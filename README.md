@@ -76,6 +76,31 @@ Useful options: `--no-flash` (firmware already on the board), `--no-pair`
 (already bonded+connected), `--repair` (drop the bond and pair fresh),
 `--profile signed-axes`.
 
+## Current status
+
+`--board esp32dev` is green on both profiles:
+
+| Profile | Result |
+|---|---|
+| `default` (64 btn, 4 hat, 8 axes) | 21 passed, 3 skipped (specials), 2 xfail |
+| `specials` (16 btn, 1 hat, 8 axes, 8 special btns) | 24 passed, 1 skipped, 1 xfail |
+
+The 2 xfails are **real Linux HID-mapping limitations the rig found** (strict
+xfail -> they flip to failures if the library/kernel ever start exposing them):
+
+- **`s2` (second slider)** gets no distinct evdev `ABS_*` code. The kernel maps
+  the first HID `Usage(Slider)` to `ABS_THROTTLE`; a second bare `Usage(Slider)`
+  in the same collection is dropped. A game using evdev/SDL sees the same.
+- **Hats 2-4** get no `ABS_HAT*` code. Linux `hid-input` only creates
+  `ABS_HAT0X/Y` for the first HID `Usage(Hat Switch)`; this library's extra hat
+  fields don't surface. And because the library emits hat fields reversed
+  (report field 0 = `_hat4`), the *one* working hat is driven by `HAT 4` --
+  `bleGamepad.setHat1()` on a multi-hat config does nothing visible on Linux.
+
+`--board esp32c3` is not wired up yet in the harness — the C3's native
+USB-Serial/JTAG port needs reconnect handling in `SerialDev` (it disappears
+when the chip resets). TODO.
+
 ## Serial protocol (`firmware/src/hil_runner.cpp`)
 
 115200 8N1, one `\n`-terminated command per line, one reply line each.
@@ -84,18 +109,25 @@ Useful options: `--no-flash` (firmware already on the board), `--no-pair`
 |---|---|
 | `PING` | `PONG` |
 | `ID?` | `ID hil_runner profile=… board=… built=…` |
-| `CONFIG?` | `CONFIG buttons=64 hats=4 axes=x,y,z,rx,ry,rz,s1,s2 special=… axesMin=… axesMax=… vid=1D34 pid=8010 reportId=3 profile=default` |
-| `BEGIN` | `OK` — calls `bleGamepad.begin()` (nothing advertises before this) |
+| `CONFIG?` | `CONFIG buttons=64 hats=4 axes=x,y,z,rx,ry,rz,s1,s2 special=none axesMin=0 axesMax=32767 vid=1D34 pid=8010 reportId=3 profile=default` |
+| `BEGIN` | `OK` — handshake only; `bleGamepad.begin()` already ran in `setup()` |
 | `CONN?` | `CONN 0` / `CONN 1` |
-| `PRESS <1..64>` / `RELEASE <1..64>` | `OK` / `ERR range` |
-| `SPECIAL PRESS\|RELEASE <0..7>` | `OK` |
+| `PRESS <n>` / `RELEASE <n>` | `OK` / `ERR range` |
+| `SPECIAL PRESS\|RELEASE <0..7>` | `OK` / `ERR disabled` |
 | `AXIS <x\|y\|z\|rx\|ry\|rz\|s1\|s2> <int16>` | `OK` |
 | `HAT <1..4> <0..8>` | `OK` |
 | `BATTERY <0..100>` | `OK` |
 | `RESET` | `OK` — zero buttons, axes, hats |
 
+`begin()` runs in `setup()` (like the TestAll example): calling it lazily from
+`loop()` on the BEGIN command wedged the NimBLE server task on the classic
+ESP32. So the firmware always advertises once booted; the two boards carry
+distinct names (`HILpad esp32dev` / `HILpad esp32c3`) so the harness bonds the
+right one. The name is kept short on purpose — 30 chars didn't fit the legacy
+BLE advertising packet and NimBLE silently truncated it.
+
 Hand-test: `~/.local/bin/pio device monitor -b 115200 --port <port>`, type
-`PING`, `CONFIG?`, `BEGIN`, `CONN?`.
+`PING`, `CONFIG?`, `CONN?`.
 
 ## Switching profiles
 
@@ -105,18 +137,31 @@ The harness detects this (it records `{mac, profile}` per device in
 `~/.cache/esp32-hil/state.json`) and re-pairs automatically. By hand:
 `bluetoothctl remove <mac>` then re-pair.
 
+## How pairing works here
+
+BlueZ needs a registered agent to auto-confirm even a no-MITM "Just Works"
+pairing (`bluetoothd: new_auth() No agent available for request type 2`
+otherwise), and an agent only lives as long as the `bluetoothctl` that
+registered it. So `host/hil/bluetooth.py` keeps **one long-lived `bluetoothctl`
+session** (`BtCtl`) open for the whole pytest run, holding a `NoInputNoOutput`
+agent, and drives pair/trust/connect through it. One-shot `bluetoothctl info`
+calls are still used for read-only queries.
+
 ## Known mapping quirks the tests pin down
 
 - **Buttons**: kernel `hid-input` maps HID Button usages 1..16 to
-  `BTN_TRIGGER, BTN_THUMB, …`, then 17+ to `BTN_TRIGGER_HAPPY1..40`. The tests
-  don't hard-code per-button codes (kernel-version sensitive) — they assert the
-  sweep is one-to-one and every code is in the gamepad key range.
-- **Hats**: the library emits hat fields in reverse of the hat index
-  (`BleGamepad.cpp` — report field 0 is `_hat4` when 4 hats are configured), so
-  firmware `HAT n` drives `ABS_HAT{4-n}`. `test_hats` asserts exactly that.
-- **Consumer specials** (home/back/volume) are Consumer-page usages; the kernel
-  routes them to a separate consumer-control input node. `test_special_buttons`
-  watches all of the DUT's event nodes at once.
+  `BTN_SOUTH, BTN_EAST, …`, then 17+ to `BTN_TRIGGER_HAPPY1..` (which runs to
+  +63, past the named `BTN_TRIGGER_HAPPY40`). Tests don't hard-code per-button
+  codes — they assert the sweep is one-to-one and every code is in the gamepad
+  key space. All 64 buttons round-trip.
+- **Axes**: `x y z rx ry rz` → `ABS_X..ABS_RZ`, `s1` → `ABS_THROTTLE`, each
+  tracking monotonically. `s2` → nothing (see Current status).
+- **Hats**: only `ABS_HAT0` exists; it's driven by the *highest* firmware hat
+  index because the library emits hat fields reversed (`BleGamepad.cpp`, report
+  field 0 = `_hat4`). See Current status.
+- **Special buttons**: all 8 (start/select/menu/home/back/vol±/mute) produce
+  exactly one distinct key event; `test_special_buttons` watches every event
+  node the DUT exposes since Consumer-page usages can land on a separate node.
 - **`setAxes()` arg order**: the firmware uses per-axis setters
   (`setX/setRX/…`) to avoid `setAxes()`'s positional quirk (its `rX` arg lands
   in the Rx field). See the library's `IndividualAxes` example header.
