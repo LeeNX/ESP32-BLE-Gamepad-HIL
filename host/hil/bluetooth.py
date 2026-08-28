@@ -76,14 +76,23 @@ def remove(mac):
 
 
 def pair(mac):
+    # No `agent` lines here: bluetoothctl can only register an agent if no other
+    # process holds one, and a desktop session / prior bluetoothctl often does
+    # ("Failed to register agent object"). The ESP32 uses Just Works pairing
+    # (setSecurityAuth(bond, no-MITM, no-SC)), which bluetoothd's built-in
+    # fallback agent auto-accepts, so an explicit agent isn't needed.
     script = "\n".join([
-        "agent NoInputNoOutput",
-        "default-agent",
         f"pair {mac}",
         f"trust {mac}",
         f"connect {mac}",
     ])
     return _btctl(script, timeout=45)
+
+
+def try_register_agent():
+    """Best-effort: register a NoInputNoOutput agent for the session. Harmless
+    if another process already owns the agent slot."""
+    _btctl("agent NoInputNoOutput\ndefault-agent")
 
 
 def ensure_paired(name_contains, known_mac=None, want_fresh=False):
@@ -93,6 +102,7 @@ def ensure_paired(name_contains, known_mac=None, want_fresh=False):
     changed, e.g. a profile switch -- hosts cache the descriptor).
     """
     power_on()
+    try_register_agent()
 
     mac = known_mac
     if mac is None:
@@ -119,10 +129,12 @@ def ensure_paired(name_contains, known_mac=None, want_fresh=False):
             )
 
     res = pair(mac)
-    if not is_bonded(mac):
-        raise RuntimeError(
-            f"pairing {mac} failed:\n{res.stdout[-2000:]}"
-        )
+    for _ in range(6):
+        if is_bonded(mac):
+            break
+        time.sleep(1)
+    else:
+        raise RuntimeError(f"pairing {mac} failed:\n{res.stdout[-2000:]}")
     for _ in range(10):
         if is_connected(mac):
             return mac
