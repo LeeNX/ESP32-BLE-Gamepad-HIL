@@ -15,9 +15,36 @@ class SerialError(RuntimeError):
 
 class SerialDev:
     def __init__(self, port, baud=115200, boot_wait=2.0):
-        self.ser = serial.Serial(port, baud, timeout=0.2)
+        self.port = port
+        self.baud = baud
+        self.ser = self._open()
         # Opening the port resets the ESP32; give it time to boot before we talk.
         time.sleep(boot_wait)
+        self.ser.reset_input_buffer()
+
+    def _open(self):
+        """Open the port, retrying while it's absent. Native USB-CDC ports (the
+        ESP32-C3/S3 USB-Serial/JTAG) vanish for ~1s whenever the chip resets."""
+        last = None
+        for _ in range(40):
+            try:
+                # dsrdtr/rtscts off so opening a USB-CDC port doesn't block on
+                # modem lines and doesn't pulse a UART-bridge board into reset.
+                return serial.Serial(self.port, self.baud, timeout=0.2,
+                                     dsrdtr=False, rtscts=False)
+            except (serial.SerialException, OSError) as e:
+                last = e
+                time.sleep(0.5)
+        raise SerialError(f"could not open {self.port}: {last}")
+
+    def _reopen(self):
+        try:
+            self.ser.close()
+        except Exception:
+            pass
+        time.sleep(0.5)
+        self.ser = self._open()
+        time.sleep(1.5)
         self.ser.reset_input_buffer()
 
     def close(self):
@@ -28,13 +55,20 @@ class SerialDev:
 
     # --- raw I/O -----------------------------------------------------------
     def drain(self):
-        self.ser.reset_input_buffer()
+        try:
+            self.ser.reset_input_buffer()
+        except (serial.SerialException, OSError):
+            self._reopen()
 
     def _readline(self, timeout):
         deadline = time.time() + timeout
         buf = bytearray()
         while time.time() < deadline:
-            b = self.ser.read(1)
+            try:
+                b = self.ser.read(1)
+            except (serial.SerialException, OSError):
+                self._reopen()
+                raise SerialError("serial port dropped mid-read (chip reset?)")
             if not b:
                 continue
             if b == b"\n":
@@ -46,8 +80,13 @@ class SerialDev:
     def command(self, cmd, timeout=6.0, prefixes=REPLY_PREFIXES):
         """Send one command line, return the first reply line matching a known
         prefix. Stray lines (boot banner, debug) are skipped."""
-        self.ser.write((cmd + "\n").encode("ascii"))
-        self.ser.flush()
+        try:
+            self.ser.write((cmd + "\n").encode("ascii"))
+            self.ser.flush()
+        except (serial.SerialException, OSError):
+            self._reopen()
+            self.ser.write((cmd + "\n").encode("ascii"))
+            self.ser.flush()
         deadline = time.time() + timeout
         while time.time() < deadline:
             line = self._readline(timeout=max(0.1, deadline - time.time()))
