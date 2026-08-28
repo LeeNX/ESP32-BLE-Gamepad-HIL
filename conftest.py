@@ -88,6 +88,7 @@ def dut(rigcfg, firmware):
     fid = d.firmware_id()
     print(f"[dut] {fid}")
     cfg = d.config()
+    print(f"[dut] CONFIG raw: {cfg.get('_raw')!r}")
     want = rigcfg["profile"]
     if cfg.get("profile") != want:
         d.close()

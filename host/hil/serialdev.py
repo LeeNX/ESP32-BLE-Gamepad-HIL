@@ -78,13 +78,18 @@ class SerialDev:
     def firmware_id(self):
         return self.command("ID?")
 
-    def config(self):
-        line = self.command("CONFIG?")
-        out = {}
-        for tok in line.split(" ")[1:]:
-            if "=" in tok:
-                k, v = tok.split("=", 1)
-                out[k] = v
+    def config(self, retries=3):
+        for attempt in range(retries):
+            self.drain()
+            line = self.command("CONFIG?")
+            out = {"_raw": line}
+            for tok in line.split(" ")[1:]:
+                if "=" in tok:
+                    k, v = tok.split("=", 1)
+                    out[k] = v
+            if "profile" in out and "buttons" in out:
+                break
+            time.sleep(0.5)
         out["buttons"] = int(out.get("buttons", 0))
         out["hats"] = int(out.get("hats", 0))
         out["axes"] = out.get("axes", "").split(",") if out.get("axes") else []
