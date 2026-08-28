@@ -99,10 +99,10 @@ static void handle(const String &cmd)
 
     if (c == "CONFIG?")
     {
-        Serial.printf("CONFIG buttons=%d hats=%d axes=x,y,z,rx,ry,rz,s1,s2 "
-                      "special=start,select,menu,home,back,volinc,voldec,volmute "
+        Serial.printf("CONFIG buttons=%d hats=%d axes=x,y,z,rx,ry,rz,s1,s2 special=%s "
                       "axesMin=%d axesMax=%d vid=%04X pid=%04X reportId=%d profile=%s\n",
                       HIL_BUTTON_COUNT, HIL_HAT_COUNT,
+                      HIL_SPECIALS ? "start,select,menu,home,back,volinc,voldec,volmute" : "none",
                       (int)bleGamepadConfig.getAxesMin(), (int)bleGamepadConfig.getAxesMax(),
                       HIL_VID, HIL_PID, bleGamepadConfig.getHidReportId(), HIL_PROFILE_NAME);
         return;
@@ -141,6 +141,10 @@ static void handle(const String &cmd)
 
     if (c == "SPECIAL")
     {
+#if !HIL_SPECIALS
+        reply("ERR disabled");
+        return;
+#endif
         if (n < 3) { reply("ERR args"); return; }
         int b = t[2].toInt();
         if (b < 0 || b > 7) { reply("ERR range"); return; }
@@ -189,7 +193,9 @@ static void handle(const String &cmd)
     if (c == "RESET")
     {
         bleGamepad.resetButtons();
+#if HIL_SPECIALS
         for (int i = 0; i < 8; i++) bleGamepad.releaseSpecialButton(i);
+#endif
         for (int i = 0; i < 8; i++) applyAxis(i, 0);
         for (int i = 1; i <= HIL_HAT_COUNT; i++) applyHat(i, 0);
         bleGamepad.sendReport();

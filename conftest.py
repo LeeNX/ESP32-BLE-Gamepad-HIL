@@ -62,11 +62,12 @@ def rigcfg(pytestconfig):
 
 
 # --- firmware --------------------------------------------------------------
+PROFILE_ENV_SUFFIX = {"default": "", "signed-axes": "-signed", "specials": "-specials"}
+
+
 @pytest.fixture(scope="session")
 def firmware(rigcfg, pytestconfig):
-    env_name = rigcfg["pio_env"]
-    if rigcfg["profile"] == "signed-axes":
-        env_name += "-signed"
+    env_name = rigcfg["pio_env"] + PROFILE_ENV_SUFFIX.get(rigcfg["profile"], "")
     if pytestconfig.getoption("no_flash"):
         return env_name
     pio = rigcfg["rig"]["pio"]
@@ -101,6 +102,13 @@ def dut(rigcfg, firmware):
 @pytest.fixture(scope="session")
 def connected_dut(dut):
     dut.begin()
+    time.sleep(1.0)
+    # begin() builds the HID report descriptor into a fixed 150-byte buffer with
+    # no bounds check -- an over-large descriptor corrupts the stack here. If the
+    # firmware stops answering right after BEGIN, that's the most likely cause.
+    if not dut.ping():
+        pytest.exit("firmware stopped responding right after BEGIN -- likely a HID "
+                    "report descriptor overflow in bleGamepad.begin() for this profile")
     return dut
 
 

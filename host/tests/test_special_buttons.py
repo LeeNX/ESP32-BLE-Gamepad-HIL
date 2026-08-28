@@ -34,6 +34,12 @@ def _collect_all(nodes, settle=0.4, hard=2.0):
     return events
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _require_specials(connected_dut):
+    if connected_dut.config().get("special", "none") == "none":
+        pytest.skip("profile has no special buttons (use --profile specials)")
+
+
 @pytest.fixture(scope="module")
 def special_sweep(connected_dut, all_nodes):
     for d in all_nodes:
