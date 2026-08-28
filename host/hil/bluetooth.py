@@ -89,7 +89,9 @@ class BtCtl:
             time.sleep(0.3)
         return None
 
-    def scan_find(self, name_contains, timeout=30):
+    def scan_find(self, name_contains, timeout=35):
+        """Actively scan until `bluetoothctl devices` lists a match. Only trusts
+        the devices list, never scrollback (which carries stale [DEL] lines)."""
         self.send("scan on")
         deadline = time.time() + timeout
         try:
@@ -97,22 +99,24 @@ class BtCtl:
                 for mac, nm in known_devices().items():
                     if name_contains in nm:
                         return mac
-                if name_contains in self._tail(400):
-                    m = re.search(r"Device ([0-9A-F:]{17}) .*" + re.escape(name_contains),
-                                  self._tail(400))
-                    if m:
-                        return m.group(1)
                 time.sleep(1.5)
         finally:
             self.send("scan off")
         return None
 
     def pair(self, mac, timeout=40):
-        self.send(f"pair {mac}")
-        hit = self.wait_for(
-            ["Pairing successful", "Failed to pair", "org.bluez.Error",
-             "AlreadyExists"], timeout)
-        # AlreadyExists / already paired is fine.
+        hit = None
+        for attempt in range(3):
+            self.send(f"pair {mac}")
+            hit = self.wait_for(
+                ["Pairing successful", "Failed to pair", "org.bluez.Error",
+                 "AlreadyExists", "not available"], timeout)
+            if hit != "not available":
+                break
+            # device fell out of bluez between scan and pair -- rescan briefly
+            self.send("scan on")
+            time.sleep(4)
+            self.send("scan off")
         self.send(f"trust {mac}")
         time.sleep(0.5)
         self.send(f"connect {mac}")
@@ -126,8 +130,10 @@ class BtCtl:
                               "Failed to connect"], timeout)
 
     def remove(self, mac):
-        self.send(f"remove {mac}")
+        self.send(f"disconnect {mac}")
         time.sleep(1.0)
+        self.send(f"remove {mac}")
+        time.sleep(2.0)  # let bluetoothd fully drop it before we rediscover
 
     def close(self):
         try:

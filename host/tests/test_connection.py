@@ -9,11 +9,20 @@ def test_firmware_alive(dut):
     assert dut.ping()
 
 
+PROFILE_LAYOUT = {
+    "default": dict(buttons=64, hats=4, special="none"),
+    "signed-axes": dict(buttons=64, hats=4, special="none"),
+    "specials": dict(buttons=16, hats=1, special="start,select,menu,home,back,volinc,voldec,volmute"),
+}
+
+
 def test_config_matches_profile(dut, rigcfg):
     cfg = dut.config()
     assert cfg["profile"] == rigcfg["profile"]
-    assert cfg["buttons"] == 64
-    assert cfg["hats"] == 4
+    expected = PROFILE_LAYOUT[rigcfg["profile"]]
+    assert cfg["buttons"] == expected["buttons"]
+    assert cfg["hats"] == expected["hats"]
+    assert cfg.get("special") == expected["special"]
     assert cfg["axes"] == ["x", "y", "z", "rx", "ry", "rz", "s1", "s2"]
 
 
