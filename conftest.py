@@ -74,8 +74,15 @@ def firmware(rigcfg, pytestconfig):
     cmd = [pio, "run", "-e", env_name, "-t", "upload",
            "--upload-port", rigcfg["port"], "-d", str(REPO / "firmware")]
     print(f"\n[firmware] {' '.join(cmd)}")
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.returncode != 0:
+    # Native USB-Serial/JTAG (C3/S3) uploads are flaky -- "Packet content
+    # transfer stopped" -- and usually succeed on a retry.
+    for attempt in range(3):
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode == 0:
+            break
+        print(f"[firmware] upload attempt {attempt + 1} failed, retrying")
+        time.sleep(3)
+    else:
         pytest.exit(f"firmware build/upload failed:\n{r.stdout[-4000:]}\n{r.stderr[-2000:]}")
     time.sleep(2)  # let the board reboot into the new image
     return env_name

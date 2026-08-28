@@ -20,7 +20,7 @@ the harness never depends on the thing under test being up.
 | Path | What |
 |---|---|
 | `firmware/` | PlatformIO project — `hil_runner` serial-command firmware, one env per board |
-| `firmware/include/hil_profile.h` | compile-time layout profiles (`default`, `signed-axes`) |
+| `firmware/include/hil_profile.h` | compile-time layout profiles (`default`, `signed-axes`, `specials`) |
 | `host/hil/` | serial client, evdev capture, `bluetoothctl` pairing helpers |
 | `host/tests/` | `test_connection` / `test_buttons` / `test_special_buttons` / `test_axes` / `test_hats` |
 | `hil_config.toml` | per-board serial port + pio env + profile |
