@@ -45,11 +45,13 @@ def test_button_mapping_is_one_to_one(button_sweep):
 
 
 def test_button_codes_are_known_gamepad_keys(button_sweep):
-    """Kernel hid-input maps HID Button usages to BTN_* / BTN_TRIGGER_HAPPY*.
+    """Kernel hid-input maps HID Button usages 1..16 to BTN_SOUTH.. then 17+ to
+    BTN_TRIGGER_HAPPY1.. (which runs to +63, past the named BTN_TRIGGER_HAPPY40).
     Not asserting the exact code per button (kernel-version sensitive), just
-    that they're all in the gamepad/joystick key ranges."""
+    that they land in the gamepad/joystick key space."""
     mapping, _ = button_sweep
-    ok_lo, ok_hi = ecodes.BTN_JOYSTICK, ecodes.BTN_TRIGGER_HAPPY40
+    ok_lo = ecodes.BTN_JOYSTICK
+    ok_hi = ecodes.BTN_TRIGGER_HAPPY1 + 63  # BTN_TRIGGER_HAPPY block is 64 wide
     strays = {i: c for i, c in mapping.items() if not (ok_lo <= c <= ok_hi)}
     assert not strays, f"buttons mapped outside the gamepad key range: {strays}"
 
