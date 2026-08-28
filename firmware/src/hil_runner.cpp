@@ -18,7 +18,9 @@
 #include <BleGamepad.h>
 #include "hil_profile.h"
 
-static BleGamepad bleGamepad("ESP32 BLE Gamepad HIL " HIL_BOARD_NAME, "Espressif", 100, true);
+// delayAdvertising=false (default): begin() starts advertising straight away.
+// begin() itself is the gate -- nothing runs before the host sends BEGIN.
+static BleGamepad bleGamepad("ESP32 BLE Gamepad HIL " HIL_BOARD_NAME);
 static BleGamepadConfiguration bleGamepadConfig;
 static bool started = false;
 
