@@ -126,7 +126,14 @@ def _save_state(s):
 
 
 @pytest.fixture(scope="session")
-def bt_mac(rigcfg, connected_dut, pytestconfig):
+def btctl():
+    c = bluetooth.BtCtl()
+    yield c
+    c.close()
+
+
+@pytest.fixture(scope="session")
+def bt_mac(rigcfg, connected_dut, btctl, pytestconfig):
     name = rigcfg["device_name"]
     state = _load_state()
     prev = state.get(name, {})
@@ -138,7 +145,8 @@ def bt_mac(rigcfg, connected_dut, pytestconfig):
     if pytestconfig.getoption("no_pair") and prev.get("mac") and not want_fresh:
         return prev["mac"]
 
-    mac = bluetooth.ensure_paired(name, known_mac=prev.get("mac"), want_fresh=want_fresh)
+    mac = bluetooth.ensure_paired(btctl, name, known_mac=prev.get("mac"),
+                                  want_fresh=want_fresh)
     connected_dut.wait_connected()
     state[name] = {"mac": mac, "profile": rigcfg["profile"]}
     _save_state(state)
