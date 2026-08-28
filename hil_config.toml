@@ -1,0 +1,19 @@
+# Per-board hardware config for the HIL rig.
+# Any value can be overridden with a pytest option (--board/--port/--profile)
+# or an env var (HIL_PORT, HIL_PROFILE, HIL_BOARD).
+
+[rig]
+lib_dir = "/home/leet/src/ESP32-BLE-Gamepad"   # library checkout the firmware builds against
+device_name = "ESP32 BLE Gamepad HIL"          # firmware advertises "<device_name> <board>"
+pio = "/home/leet/.local/bin/pio"
+
+[board.esp32dev]
+pio_env = "esp32dev"
+# Fill in from `ls /dev/serial/by-id/` once the board is attached:
+port = "/dev/serial/by-id/CHANGE-ME-esp32dev"
+profile = "default"
+
+[board.esp32c3]
+pio_env = "esp32c3"
+port = "/dev/serial/by-id/CHANGE-ME-esp32c3"
+profile = "default"

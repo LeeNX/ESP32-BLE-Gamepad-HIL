@@ -1,0 +1,5 @@
+firmware/.pio/
+results/
+__pycache__/
+*.pyc
+.venv/
