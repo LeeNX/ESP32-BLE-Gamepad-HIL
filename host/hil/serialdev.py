@@ -1,5 +1,6 @@
 """Line-protocol client for the hil_runner firmware (see firmware/src/hil_runner.cpp)."""
 
+import threading
 import time
 
 import serial
@@ -24,18 +25,29 @@ class SerialDev:
 
     def _open(self):
         """Open the port, retrying while it's absent. Native USB-CDC ports (the
-        ESP32-C3/S3 USB-Serial/JTAG) vanish for ~1s whenever the chip resets."""
-        last = None
-        for _ in range(40):
+        ESP32-C3/S3 USB-Serial/JTAG) vanish for ~1s whenever the chip resets,
+        and a half-open one can make serial.Serial() *block* rather than raise --
+        so each attempt runs in a thread with a hard timeout."""
+        last = ["never returned"]
+        result = [None]
+
+        def attempt():
             try:
                 # dsrdtr/rtscts off so opening a USB-CDC port doesn't block on
                 # modem lines and doesn't pulse a UART-bridge board into reset.
-                return serial.Serial(self.port, self.baud, timeout=0.2,
-                                     dsrdtr=False, rtscts=False)
-            except (serial.SerialException, OSError) as e:
-                last = e
-                time.sleep(0.5)
-        raise SerialError(f"could not open {self.port}: {last}")
+                result[0] = serial.Serial(self.port, self.baud, timeout=0.2,
+                                          dsrdtr=False, rtscts=False)
+            except (serial.SerialException, OSError) as e:  # noqa: BLE001
+                last[0] = repr(e)
+
+        for _ in range(20):
+            t = threading.Thread(target=attempt, daemon=True)
+            t.start()
+            t.join(timeout=4.0)
+            if result[0] is not None:
+                return result[0]
+            time.sleep(1.0)
+        raise SerialError(f"could not open {self.port}: {last[0]}")
 
     def _reopen(self):
         try:

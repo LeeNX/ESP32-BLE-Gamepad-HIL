@@ -97,9 +97,14 @@ xfail -> they flip to failures if the library/kernel ever start exposing them):
   (report field 0 = `_hat4`), the *one* working hat is driven by `HAT 4` --
   `bleGamepad.setHat1()` on a multi-hat config does nothing visible on Linux.
 
-`--board esp32c3` is not wired up yet in the harness — the C3's native
-USB-Serial/JTAG port needs reconnect handling in `SerialDev` (it disappears
-when the chip resets). TODO.
+`--board esp32c3`: flashes and pairs, but the C3's **native USB-Serial/JTAG**
+port is unreliable as the command channel — it disappears when the chip resets
+and `serial.Serial()` can block on a half-open handle (`SerialDev._open` now
+guards that with a threaded timeout, so it fails fast instead of hanging, but a
+run can still lose the port mid-test). **Recommended fix: wire the C3's *other*
+USB port** (the CP210x UART bridge on the DevKitC-02) and point
+`hil_config.toml`'s `[board.esp32c3].port` at that — native USB for flashing,
+the bridge for serial, same stable setup as esp32dev.
 
 ## Serial protocol (`firmware/src/hil_runner.cpp`)
 
