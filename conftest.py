@@ -22,6 +22,7 @@ except ModuleNotFoundError:  # pragma: no cover
 REPO = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(REPO / "host"))
 from hil import bluetooth  # noqa: E402
+from hil.config import load as load_config  # noqa: E402
 from hil.evdev_utils import Capture, find_all_nodes, find_gamepad  # noqa: E402
 from hil.serialdev import SerialDev  # noqa: E402
 
@@ -34,6 +35,9 @@ def pytest_addoption(parser):
     parser.addoption("--profile", default=os.environ.get("HIL_PROFILE"))
     parser.addoption("--no-flash", action="store_true",
                      help="skip building/flashing; use firmware already on the board")
+    parser.addoption("--bundle", default=os.environ.get("HIL_BUNDLE"),
+                     help="flash a prebuilt firmware bundle (builder/make_bundle.py) "
+                          "with esptool instead of running PlatformIO")
     parser.addoption("--no-pair", action="store_true",
                      help="assume the DUT is already bonded+connected")
     parser.addoption("--repair", action="store_true",
@@ -43,7 +47,7 @@ def pytest_addoption(parser):
 # --- config -----------------------------------------------------------------
 @pytest.fixture(scope="session")
 def rigcfg(pytestconfig):
-    cfg = tomllib.loads((REPO / "hil_config.toml").read_text())
+    cfg = load_config(REPO)
     board = pytestconfig.getoption("board")
     if board not in cfg.get("board", {}):
         pytest.exit(f"unknown board {board!r}; known: {list(cfg.get('board', {}))}")
@@ -65,11 +69,35 @@ def rigcfg(pytestconfig):
 PROFILE_ENV_SUFFIX = {"default": "", "signed-axes": "-signed", "specials": "-specials"}
 
 
+def _flash_bundle(bundle_dir, port):
+    """TESTER path: flash a prebuilt bundle with esptool (no PlatformIO)."""
+    bundle = pathlib.Path(bundle_dir)
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    cmd = [sys.executable, str(REPO / "tester" / "flash.py"), str(bundle), "--port", port]
+    print(f"\n[firmware] bundle {bundle.name}  ({manifest['lib_describe']}, "
+          f"profile={manifest['profile']})")
+    r = subprocess.run(cmd)
+    if r.returncode != 0:
+        pytest.exit(f"flashing bundle {bundle} failed")
+    return manifest
+
+
 @pytest.fixture(scope="session")
 def firmware(rigcfg, pytestconfig):
     env_name = rigcfg["pio_env"] + PROFILE_ENV_SUFFIX.get(rigcfg["profile"], "")
+    bundle = pytestconfig.getoption("bundle")
+
     if pytestconfig.getoption("no_flash"):
+        return env_name  # --no-flash wins over everything
+
+    if bundle:
+        manifest = _flash_bundle(bundle, rigcfg["port"])
+        if manifest["board"] != rigcfg["name"] or manifest["profile"] != rigcfg["profile"]:
+            pytest.exit(f"bundle is {manifest['board']}/{manifest['profile']}, "
+                        f"expected {rigcfg['name']}/{rigcfg['profile']}")
+        time.sleep(2)
         return env_name
+
     pio = rigcfg["rig"]["pio"]
     cmd = [pio, "run", "-e", env_name, "-t", "upload",
            "--upload-port", rigcfg["port"], "-d", str(REPO / "firmware")]

@@ -1,5 +1,7 @@
 firmware/.pio/
 results/
+bundles/
+hil_config.local.toml
 __pycache__/
 *.pyc
 .venv/

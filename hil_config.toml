@@ -1,20 +1,34 @@
-# Per-board hardware config for the HIL rig.
-# Any value can be overridden with a pytest option (--board/--port/--profile)
-# or an env var (HIL_PORT, HIL_PROFILE, HIL_BOARD).
+# HIL rig config. This file is the committed template; put per-machine values
+# (serial ports, ssh hosts, paths) in hil_config.local.toml, which is gitignored
+# and deep-merged over this one. Env vars still win: HIL_PORT / HIL_BOARD /
+# HIL_PROFILE / HIL_BOARDS / HIL_PROFILES / HIL_BUNDLE.
 
 [rig]
-lib_dir = "/home/leet/src/ESP32-BLE-Gamepad"   # library checkout the firmware builds against
+lib_dir = "/home/leet/src/ESP32-BLE-Gamepad"   # library checkout the builder compiles against
 device_name = "HILpad"                         # firmware advertises "<device_name> <board>"
 pio = "/home/leet/.local/bin/pio"
 
+# BUILDER role -- what builder/build.sh compiles by default.
+[builder]
+boards = "esp32dev"                 # space separated
+profiles = "default specials"       # space separated
+
+# TESTER role -- where builder/build.sh --push rsyncs bundles, and the SSH
+# target the CI orchestrator job drives.
+[tester]
+ssh_host = ""                       # e.g. "hil-pi.lan" -- empty = no push
+ssh_user = "leet"
+bundle_dir = "~/hil-bundles"
+
 [board.esp32dev]
 pio_env = "esp32dev"
-# CP2102 UART bridge (Silicon Labs 10c4:ea60)
+# CP2102 UART bridge (Silicon Labs 10c4:ea60) -- override per machine in .local
 port = "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0"
 profile = "default"
 
 [board.esp32c3]
 pio_env = "esp32c3"
-# native USB-Serial/JTAG (Espressif 303a:1001)
+# native USB-Serial/JTAG (Espressif 303a:1001); a CP210x bridge port is more
+# reliable as the command channel -- see README.
 port = "/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_98:3D:AE:52:7A:C8-if00"
 profile = "default"

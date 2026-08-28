@@ -1,80 +1,107 @@
 # ESP32-BLE-Gamepad — hardware-in-the-loop test rig
 
-Runs on **cylon**. An ESP32 runs the `hil_runner` firmware; this harness drives
-it over USB serial and asserts the resulting BLE HID events on
-`/dev/input/eventN`. It answers what the compile-only CI can't: does `press(5)`
-actually produce one distinct key event on a host, do axes/hats/special buttons
-map correctly, does a config change survive a re-pair.
+An ESP32 runs the `hil_runner` firmware; this harness drives it over USB serial
+and asserts the resulting BLE HID events on `/dev/input/eventN`. It answers what
+the compile-only CI can't: does `press(5)` actually produce one distinct key
+event on a host, do axes/hats/special buttons map correctly, does a config
+change survive a re-pair.
+
+The rig is split into two roles so the BLE host can be a small board (a
+Raspberry Pi 3B+) that can't build firmware in reasonable time:
 
 ```
-pytest (this repo) ──USB serial──► ESP32 hil_runner ──BLE HID──► BlueZ ──► /dev/input/eventN
-       │  "PRESS 5\n" → "OK\n"                                                      │
-       └──────────────────── evdev: assert EV_KEY BTN_… value 1 ◄──────────────────┘
+ BUILDER (cylon / a CI runner)              TESTER (Raspberry Pi 3B+ / cylon)
+ ┌────────────────────────────┐   bundle   ┌──────────────────────────────────┐
+ │ builder/build.sh:          │  (rsync/   │ tester/test.sh:                  │
+ │  pio run  (lib under test) │   CI       │  tester/flash.py  (esptool only) │
+ │  -> bundles/<b>-<p>-<sha>/ │  artifact) │  pytest  (pyserial+evdev+bluez)  │
+ │     *.bin + manifest.json  │──────────►│   USB─► ESP32 ─BLE─► /dev/input/  │
+ └────────────────────────────┘            │  -> results/junit-*.xml summary  │
+                                           └──────────────────────────────────┘
 ```
 
-Command injection is over USB serial, **not** BLE — an independent channel, so
-the harness never depends on the thing under test being up.
+- **builder** needs PlatformIO. `builder/build.sh` compiles `hil_runner`
+  against the library-under-test and writes a **bundle**: the flashable
+  `.bin` parts + `manifest.json` (chip, flash offsets, sha256s, lib git sha).
+- **tester** needs only `esptool` + the pytest deps (all pure-Python /
+  lightweight — fine on a Pi). `tester/test.sh` flashes a bundle and runs the
+  suite.
+- Command injection is over USB serial, **not** BLE — an independent channel,
+  so the harness never depends on the thing under test being up.
+
+One box can be both (`./run.sh` does builder then tester locally).
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `firmware/` | PlatformIO project — `hil_runner` serial-command firmware, one env per board |
-| `firmware/include/hil_profile.h` | compile-time layout profiles (`default`, `signed-axes`, `specials`) |
-| `host/hil/` | serial client, evdev capture, `bluetoothctl` pairing helpers |
-| `host/tests/` | `test_connection` / `test_buttons` / `test_special_buttons` / `test_axes` / `test_hats` |
-| `hil_config.toml` | per-board serial port + pio env + profile |
-| `run.sh` | update library checkout → pytest per board → JUnit XML + `results/summary.md` |
+| `firmware/` | PlatformIO project — `hil_runner` serial-command firmware, `hil_profile.h` layout profiles (`default`, `signed-axes`, `specials`) |
+| `builder/build.sh` `builder/make_bundle.py` | compile → firmware bundle(s) → optional `--push` rsync to the tester |
+| `tester/flash.py` `tester/test.sh` | flash a bundle with esptool, run the suite, write `results/` |
+| `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite: fixtures, serial/evdev/bluetooth helpers, the tests |
+| `hil_config.toml` (+ gitignored `hil_config.local.toml`) | per-machine ports, ssh host, builder board/profile matrix |
+| `run.sh` | one-box: build all bundles then flash+test each |
+| `.gitea/workflows/hil.yml` | Gitea CI: build job → SSH-to-Pi test job |
 
-## One-time setup on cylon
+## Setup
 
-Already done once (kept here as the record):
+### Builder (has PlatformIO — e.g. cylon)
 
 ```bash
-# library checkout the firmware builds against (THE one hard-coded path)
+git clone <gitea>/leet/esp32-ble-gamepad-hil ~/src/esp32-ble-gamepad-hil
 git clone git@github.com:LeeNX/ESP32-BLE-Gamepad ~/src/ESP32-BLE-Gamepad
-
-# PlatformIO
 python3 -m venv ~/.venvs/pio && ~/.venvs/pio/bin/pip install platformio
 ln -sf ~/.venvs/pio/bin/pio ~/.local/bin/pio
-
-# host deps
-sudo apt install -y python3-dev build-essential
-python3 -m venv ~/.venvs/hil && ~/.venvs/hil/bin/pip install -r host/requirements.txt
 ```
 
-Groups: `leet` is already in `dialout` (serial), `input` (`/dev/input/event*`),
-`plugdev` (`/dev/hidraw*`). udev rule for the HIL VID/PID
-(`0005:1D34:8010.*`) added to `/etc/udev/rules.d/99-esp32-gamepad.rules`
-alongside the existing `E502:BBAB` line — see `LinuxHIDTesting.md` §4 for the
-rule shape.
+`hil_config.local.toml` on the builder only needs `[rig] lib_dir` / `pio` if
+they differ from the template, plus `[tester] ssh_host` for `--push`.
 
-### Attaching a board
+### Tester (has the ESP32 + a BLE adapter — e.g. the Pi)
 
-1. Plug the ESP32 into cylon over USB.
-2. `ls -l /dev/serial/by-id/` → copy the stable path into `hil_config.toml`
-   under `[board.<name>].port`.
-3. First run pairs it automatically (`NoInputNoOutput` agent, Just Works). Or
-   pair by hand per `LinuxHIDTesting.md` §3 — the device name is
-   `ESP32 BLE Gamepad HIL <board>`.
+```bash
+sudo apt install -y bluez python3-venv build-essential python3-dev
+python3 -m venv ~/.venvs/hil
+~/.venvs/hil/bin/pip install -r ~/src/esp32-ble-gamepad-hil/tester/requirements.txt
+```
+
+- Groups: add your user to `dialout` (serial), `input` (`/dev/input/event*`),
+  `plugdev` (`/dev/hidraw*`); log out/in.
+- udev: add `SUBSYSTEM=="hidraw", KERNELS=="0005:1D34:8010.*", MODE="0660",
+  GROUP="plugdev"` to `/etc/udev/rules.d/99-esp32-gamepad.rules`
+  (`udevadm control --reload-rules && udevadm trigger`).
+- **Power**: a Pi 3B+ can't reliably power an ESP32 doing BLE off its own USB —
+  brownouts show up as a reset loop that never advertises (seen on cylon too).
+  Use a **powered USB hub** for the ESP32.
+- BLE: the Pi 3B+ built-in adapter (BT 4.1, shares the WiFi antenna) works but a
+  USB BT dongle is steadier for a test rig.
+- `hil_config.local.toml` on the tester sets the real `[board.<b>].port`
+  (`ls -l /dev/serial/by-id/`).
+
+First run pairs the device automatically (`NoInputNoOutput` agent, Just Works),
+or pair by hand per `LinuxHIDTesting.md` §3 — the device name is `HILpad <board>`.
 
 ## Running
 
 ```bash
-cd ~/src/esp32-ble-gamepad-hil
+# one box (build + flash + test here)
+./run.sh                                    # config defaults, current lib checkout
+LIB_REF=some-branch ./run.sh --profiles default
+./run.sh --boards esp32dev --profiles "default specials"
+./run.sh --profiles default -- -k buttons   # args after -- go to pytest
 
-./run.sh                                  # default board, current library checkout
-LIB_REF=some-branch ./run.sh --board esp32c3
-HIL_BOARDS="esp32dev esp32c3" ./run.sh    # both boards, sequentially
+# split: on the builder
+PUSH=1 LIB_REF=some-branch builder/build.sh
+# then on the tester
+tester/test.sh ~/hil-bundles/esp32dev-default-<sha>/
 
-# or pytest directly:
-~/.venvs/hil/bin/pytest --board esp32dev
-~/.venvs/hil/bin/pytest --board esp32dev --no-flash -k buttons   # skip the ~3min build
+# pytest directly against a hand-flashed board (no builder needed)
+~/.venvs/hil/bin/pytest --board esp32dev --no-flash --port /dev/ttyUSB0
 ```
 
-Useful options: `--no-flash` (firmware already on the board), `--no-pair`
-(already bonded+connected), `--repair` (drop the bond and pair fresh),
-`--profile signed-axes`.
+Useful pytest options: `--bundle <dir>` (flash a bundle via esptool),
+`--no-flash`, `--no-pair`, `--repair` (drop bond + pair fresh),
+`--profile specials`.
 
 ## Current status
 
@@ -131,8 +158,9 @@ distinct names (`HILpad esp32dev` / `HILpad esp32c3`) so the harness bonds the
 right one. The name is kept short on purpose — 30 chars didn't fit the legacy
 BLE advertising packet and NimBLE silently truncated it.
 
-Hand-test: `~/.local/bin/pio device monitor -b 115200 --port <port>`, type
-`PING`, `CONFIG?`, `CONN?`.
+Hand-test: `python3 -m serial.tools.miniterm <port> 115200` (or
+`pio device monitor` on the builder), type `PING`, `CONFIG?`, `CONN?`,
+`PRESS 5`, `AXIS x 16000`, `HAT 4 3`.
 
 ## Switching profiles
 
@@ -171,18 +199,30 @@ calls are still used for read-only queries.
   (`setX/setRX/…`) to avoid `setAxes()`'s positional quirk (its `rX` arg lands
   in the Rx field). See the library's `IndividualAxes` example header.
 
-## Future: GitHub self-hosted runner
+## Gitea CI
 
-Not built yet. Plan:
+`.gitea/workflows/hil.yml` — a **build** job on any Gitea runner (installs
+PlatformIO fresh, runs `builder/build.sh`, uploads the bundles as an artifact),
+then a **hil-test** job on a normal runner that downloads the bundles, `rsync`s
+them to the Pi and `ssh`es in to run `tester/test.sh`, then publishes the JUnit
+report. The Pi is a plain **SSH target**, not a runner — nothing untrusted
+executes on it directly.
 
-- Install the Actions runner on cylon as a **systemd service**, labels
-  `[self-hosted, linux, hil, cylon]`, registered to `LeeNX/ESP32-BLE-Gamepad`.
-- `.github/workflows/hil.yml` in the library repo: `workflow_dispatch` +
-  `pull_request`, `runs-on: [self-hosted, hil]`, wrapped in an
-  `environment: hil` whose protection rule **requires a maintainer to approve
-  each run** — fork-PR code never runs unattended on the LAN.
-- Steps: check out the library at the PR ref into `~/src/ESP32-BLE-Gamepad`,
-  run `~/src/esp32-ble-gamepad-hil/run.sh`, upload `results/*.xml` +
-  `summary.md`, surface it as a PR check (`dorny/test-reporter`).
-- This harness would need to be reachable by the runner (push to a private
-  GitHub repo, or keep it at the `~/src` path the workflow assumes).
+Prerequisites:
+
+- Push this harness repo and the library to your Gitea. Enable Actions on the
+  repo; make sure the runners can fetch `actions/checkout` etc. (Gitea
+  `DEFAULT_ACTIONS_URL`).
+- The Pi has this repo at `~/esp32-ble-gamepad-hil` with `hil_config.local.toml`
+  filled in, `~/.venvs/hil` built, udev + groups done, ESP32 + BLE attached.
+- Repo secrets: `HIL_PI_HOST`, `HIL_PI_USER`, `HIL_PI_SSH_KEY` (a passphrase-less
+  key authorised on the Pi).
+
+Triggers: push to `master` / `hil-*`, manual dispatch (with `lib_repo` /
+`lib_ref` inputs), or `repository_dispatch` type `hil` from the library repo.
+A `concurrency: hil-pi` group serialises runs — there's one physical rig.
+
+**Untrusted code**: the build job compiles whatever library ref it's handed and
+the test job flashes it to hardware on your LAN. Keep the triggers to
+same-repo pushes + manual dispatch; don't wire it to run automatically on PRs
+from forks.

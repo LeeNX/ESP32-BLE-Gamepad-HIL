@@ -1,48 +1,33 @@
 #!/usr/bin/env bash
-# Update the library checkout to the ref under test, run the HIL suite for each
-# board, write JUnit XML + results/summary.md.
+# One-box path: build firmware bundles here, then flash + test each of them
+# here. For the split builder/tester setup use builder/build.sh --push on the
+# builder and tester/test.sh on the tester (or let Gitea CI do it).
 #
-#   ./run.sh                              # current checkout, default board, default profile
-#   LIB_REF=my-branch ./run.sh            # check out a ref first
-#   ./run.sh --board esp32c3              # single board; extra pytest args pass through
-#   HIL_PROFILES="default specials" ./run.sh   # run each profile in turn (re-pairs between)
+#   ./run.sh                              # config defaults (see hil_config.toml [builder])
+#   LIB_REF=my-branch ./run.sh            # check the library out first
+#   ./run.sh --boards esp32dev --profiles "default specials"
+#   ./run.sh --profiles default -- -k buttons      # args after -- go to pytest
 set -euo pipefail
-
 cd "$(dirname "$0")"
 REPO=$(pwd)
-VENV=${HIL_VENV:-$HOME/.venvs/hil}
-LIB_DIR=$(python3 -c "import tomllib,sys;print(tomllib.load(open('hil_config.toml','rb'))['rig']['lib_dir'])")
-BOARDS=(${HIL_BOARDS:-esp32dev})
-PROFILES=(${HIL_PROFILES:-default})
+
+BUILD_ARGS=()
 PYTEST_ARGS=()
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --board) BOARDS=("$2"); shift 2 ;;
-    *) PYTEST_ARGS+=("$1"); shift ;;
-  esac
+seen_ddash=0
+for a in "$@"; do
+  if [[ $seen_ddash == 1 ]]; then PYTEST_ARGS+=("$a"); continue; fi
+  [[ "$a" == "--" ]] && { seen_ddash=1; continue; }
+  BUILD_ARGS+=("$a")
 done
 
-if [[ -n "${LIB_REF:-}" ]]; then
-  echo "== library checkout: $LIB_DIR @ $LIB_REF"
-  git -C "$LIB_DIR" fetch --all --quiet
-  git -C "$LIB_DIR" checkout --quiet "$LIB_REF"
-  git -C "$LIB_DIR" pull --ff-only --quiet || true
-fi
-echo "== library at $(git -C "$LIB_DIR" describe --always --dirty) ($(git -C "$LIB_DIR" rev-parse --abbrev-ref HEAD))"
+echo "=== build ==="
+rm -rf "$REPO/bundles"
+"$REPO/builder/build.sh" "${BUILD_ARGS[@]}"
 
-mkdir -p results
-STAMP=$(date +%Y%m%d-%H%M%S)
 rc=0
-for board in "${BOARDS[@]}"; do
-  for profile in "${PROFILES[@]}"; do
-    tag="${board}-${profile}-${STAMP}"
-    xml="results/junit-${tag}.xml"
-    echo "== board: $board  profile: $profile -> $xml"
-    "$VENV/bin/pytest" --board "$board" --profile "$profile" --junit-xml="$xml" \
-      "${PYTEST_ARGS[@]}" 2>&1 | tee "results/log-${tag}.txt" || rc=$?
-    "$VENV/bin/python" host/hil/summarize.py "$xml" "results/summary-${tag}.md" || rc=$?
-    cp "results/summary-${tag}.md" "results/summary.md"
-    cat "results/summary.md"
-  done
+for bundle in "$REPO"/bundles/*/; do
+  [[ -f "$bundle/manifest.json" ]] || continue
+  echo "=== test: $(basename "$bundle") ==="
+  "$REPO/tester/test.sh" "$bundle" "${PYTEST_ARGS[@]}" || rc=$?
 done
 exit $rc

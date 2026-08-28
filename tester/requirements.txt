@@ -1,0 +1,6 @@
+esptool>=4.7
+pytest>=8
+pyserial>=3.5
+evdev>=1.6
+pyudev>=0.24
+tomli>=2 ; python_version < "3.11"
