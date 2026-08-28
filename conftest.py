@@ -19,12 +19,12 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     import tomli as tomllib
 
-sys.path.insert(0, os.path.dirname(__file__))
+REPO = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(REPO / "host"))
 from hil import bluetooth  # noqa: E402
 from hil.evdev_utils import Capture, find_all_nodes, find_gamepad  # noqa: E402
 from hil.serialdev import SerialDev  # noqa: E402
 
-REPO = pathlib.Path(__file__).resolve().parent.parent
 STATE = pathlib.Path.home() / ".cache" / "esp32-hil" / "state.json"
 
 
