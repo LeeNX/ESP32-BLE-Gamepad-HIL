@@ -9,11 +9,12 @@ pio = "/home/leet/.local/bin/pio"
 
 [board.esp32dev]
 pio_env = "esp32dev"
-# Fill in from `ls /dev/serial/by-id/` once the board is attached:
-port = "/dev/serial/by-id/CHANGE-ME-esp32dev"
+# CP2102 UART bridge (Silicon Labs 10c4:ea60)
+port = "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0"
 profile = "default"
 
 [board.esp32c3]
 pio_env = "esp32c3"
-port = "/dev/serial/by-id/CHANGE-ME-esp32c3"
+# native USB-Serial/JTAG (Espressif 303a:1001)
+port = "/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_98:3D:AE:52:7A:C8-if00"
 profile = "default"
