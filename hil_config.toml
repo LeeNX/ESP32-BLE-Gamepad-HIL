@@ -4,7 +4,7 @@
 
 [rig]
 lib_dir = "/home/leet/src/ESP32-BLE-Gamepad"   # library checkout the firmware builds against
-device_name = "ESP32 BLE Gamepad HIL"          # firmware advertises "<device_name> <board>"
+device_name = "HILpad"                         # firmware advertises "<device_name> <board>"
 pio = "/home/leet/.local/bin/pio"
 
 [board.esp32dev]

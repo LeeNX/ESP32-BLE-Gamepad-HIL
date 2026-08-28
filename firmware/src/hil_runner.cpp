@@ -18,11 +18,11 @@
 #include <BleGamepad.h>
 #include "hil_profile.h"
 
-// delayAdvertising=false (default): begin() starts advertising straight away.
-// begin() itself is the gate -- nothing runs before the host sends BEGIN.
-static BleGamepad bleGamepad("ESP32 BLE Gamepad HIL " HIL_BOARD_NAME);
+// Keep this short: it has to fit in the 31-byte legacy BLE advertising packet
+// alongside flags + appearance + the HID service UUID, or NimBLE truncates it
+// and the host sees a clipped name it can't match on.
+static BleGamepad bleGamepad("HILpad " HIL_BOARD_NAME);
 static BleGamepadConfiguration bleGamepadConfig;
-static bool started = false;
 
 static String line;
 
@@ -108,25 +108,19 @@ static void handle(const String &cmd)
         return;
     }
 
+    // begin() runs in setup() (see there for why); BEGIN is now just a
+    // readiness handshake the harness can rely on.
     if (c == "BEGIN")
     {
-        if (!started)
-        {
-            bleGamepad.begin(&bleGamepadConfig);
-            started = true;
-        }
         reply("OK");
         return;
     }
 
     if (c == "CONN?")
     {
-        reply(started && bleGamepad.isConnected() ? "CONN 1" : "CONN 0");
+        reply(bleGamepad.isConnected() ? "CONN 1" : "CONN 0");
         return;
     }
-
-    // Everything past here needs BEGIN first.
-    if (!started) { reply("ERR not-begun"); return; }
 
     if (c == "PRESS" || c == "RELEASE")
     {
@@ -210,8 +204,15 @@ void setup()
 {
     Serial.begin(115200);
     line.reserve(64);
-    hilApplyProfile(bleGamepadConfig); // populate config now so CONFIG? is accurate pre-BEGIN
-    // Announce readiness; host waits for this or just polls PING.
+    hilApplyProfile(bleGamepadConfig);
+    // begin() is called here, from setup(), exactly like the TestAll example.
+    // Calling it later from loop() in response to a serial command reliably
+    // wedged the NimBLE server task on the classic ESP32 (advertising never
+    // started, board reset-looped) -- so the firmware always advertises once
+    // booted, and BEGIN is just a handshake. Both boards carry distinct names
+    // ("... HIL esp32dev" / "... HIL esp32c3") so the harness still bonds the
+    // right one.
+    bleGamepad.begin(&bleGamepadConfig);
     Serial.println("HIL hil_runner ready profile=" HIL_PROFILE_NAME " board=" HIL_BOARD_NAME);
 }
 
