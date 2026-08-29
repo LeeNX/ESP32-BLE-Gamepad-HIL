@@ -37,6 +37,7 @@ One box can be both (`./run.sh` does builder then tester locally).
 |---|---|
 | `firmware/` | PlatformIO project — `hil_runner` serial-command firmware, `hil_profile.h` layout profiles (`default`, `signed-axes`, `specials`) |
 | `builder/build.sh` `builder/make_bundle.py` | compile → firmware bundle(s) → optional `--push` rsync to the tester |
+| `tester/bootstrap.sh` | one-time, idempotent tester provisioning (apt deps, venv, groups, udev) |
 | `tester/flash.py` `tester/test.sh` | flash a bundle with esptool, run the suite, write `results/` |
 | `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite: fixtures, serial/evdev/bluetooth helpers, the tests |
 | `hil_config.toml` (+ gitignored `hil_config.local.toml`) | per-machine ports, ssh host, builder board/profile matrix |
@@ -60,16 +61,17 @@ they differ from the template, plus `[tester] ssh_host` for `--push`.
 ### Tester (has the ESP32 + a BLE adapter — e.g. the Pi)
 
 ```bash
-sudo apt install -y bluez python3-venv build-essential python3-dev
-python3 -m venv ~/.venvs/hil
-~/.venvs/hil/bin/pip install -r ~/src/esp32-ble-gamepad-hil/tester/requirements.txt
+git clone <gitea>/leet/esp32-ble-gamepad-hil ~/esp32-ble-gamepad-hil
+~/esp32-ble-gamepad-hil/tester/bootstrap.sh          # idempotent; re-run after updates
 ```
 
-- Groups: add your user to `dialout` (serial), `input` (`/dev/input/event*`),
-  `plugdev` (`/dev/hidraw*`); log out/in.
-- udev: add `SUBSYSTEM=="hidraw", KERNELS=="0005:1D34:8010.*", MODE="0660",
-  GROUP="plugdev"` to `/etc/udev/rules.d/99-esp32-gamepad.rules`
-  (`udevadm control --reload-rules && udevadm trigger`).
+`tester/bootstrap.sh` does the apt deps (`bluez` + `rfkill` + build tools), the
+`~/.venvs/hil` venv from `tester/requirements.txt`, the `dialout` / `input` /
+`plugdev` group adds, the udev rule, and a `hil_config.local.toml` stub. It
+prints the remaining manual steps. For a managed fleet, mirror it as an Ansible
+role — the step list is in that script's header. What it deliberately leaves
+manual:
+
 - **Power**: a Pi 3B+ can't reliably power an ESP32 doing BLE off its own USB —
   brownouts show up as a reset loop that never advertises (seen on cylon too).
   Use a **powered USB hub** for the ESP32.
@@ -79,7 +81,69 @@ python3 -m venv ~/.venvs/hil
   (`ls -l /dev/serial/by-id/`).
 
 First run pairs the device automatically (`NoInputNoOutput` agent, Just Works),
-or pair by hand per `LinuxHIDTesting.md` §3 — the device name is `HILpad <board>`.
+or pair by hand: `bluetoothctl` → `scan on`, wait for `HILpad <board>`, then
+`pair <mac>` / `trust <mac>` / `connect <mac>` (the persistent agent the suite
+runs is only needed for unattended re-pairs).
+
+### Local (one box)
+
+Do **both** the Builder and Tester setup above on one machine, plug the ESP32
+into it (still via a powered hub), and `./run.sh` builds, flashes and tests in
+one go — no SSH, no `--push`. This is the fastest edit/test loop.
+
+**This one box must be Linux.** The suite asserts on `/dev/input/event*` via
+`evdev` and pairs through BlueZ `bluetoothctl`; both are Linux-only, as are the
+`evdev` / `pyudev` deps.
+
+**macOS can be the Builder only** — PlatformIO builds fine there, so
+`builder/build.sh --push` from a Mac to a Linux tester (a Pi, or a Linux
+desktop) works. Running the pytest suite on macOS does not — see below for
+what that would take.
+
+### macOS as a tester (unsupported — gap list)
+
+Flashing and the serial command channel already work on macOS: `esptool` and
+`pyserial` are cross-platform, just point `[board.<b>].port` at a
+`/dev/cu.usbserial-*` path. The two things the suite needs from the OS —
+initiating the BLE bond and reading the resulting HID events as ground truth —
+have no macOS implementation. What's missing:
+
+1. **A CoreBluetooth pairing backend** to replace BlueZ `bluetoothctl`
+   (`host/hil/bluetooth.py` — `BtCtl`, `ensure_paired`, and
+   scan/pair/trust/connect/remove-bond). *Blocker:* macOS hands a BLE-HID
+   device's GATT service to the system HID stack, so a CoreBluetooth app can't
+   touch it to trigger pairing, and `blueutil` / `IOBluetoothDevicePair` are
+   Classic-BT oriented and won't pair a BLE-only peripheral. Pairing would stay
+   a **one-time manual step in System Settings ▸ Bluetooth**, with the suite run
+   as `--no-pair`. The `--repair` / automatic re-pair-on-profile-change path
+   (`conftest.py` `bt_mac`) would then need a manual "Forget This Device" first.
+
+2. **An IOHIDManager read backend** to replace `host/hil/evdev_utils.py`
+   (`find_gamepad`, `find_all_nodes`, `Capture.collect` / `key_changes` /
+   `abs_changes`): enumerate `IOHIDDevice`s by product name (`HILpad <board>`),
+   open, subscribe to input-value callbacks. Needs `pyobjc-framework-IOKit` (or
+   a ctypes IOKit shim) in place of `evdev` / `pyudev`. *Blocker:* reading HID
+   input from a device the process doesn't own requires the **Input Monitoring**
+   TCC permission, granted by hand in System Settings (or via an MDM PPPC
+   profile) to the python running pytest — not scriptable from a bootstrap.
+
+3. **macOS ground-truth mapping tables.** Every `host/tests/test_*.py` asserts
+   against Linux `hid-input` codes (`BTN_SOUTH…`, `ABS_THROTTLE` for `s1`,
+   `ABS_HAT0*`), and the two strict xfails (`s2`, hats 2-4) pin *Linux kernel*
+   behaviour. IOKit parses the report descriptor itself and exposes raw HID
+   usage-page/usage, so the expected values — and which quirks even exist — must
+   be re-characterised once on macOS and kept as a parallel table chosen by
+   platform.
+
+4. **Backend selection + a macOS bootstrap.** `conftest.py` fixtures (`gamepad`,
+   `all_nodes`, `_reset`) and `tester/requirements.txt` are hardwired to evdev;
+   they'd dispatch on `sys.platform`. `tester/bootstrap.sh` is apt/systemd/udev
+   — a `bootstrap-macos.sh` would do Homebrew python + the pyobjc deps and print
+   the manual TCC / pairing steps.
+
+5. **CI**: a headless Mac runner needs a logged-in GUI session for BLE plus the
+   TCC grants pre-provisioned (MDM PPPC or a seeded TCC.db). More friction than
+   the Linux/Pi path — a Linux tester stays the recommended CI node.
 
 ## Running
 
@@ -213,8 +277,8 @@ Prerequisites:
 - Push this harness repo and the library to your Gitea. Enable Actions on the
   repo; make sure the runners can fetch `actions/checkout` etc. (Gitea
   `DEFAULT_ACTIONS_URL`).
-- The Pi has this repo at `~/esp32-ble-gamepad-hil` with `hil_config.local.toml`
-  filled in, `~/.venvs/hil` built, udev + groups done, ESP32 + BLE attached.
+- The Pi has this repo at `~/esp32-ble-gamepad-hil`, `tester/bootstrap.sh` run,
+  `hil_config.local.toml` port filled in, ESP32 + BLE attached.
 - Repo secrets: `HIL_PI_HOST`, `HIL_PI_USER`, `HIL_PI_SSH_KEY` (a passphrase-less
   key authorised on the Pi).
 
