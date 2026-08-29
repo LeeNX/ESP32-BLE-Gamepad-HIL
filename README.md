@@ -282,7 +282,7 @@ Prerequisites:
 - Repo secrets: `HIL_PI_HOST`, `HIL_PI_USER`, `HIL_PI_SSH_KEY` (a passphrase-less
   key authorised on the Pi).
 
-Triggers: push to `master` / `hil-*`, manual dispatch (with `lib_repo` /
+Triggers: push to `main` / `hil-*`, manual dispatch (with `lib_repo` /
 `lib_ref` inputs), or `repository_dispatch` type `hil` from the library repo.
 A `concurrency: hil-pi` group serialises runs — there's one physical rig.
 

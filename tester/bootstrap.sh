@@ -53,8 +53,12 @@ echo "== pytest venv at $VENV"
 "$VENV/bin/pip" -q install -r "$REPO/tester/requirements.txt"
 
 echo "== hil_config.local.toml stub"
+port=$("$VENV/bin/python" "$REPO/host/hil/config.py" board.esp32dev.port 2>/dev/null || true)
 if [[ -e "$REPO/hil_config.local.toml" ]]; then
   echo "   exists -- left untouched"
+elif [[ -n "$port" && "$port" != *CHANGE-ME* && -e "$port" ]]; then
+  # committed hil_config.toml already points at a device present on this box
+  echo "   hil_config.toml already resolves board.esp32dev.port -> $port; no stub needed"
 else
   cat > "$REPO/hil_config.local.toml" <<'EOF'
 # Per-machine tester overrides. Deep-merged over hil_config.toml.
@@ -68,10 +72,10 @@ fi
 cat <<EOF
 
 == done. Remaining manual steps:
-  1. log out/in (or 'newgrp') so the group changes take effect
+  1. log out/in (or reboot) so the dialout/input/plugdev group adds take effect
   2. attach the ESP32 on a powered hub + a BLE adapter
-  3. set [board.esp32dev].port in $REPO/hil_config.local.toml
-     ($ ls -l /dev/serial/by-id/)
+  3. if the "no stub needed" line above did not print, set [board.esp32dev].port
+     in $REPO/hil_config.local.toml  ($ ls -l /dev/serial/by-id/)
   4. smoke test:  $VENV/bin/pytest --board esp32dev --no-flash --port <port> -k connection
   5. for CI: add the CI ssh key to ~/.ssh/authorized_keys and set the
      HIL_PI_HOST / HIL_PI_USER / HIL_PI_SSH_KEY repo secrets
