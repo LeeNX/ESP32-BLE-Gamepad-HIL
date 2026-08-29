@@ -34,14 +34,24 @@ $SUDO apt-get install -y --no-install-recommends \
 
 echo "== bluetooth service"
 $SUDO systemctl enable --now bluetooth
-$SUDO rfkill unblock bluetooth || true
+# rfkill lives in /usr/sbin; a fresh Pi image often ships BT soft-blocked, which
+# makes `bluetoothctl power on` fail with org.bluez.Error.Failed. main.conf
+# AutoEnable=true (Debian/RPi default) then powers it once unblocked.
+RFKILL=$(command -v rfkill || echo /usr/sbin/rfkill)
+$SUDO "$RFKILL" unblock bluetooth || true
+if $SUDO "$RFKILL" list bluetooth 2>/dev/null | grep -q 'Soft blocked: yes'; then
+  echo "   WARNING: bluetooth still soft-blocked -- pairing will not work"
+fi
 
 echo "== groups for $TARGET_USER (serial / input / hidraw)"
+# 'input' is the one people miss: without it evdev.list_devices() returns [] for
+# this user and every test times out finding the gamepad node.
 $SUDO usermod -aG dialout,input,plugdev "$TARGET_USER"
 
 echo "== udev rule for the DUT hidraw node"
-# VID:PID 1D34:8010 is the ESP32-BLE-Gamepad default HID identity; the test
-# suite reads /dev/hidraw* for it, so it needs to be group-readable.
+# VID:PID 1D34:8010 is the ESP32-BLE-Gamepad default HID identity. The pytest
+# suite is pure-evdev and does not open /dev/hidraw*, but the rule keeps the
+# node group-readable for manual HID inspection.
 rule='SUBSYSTEM=="hidraw", KERNELS=="0005:1D34:8010.*", MODE="0660", GROUP="plugdev"'
 echo "$rule" | $SUDO tee /etc/udev/rules.d/99-esp32-gamepad.rules >/dev/null
 $SUDO udevadm control --reload-rules
@@ -68,6 +78,27 @@ port = "/dev/serial/by-id/CHANGE-ME"   # ls -l /dev/serial/by-id/
 EOF
   echo "   wrote a stub -- set the real port"
 fi
+
+echo "== health check"
+"$VENV/bin/python" - "$REPO" <<'PY' || true
+import sys, glob
+sys.path.insert(0, sys.argv[1] + "/host")
+try:
+    import evdev
+    n = len(evdev.list_devices())
+    print(f"   evdev: {n} readable input node(s)" +
+          ("" if n else "  <- 0: not in 'input' group yet, or no session refresh"))
+except Exception as e:
+    print("   evdev:", e)
+try:
+    import subprocess
+    out = subprocess.run(["bluetoothctl", "show"], capture_output=True, text=True, timeout=8).stdout
+    powered = [l.strip() for l in out.splitlines() if "Powered:" in l]
+    print("   bt:", powered[0] if powered else "no controller")
+except Exception as e:
+    print("   bt:", e)
+print("   serial ports:", ", ".join(glob.glob("/dev/serial/by-id/*")) or "none")
+PY
 
 cat <<EOF
 

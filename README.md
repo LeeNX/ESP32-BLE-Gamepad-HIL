@@ -278,7 +278,12 @@ Prerequisites:
   repo; make sure the runners can fetch `actions/checkout` etc. (Gitea
   `DEFAULT_ACTIONS_URL`).
 - The Pi has this repo at `~/esp32-ble-gamepad-hil`, `tester/bootstrap.sh` run,
-  `hil_config.local.toml` port filled in, ESP32 + BLE attached.
+  `hil_config.local.toml` port set (or the committed template already matches),
+  ESP32 + BLE attached. The bootstrap health check must show a powered BT
+  controller and ≥1 readable input node — the two things a fresh Pi image gets
+  wrong are BT left **rfkill soft-blocked** and the CI user missing from the
+  **`input`** group (`evdev.list_devices()` then returns `[]` and every test
+  times out).
 - Repo secrets: `HIL_PI_HOST`, `HIL_PI_USER`, `HIL_PI_SSH_KEY` (a passphrase-less
   key authorised on the Pi).
 
