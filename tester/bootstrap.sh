@@ -30,7 +30,13 @@ $SUDO apt-get update -qq
 $SUDO apt-get install -y --no-install-recommends \
   bluez rfkill \
   python3-venv python3-dev build-essential \
-  git rsync openssh-client
+  git rsync openssh-client \
+  locales-all
+# locales-all: sshd forwards the operator's LANG/LC_* (a Mac sends
+# LC_ALL=en_US.UTF-8) and bash/python warn if that locale isn't built. Shipping
+# every locale is simplest for a box many people ssh into; pin the node's own
+# default too so cron/CI runs are deterministic regardless of client.
+$SUDO update-locale LANG=C.UTF-8
 
 echo "== bluetooth service"
 $SUDO systemctl enable --now bluetooth
