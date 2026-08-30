@@ -43,7 +43,7 @@ One box can be both (`./run.sh` does builder then tester locally).
 |---|---|
 | `firmware/` | PlatformIO project — `hil_runner` serial-command firmware, `hil_profile.h` layout profiles: `default` (64 btn/4 hat/8 axis), `signed-axes` (same, −32767 axis min), `specials` (16 btn/1 hat/8 axis/8 special), `minimal` (1 btn/1 axis), `maxbtn` (128 btn, no hats/axes) |
 | `builder/build.sh` `builder/make_bundle.py` | compile → firmware bundle(s) → optional `--push` rsync to the tester. Library path comes from `$HIL_LIB_DIR` (exported from `rig.lib_dir`) |
-| `tester/bootstrap.sh` | one-time, idempotent tester provisioning (apt deps, venv, groups, udev) |
+| `tester/bootstrap-host.sh` (root) `tester/bootstrap.sh` (user) | tester provisioning, split: privileged half (apt/bluetooth/groups/udev) vs unprivileged half (venv/config/health check) |
 | `tester/flash.py` `tester/test.sh` | flash a bundle with esptool, run the suite + benchmark, write `results/` |
 | `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite. Helpers: `serialdev` (hil_runner protocol), `evdev_utils`, `bluetooth`, `gatt` (DIS/PnP/battery over bleak), `latency` + `bench` (the benchmark), `charts` (JSON → table + SVGs), `summarize` |
 | `hil_config.toml` (+ gitignored `hil_config.local.toml`) | per-machine ports, ssh host, builder board/profile matrix |
@@ -66,17 +66,29 @@ they differ from the template, plus `[tester] ssh_host` for `--push`.
 
 ### Tester (has the ESP32 + a BLE adapter — e.g. the Pi)
 
+Bootstrap is split so the CI/test user never needs root:
+
 ```bash
-git clone <gitea>/leet/esp32-ble-gamepad-hil ~/esp32-ble-gamepad-hil
-~/esp32-ble-gamepad-hil/tester/bootstrap.sh          # idempotent; re-run after updates
+git clone <gitea>/leenx-foss/esp32-ble-gamepad-hil ~/esp32-ble-gamepad-hil
+
+# once, by a host admin -- the only step that touches root:
+sudo ~/esp32-ble-gamepad-hil/tester/bootstrap-host.sh --user bot-gitea-esp32-hil
+
+# then as that user, NO sudo -- re-run freely after a requirements.txt change:
+tester/bootstrap.sh
 ```
 
-`tester/bootstrap.sh` does the apt deps (`bluez` + `rfkill` + build tools), the
-`~/.venvs/hil` venv from `tester/requirements.txt`, the `dialout` / `input` /
-`plugdev` group adds, the udev rule, and a `hil_config.local.toml` stub. It
-prints the remaining manual steps. For a managed fleet, mirror it as an Ansible
-role — the step list is in that script's header. What it deliberately leaves
-manual:
+- `tester/bootstrap-host.sh` (root): apt deps (`bluez` + `rfkill` + build
+  tools), system locale, the `bluetooth` service + rfkill unblock, adds the
+  `--user` to `dialout` / `input` / `plugdev`, installs the udev rule.
+- `tester/bootstrap.sh` (unprivileged): the `~/.venvs/hil` venv from
+  `tester/requirements.txt`, the `hil_config.local.toml` stub, a health check.
+  It **preflights** the privileged bits and tells you to run `bootstrap-host.sh`
+  if they're missing. `--with-host` runs the root half via `sudo` first (handy
+  on a dev box); `--skip-preflight` bypasses the check.
+
+For a managed fleet, mirror `bootstrap-host.sh` as an Ansible role — the step
+list is in its header. What is still manual:
 
 - **Power**: a Pi 3B+ can't reliably power an ESP32 doing BLE off its own USB —
   brownouts show up as a reset loop that never advertises (seen on cylon too).
@@ -380,10 +392,12 @@ Prerequisites:
 - Push this harness repo and the library to your Gitea. Enable Actions on the
   repo; make sure the runners can fetch `actions/checkout` etc. (Gitea
   `DEFAULT_ACTIONS_URL`).
-- The Pi has this repo at `~/esp32-ble-gamepad-hil`, `tester/bootstrap.sh` run
-  (re-run it after `tester/requirements.txt` changes — e.g. the `bleak` add for
-  the GATT tests), `hil_config.local.toml` with **both** board ports set, both
-  ESP32s + BLE attached. The bootstrap health check must show a powered BT
+- The Pi has this repo at `~/esp32-ble-gamepad-hil`, `bootstrap-host.sh` run
+  once by an admin for the CI user and `tester/bootstrap.sh` run as that user
+  (re-run the latter — no sudo — after `tester/requirements.txt` changes, e.g.
+  the `bleak` add for the GATT tests), `hil_config.local.toml` with **both**
+  board ports set, both ESP32s + BLE attached. The bootstrap health check must
+  show a powered BT
   controller and ≥1 readable input node — the two things a fresh Pi image gets
   wrong are BT left **rfkill soft-blocked** and the CI user missing from the
   **`input`** group (`evdev.list_devices()` then returns `[]` and every test
