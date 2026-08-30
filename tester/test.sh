@@ -15,8 +15,12 @@ BUNDLE=$(cd "$BUNDLE" && pwd)
 
 read -r BOARD PROFILE < <(python3 -c "import json;m=json.load(open('$BUNDLE/manifest.json'));print(m['board'],m['profile'])")
 PORT=$(python3 host/hil/config.py "board.$BOARD.port")
+# flash_port defaults to port; esp32-c3 with an external UART bridge flashes on
+# its native USB and talks on the bridge (README "ESP32-C3 serial bridge").
+FLASH_PORT=$(python3 host/hil/config.py "board.$BOARD.flash_port")
+[[ -n "$FLASH_PORT" ]] || FLASH_PORT=$PORT
 
-echo "== tester: board=$BOARD profile=$PROFILE port=$PORT"
+echo "== tester: board=$BOARD profile=$PROFILE port=$PORT flash_port=$FLASH_PORT"
 echo "== bundle: $BUNDLE"
 
 FLASH=1
@@ -26,7 +30,7 @@ for a in "$@"; do
   PYTEST_EXTRA+=("$a")
 done
 if [[ $FLASH == 1 ]]; then
-  "$VENV/bin/python" tester/flash.py "$BUNDLE" --port "$PORT"
+  "$VENV/bin/python" tester/flash.py "$BUNDLE" --port "$FLASH_PORT"
 fi
 
 mkdir -p results

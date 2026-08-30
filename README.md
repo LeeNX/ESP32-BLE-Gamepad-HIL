@@ -188,14 +188,64 @@ xfail -> they flip to failures if the library/kernel ever start exposing them):
   (report field 0 = `_hat4`), the *one* working hat is driven by `HAT 4` --
   `bleGamepad.setHat1()` on a multi-hat config does nothing visible on Linux.
 
-`--board esp32c3`: flashes and pairs, but the C3's **native USB-Serial/JTAG**
-port is unreliable as the command channel — it disappears when the chip resets
-and `serial.Serial()` can block on a half-open handle (`SerialDev._open` now
-guards that with a threaded timeout, so it fails fast instead of hanging, but a
-run can still lose the port mid-test). **Recommended fix: wire the C3's *other*
-USB port** (the CP210x UART bridge on the DevKitC-02) and point
-`hil_config.toml`'s `[board.esp32c3].port` at that — native USB for flashing,
-the bridge for serial, same stable setup as esp32dev.
+`--board esp32c3`: flashes and pairs, but the command channel needs a wiring
+change — see **ESP32-C3 serial bridge** below. Not in the CI matrix
+(`.gitea/workflows/hil.yml` runs `esp32dev` only) until that's done.
+
+## ESP32-C3 serial bridge
+
+`hil_runner` writes the command protocol to `Serial`, and on the C3 with this
+rig's build (`ARDUINO_USB_CDC_ON_BOOT` unset → `0`) `Serial` is **UART0**
+(`GPIO21` TX / `GPIO20` RX), *not* the USB-C port. The USB-C connector on a C3 is
+the native USB-Serial/JTAG peripheral — great for flashing, but it carries no
+`hil_runner` I/O in this build, and even with CDC-on-boot it re-enumerates on
+every chip reset and `serial.Serial()` can wedge on the half-open handle
+(`SerialDev._open` guards that with a threaded timeout so it fails fast, but a
+run can still lose the port mid-test).
+
+So the C3 wants **two interfaces**: flash over USB-C, talk over an external
+3.3 V USB-UART bridge on UART0. The harness supports this with a `flash_port`
+distinct from `port`:
+
+```toml
+[board.esp32c3]
+port       = "/dev/serial/by-id/usb-<CP2102-or-CH340-bridge>-if00-port0"   # UART0
+flash_port = "/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_…-if00"  # USB-C
+```
+
+(`flash_port` defaults to `port`; `--flash-port` / `HIL_FLASH_PORT` override it.)
+
+### Wiring — ESP32-C3 SuperMini
+
+The SuperMini has **no onboard USB-UART chip** (unlike the DevKitC/DevKitM, which
+expose a CP2102 on a second connector), so an external adapter is mandatory,
+not just recommended. Any FTDI / CP2102 / CH340 dongle set to **3.3 V logic**
+(the C3 is **not** 5 V tolerant):
+
+| USB-UART adapter | C3 SuperMini | |
+|---|---|---|
+| `GND` | `GND` | common ground is required |
+| `TX` (adapter → C3) | `GPIO20` (U0RXD) | pin nearest the USB-C shell, one side |
+| `RX` (adapter ← C3) | `GPIO21` (U0TXD) | pin nearest the USB-C shell, other side |
+| `VCC` / `5V` / `3V3` | **leave unconnected** | board is powered + flashed via USB-C |
+
+Both cables plug into the powered hub. Don't wire the adapter's VCC *and* USB-C —
+pick one power source (USB-C is simplest, and it's needed for flashing anyway).
+
+### Approaches, trade-offs
+
+| | Flash | Command channel | Verdict |
+|---|---|---|---|
+| **Native USB-C only** (`ARDUINO_USB_CDC_ON_BOOT=0`, today) | USB-C ✓ (slow, retries) | none — `Serial` is UART0, not exposed | broken for the suite |
+| **Native USB-C only**, rebuild with `-D ARDUINO_USB_CDC_ON_BOOT=1` | USB-C ✓ | USB-C CDC — re-enumerates on every reset, races NimBLE for USB IRQ budget, "port vanished" mid-run | fragile; not for CI |
+| **USB-C + external UART bridge** (recommended) | USB-C ✓ | FTDI/CP210x on UART0 — never resets when the C3 does, fully isolated from the flash path, identical to the stable esp32dev setup, works with the default build | **use this** |
+| **External bridge for flash too** | UART0 — needs holding `BOOT` (GPIO9) + tapping `RST` by hand (SuperMini has no auto-reset on UART0) | UART0 ✓ | no good for unattended CI |
+
+**Pros of the bridge approach:** rock-solid command channel (a real UART, not
+the C3's shared USB peripheral); flashing resets never disturb it; no firmware
+rebuild; same code path and reliability as esp32dev. **Cons:** a $2 adapter and
+three jumper wires per C3; two USB devices per board on the hub; you must set
+both `port` and `flash_port`.
 
 ## Serial protocol (`firmware/src/hil_runner.cpp`)
 
