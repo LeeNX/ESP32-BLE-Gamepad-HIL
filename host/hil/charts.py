@@ -179,7 +179,7 @@ def table_md(records):
             f'| {r["board"]} | {r["profile"]} | {r.get("report_bytes")} | '
             f'{r.get("descriptor_bytes")} | {r.get("conn_interval_ms")} | '
             f'{r.get("mtu")} | {b.get("p50")}/{b.get("p99")} | {ax.get("p50", "-")} | '
-            f'{r.get("clean_rate_hz", "-")} | {dropped} |')
+            f'{r.get("clean_rate_hz") or "-"} | {dropped} |')
     return _env_line(records) + "\n".join(rows) + "\n"
 
 

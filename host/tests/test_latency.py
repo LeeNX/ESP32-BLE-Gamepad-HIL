@@ -66,6 +66,8 @@ def test_clean_rate(sweep):
     event, so paced traffic keeps up well past 1/connection-interval -- here
     it's the rig's own serial command channel that's the limit, not BLE. (The
     unpaced-burst ceiling is much lower -- see the `burst` curve.)"""
+    if not sweep["clean_rate_curve"]:
+        pytest.skip("no axis in this profile to measure a clean rate")
     clean = sweep["clean_rate_hz"]
     assert clean is not None, "clean_rate never hit 95% delivery -- check the curve"
     assert 5 <= clean <= 1000, f"clean rate {clean} Hz out of any plausible range"

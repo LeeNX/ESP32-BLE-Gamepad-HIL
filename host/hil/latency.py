@@ -135,24 +135,22 @@ def clean_rate(dev, cap, cfg, steps=40):
     measured rate with >=95% delivery.
     """
     axes = cfg.get("axes") or []
-    if axes:
-        code = {"x": ecodes.ABS_X, "y": ecodes.ABS_Y, "z": ecodes.ABS_Z,
-                "rx": ecodes.ABS_RX, "ry": ecodes.ABS_RY, "rz": ecodes.ABS_RZ,
-                "s1": ecodes.ABS_THROTTLE}.get(axes[0])
-        lo, hi = cfg["axesMin"], cfg["axesMax"]
-        span = hi - lo
-        step = max(1, span // (steps + 4))
-        send = lambda i: dev.axis(axes[0], lo + (i + 1) * step)  # noqa: E731
-        rest = lambda: dev.axis(axes[0], lo)                     # noqa: E731
-        count_seen = lambda evs: len({e.value for e in evs
-                                      if e.type == ecodes.EV_ABS and e.code == code})
-    else:  # buttons-only profile (maxbtn): press N distinct buttons, count codes
-        code = None
-        nbtn = min(cfg.get("buttons", 16), steps)
-        send = lambda i: dev.press((i % nbtn) + 1)               # noqa: E731
-        rest = lambda: dev.reset()                               # noqa: E731
-        count_seen = lambda evs: len({e.code for e in evs        # noqa: E731
-                                      if e.type == ecodes.EV_KEY and e.value == 1})
+    if not axes:
+        # Needs a monotonic continuous signal to count distinct deliveries; a
+        # buttons-only profile has none (and Linux's button->keycode mapping
+        # past ~15 is too sparse for a gamepad collection to use as a proxy).
+        return {"curve": [], "clean_hz": None, "note": "no axis to measure"}
+
+    code = {"x": ecodes.ABS_X, "y": ecodes.ABS_Y, "z": ecodes.ABS_Z,
+            "rx": ecodes.ABS_RX, "ry": ecodes.ABS_RY, "rz": ecodes.ABS_RZ,
+            "s1": ecodes.ABS_THROTTLE}.get(axes[0])
+    lo, hi = cfg["axesMin"], cfg["axesMax"]
+    span = hi - lo
+    step = max(1, span // (steps + 4))
+    send = lambda i: dev.axis(axes[0], lo + (i + 1) * step)  # noqa: E731
+    rest = lambda: dev.axis(axes[0], lo)                     # noqa: E731
+    count_seen = lambda evs: len({e.value for e in evs       # noqa: E731
+                                  if e.type == ecodes.EV_ABS and e.code == code})
 
     curve = []
     best = None

@@ -301,17 +301,37 @@ The SuperMini has **no onboard USB-UART chip**, so an external adapter set to
 
 ## CI
 
-`.github/workflows/hil.yml` — a **build** job (installs PlatformIO fresh, runs
-`builder/build.sh`, uploads the bundles as an artifact), then a **hil-test**
-job that `rsync`s **both** the checked-out harness code (so the tester runs the
-same ref) and the bundles to the tester, `ssh`es in to run `tester/test.sh
---bench` per bundle, and publishes the JUnit report + `hil-results/`. The
-tester is a plain **SSH target**, not a runner — nothing untrusted executes on
-it directly, and its own `hil_config.local.toml` (real serial ports) is never
-overwritten.
+`.github/workflows/hil.yml` runs entirely on **GitHub-hosted runners** — no
+self-hosted runner, no inbound ports on your network:
 
-Repo secrets: `HIL_TESTER_HOST`, `HIL_TESTER_USER`, `HIL_TESTER_SSH_KEY` (a
-passphrase-less key authorised on the tester).
+- **build** — `pip install platformio`, `builder/build.sh`, upload the bundles.
+- **hil-test** — brings up an **ephemeral Tailscale node** for the job
+  (`tailscale/github-action`), `rsync`s the checked-out harness code (so the
+  tester runs the same ref) **and** the bundles to the tester over the tailnet,
+  `ssh`es in to run `tester/test.sh --bench` per bundle, pulls `results/` back,
+  publishes the JUnit report.
+
+The tester is a plain **SSH target** on the tailnet, not a runner — nothing
+untrusted executes on it directly, and its own `hil_config.local.toml` (real
+serial ports) is never overwritten.
+
+### Setup
+
+1. **Tailscale on the tester**: `tester/bootstrap-host.sh` installs it; then
+   `sudo tailscale up` (tag it, e.g. `--advertise-tags=tag:hil-rig`). Note its
+   MagicDNS name.
+2. **Tailscale ACL**: allow `tag:ci` → the tester on `tcp:22`, e.g.
+   ```jsonc
+   "acls": [
+     { "action": "accept", "src": ["tag:ci"], "dst": ["tag:hil-rig:22"] }
+   ],
+   "tagOwners": { "tag:ci": ["autogroup:admin"], "tag:hil-rig": ["autogroup:admin"] }
+   ```
+3. **OAuth client** (Tailscale admin → Settings → OAuth clients): scope
+   *Auth Keys* (write), tag `tag:ci`. → `TS_OAUTH_CLIENT_ID` / `TS_OAUTH_SECRET`.
+4. **Repo secrets**: `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, `HIL_TESTER_HOST`
+   (the MagicDNS name), `HIL_TESTER_USER`, `HIL_TESTER_SSH_KEY` (a
+   passphrase-less key in the tester user's `~/.ssh/authorized_keys`).
 
 Triggers: push to `main` / `hil-*`, manual dispatch (with `lib_repo` / `lib_ref`
 inputs), or `repository_dispatch` type `hil` from the library repo. A
@@ -319,7 +339,7 @@ inputs), or `repository_dispatch` type `hil` from the library repo. A
 
 **Untrusted code**: the build job compiles whatever library ref it's handed and
 the test job flashes it to hardware. Keep the triggers to same-repo pushes +
-manual dispatch; don't wire it to run automatically on PRs from forks.
+manual dispatch; don't run it automatically on PRs from forks.
 
 ## macOS as a tester (unsupported — gap list)
 
