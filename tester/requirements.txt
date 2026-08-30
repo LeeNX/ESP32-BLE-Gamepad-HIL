@@ -3,5 +3,5 @@ pytest>=8
 pyserial>=3.5
 evdev>=1.6
 pyudev>=0.24
-bleak>=0.21          # GATT reads: Device Information, PnP, Battery Power State
+dbus-fast>=2.21      # GATT reads (Device Info / PnP / Battery Power State) over BlueZ D-Bus
 tomli>=2 ; python_version < "3.11"

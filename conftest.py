@@ -230,12 +230,12 @@ def all_nodes(rigcfg, bt_mac):
 # --- GATT / Device Information -------------------------------------------
 @pytest.fixture(scope="session")
 def gatt():
-    """The hil.gatt module, with bleak confirmed importable (skip otherwise)."""
+    """The hil.gatt module, with dbus-fast confirmed importable (skip otherwise)."""
     from hil import gatt as _gatt
     try:
-        import bleak  # noqa: F401
+        import dbus_fast  # noqa: F401
     except ImportError as e:
-        pytest.skip(f"bleak not installed -- GATT reads unavailable: {e}")
+        pytest.skip(f"dbus-fast not installed -- GATT reads unavailable: {e}")
     return _gatt
 
 

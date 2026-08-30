@@ -45,7 +45,9 @@ def endpoints(connected_dut, gamepad):
         ai = dev.absinfo(code)
         seen = {}
         for name, cmd in (("lo", lo), ("mid", mid), ("hi", hi)):
-            connected_dut.axis(tok, mid)
+            # move from the *opposite* rail so every probe is a real change
+            base = hi if cmd != hi else lo
+            connected_dut.axis(tok, base)
             cap.collect(settle=0.15)
             cap.drain()
             connected_dut.axis(tok, cmd)

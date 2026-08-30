@@ -17,7 +17,7 @@ reasonable time:
  │ builder/build.sh:          │  (rsync/   │ tester/test.sh:                  │
  │  pio run  (lib under test) │   CI       │  tester/flash.py  (esptool only) │
  │  -> bundles/<b>-<p>-<sha>/ │  artifact) │  pytest  (pyserial+evdev+bluez   │
- │     *.bin + manifest.json  │──────────►│         +bleak)                   │
+ │     *.bin + manifest.json  │──────────►│         +dbus-fast)               │
  └────────────────────────────┘            │   USB─► ESP32 ─BLE─► /dev/input/  │
                                            │  -> results/ junit + bench + svg │
                                            └──────────────────────────────────┘
@@ -45,7 +45,7 @@ One box can be both (`./run.sh` does builder then tester locally).
 | `builder/build.sh` `builder/make_bundle.py` | compile → firmware bundle(s) → optional `--push` rsync to the tester. Library path comes from `$HIL_LIB_DIR` (exported from `rig.lib_dir`) |
 | `tester/bootstrap-host.sh` (root) `tester/bootstrap.sh` (user) | tester provisioning, split: privileged half (apt/bluetooth/groups/udev) vs unprivileged half (venv/config/health check) |
 | `tester/flash.py` `tester/test.sh` | flash a bundle with esptool, run the suite + benchmark, write `results/` |
-| `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite. Helpers: `serialdev` (hil_runner protocol), `evdev_utils`, `bluetooth`, `gatt` (DIS/PnP/battery over bleak), `latency` + `bench` (the benchmark), `charts` (JSON → table + SVGs), `summarize` |
+| `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite. Helpers: `serialdev` (hil_runner protocol), `evdev_utils`, `bluetooth`, `gatt` (DIS/PnP/battery over BlueZ D-Bus), `latency` + `bench` (the benchmark), `charts` (JSON → table + SVGs), `summarize` |
 | `hil_config.toml` (+ gitignored `hil_config.local.toml`) | per-machine ports, ssh host, builder board/profile matrix |
 | `run.sh` | one-box: build all bundles then flash+test each |
 | `.gitea/workflows/hil.yml` | Gitea CI: build job → SSH-to-Pi test job |
@@ -190,7 +190,9 @@ Useful pytest options: `--bundle <dir>` (flash a bundle via esptool),
 `test_device_info.py` / `test_battery.py` cover the non-HID side. Once the
 device is bonded, BlueZ still exposes Device Information (`0x180A`), PnP ID
 (`0x2A50`) and Battery (`0x180F`) to a generic GATT client, so `host/hil/gatt.py`
-reads them with `bleak` and the tests assert they match what the firmware set
+reads them straight off the existing BlueZ connection (D-Bus `ReadValue`, no
+connect/disconnect -- bleak would drop the HID link) and the tests assert they
+match what the firmware set
 (`DIS?` / `PNP?`). Battery level is also cross-checked against `upower`. The
 `0x2A1A` Battery Power State bitfield (`setPowerStateAll()`) is read raw and
 decoded; those tests skip if BlueZ doesn't surface that characteristic.
@@ -395,7 +397,7 @@ Prerequisites:
 - The Pi has this repo at `~/esp32-ble-gamepad-hil`, `bootstrap-host.sh` run
   once by an admin for the CI user and `tester/bootstrap.sh` run as that user
   (re-run the latter — no sudo — after `tester/requirements.txt` changes, e.g.
-  the `bleak` add for the GATT tests), `hil_config.local.toml` with **both**
+  the `dbus-fast` add for the GATT tests), `hil_config.local.toml` with **both**
   board ports set, both ESP32s + BLE attached. The bootstrap health check must
   show a powered BT
   controller and ≥1 readable input node — the two things a fresh Pi image gets
