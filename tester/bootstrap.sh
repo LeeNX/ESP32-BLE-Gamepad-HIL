@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # TESTER role, UNPRIVILEGED half. Run as the CI/test user -- NO sudo, NO root.
-# Idempotent; re-run after a tester/requirements.txt change (e.g. the bleak add).
+# Idempotent; re-run after a tester/requirements.txt change (e.g. the dbus-fast add).
 #
 #   tester/bootstrap.sh                 # venv at ~/.venvs/hil, config stub, health check
 #   HIL_VENV=/opt/hil tester/bootstrap.sh
@@ -98,10 +98,10 @@ try:
 except Exception as e:
     print("   evdev:", e)
 try:
-    import bleak  # noqa: F401
-    print("   bleak: ok")
+    import dbus_fast  # noqa: F401
+    print("   dbus-fast: ok")
 except Exception as e:
-    print("   bleak:", e, " <- GATT tests (test_device_info/test_battery) will skip")
+    print("   dbus-fast:", e, " <- GATT tests (test_device_info/test_battery) will skip")
 try:
     import subprocess
     out = subprocess.run(["bluetoothctl", "show"], capture_output=True, text=True, timeout=8).stdout

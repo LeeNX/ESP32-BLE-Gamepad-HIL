@@ -1,21 +1,33 @@
 """bluetoothctl helpers for pairing the DUT (Just Works / NoInputNoOutput).
 
-The tricky part is the agent: BlueZ needs a registered agent to auto-confirm
-even a no-MITM "Just Works" pairing (`bluetoothd: new_auth() No agent
-available for request type 2` otherwise), and an agent only lives as long as
-the bluetoothctl process that registered it. So pairing runs inside one
-long-lived `bluetoothctl` session (`BtCtl`) that holds the agent the whole
-time. Read-only queries (`info`, `devices`) still shell out one-shot.
+Two things make this fiddly, both handled by one long-lived `bluetoothctl`
+session (`BtCtl`):
+
+1. **The agent.** BlueZ needs a registered agent to confirm even a no-MITM
+   "Just Works" pairing, and an agent only lives as long as the bluetoothctl
+   that registered it. BlueZ 5.82's `NoInputNoOutput` agent still *prompts*
+   `[agent] Accept pairing (yes/no):` for the device's `RequestAuthorization`
+   during bonding -- so the reader thread auto-answers any `(yes/no)` prompt
+   with `yes`.
+2. **Device purging.** BlueZ 5.82 drops every discovered-but-unconnected device
+   from its object tree the moment discovery stops (`[DEL]` storm), so a `pair`
+   issued after `scan off` fails with "not available". `BtCtl` therefore keeps
+   discovery running for its whole lifetime and only stops it in `close()`.
+
+Read-only queries (`info`, `devices`) still shell out one-shot.
 
 Manual equivalent: `bluetoothctl` -> `scan on` / `pair` / `trust` / `connect`
-(see README "Setup / Tester").
+(answer the pairing prompt `yes`); see README "Setup / Tester".
 """
 
+import os
 import re
 import subprocess
 import threading
 import time
 from collections import deque
+
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 
 def _run(args, timeout=15):
@@ -45,32 +57,65 @@ def known_devices():
 
 
 class BtCtl:
-    """A persistent interactive bluetoothctl session holding a NoInputNoOutput
-    agent for its whole lifetime."""
+    """A persistent bluetoothctl session: holds a NoInputNoOutput agent, keeps
+    discovery running, and auto-confirms pairing prompts."""
 
     def __init__(self):
         self.p = subprocess.Popen(
             ["bluetoothctl"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, text=True, bufsize=1,
+            stderr=subprocess.STDOUT, bufsize=0,
         )
-        self._buf = deque(maxlen=4000)
+        self._buf = deque(maxlen=8000)
         self._lock = threading.Lock()
+        self._io = threading.Lock()
         self._reader = threading.Thread(target=self._pump, daemon=True)
         self._reader.start()
         for cmd in ("power on", "agent NoInputNoOutput", "default-agent"):
             self.send(cmd)
             time.sleep(0.3)
-        time.sleep(1.0)
+        self._scan(True)   # stays on until close() -- see module docstring
+        time.sleep(1.5)
+
+    def _scan(self, on):
+        self.send("scan on" if on else "scan off")
+
+    def _ensure_scanning(self):
+        """BlueZ discovery can stop on its own; re-arm it if it has."""
+        out = _run(["bluetoothctl", "show"]).stdout
+        if "Discovering: yes" not in out:
+            self._scan(True)
+            time.sleep(2)
 
     def _pump(self):
-        for line in self.p.stdout:
-            clean = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", line)
+        """Read raw bytes (agent prompts have no trailing newline, so line
+        iteration would stall), buffer cleaned lines, auto-answer yes/no."""
+        pending = ""
+        while True:
+            try:
+                chunk = os.read(self.p.stdout.fileno(), 4096)
+            except (OSError, ValueError):
+                return
+            if not chunk:
+                return
+            text = _ANSI.sub("", chunk.decode("utf-8", "replace"))
+            if "(yes/no)" in text:
+                self._write("yes")
+            pending += text
+            lines = pending.split("\n")
+            pending = lines.pop()
             with self._lock:
-                self._buf.append(clean.rstrip("\n"))
+                self._buf.extend(s.rstrip("\r") for s in lines)
+
+    def _write(self, cmd):
+        with self._io:
+            try:
+                self.p.stdin.write((cmd + "\n").encode())
+                self.p.stdin.flush()
+            except (OSError, ValueError):
+                pass
 
     def send(self, cmd):
-        self.p.stdin.write(cmd + "\n")
-        self.p.stdin.flush()
+        self._write(cmd)
 
     def _tail(self, n=200):
         with self._lock:
@@ -90,34 +135,36 @@ class BtCtl:
             time.sleep(0.3)
         return None
 
-    def scan_find(self, name_contains, timeout=35):
-        """Actively scan until `bluetoothctl devices` lists a match. Only trusts
-        the devices list, never scrollback (which carries stale [DEL] lines)."""
-        self.send("scan on")
+    def scan_find(self, name_contains, timeout=70):
+        """Wait until `bluetoothctl devices` lists a match, re-arming discovery
+        as needed. Only trust the devices list, never scrollback."""
         deadline = time.time() + timeout
-        try:
-            while time.time() < deadline:
-                for mac, nm in known_devices().items():
-                    if name_contains in nm:
-                        return mac
-                time.sleep(1.5)
-        finally:
-            self.send("scan off")
+        last_kick = 0.0
+        while time.time() < deadline:
+            for mac, nm in known_devices().items():
+                if name_contains in nm:
+                    return mac
+            if time.time() - last_kick > 10:
+                self._ensure_scanning()
+                last_kick = time.time()
+            time.sleep(1.5)
         return None
 
-    def pair(self, mac, timeout=40):
+    def pair(self, mac, timeout=45):
+        """Bond + connect. Discovery stays on so the device object survives;
+        the reader thread answers the pairing prompt."""
         hit = None
-        for attempt in range(3):
+        for attempt in range(4):
             self.send(f"pair {mac}")
             hit = self.wait_for(
                 ["Pairing successful", "Failed to pair", "org.bluez.Error",
                  "AlreadyExists", "not available"], timeout)
-            if hit != "not available":
+            if hit in ("Pairing successful", "AlreadyExists"):
                 break
-            # device fell out of bluez between scan and pair -- rescan briefly
-            self.send("scan on")
-            time.sleep(4)
-            self.send("scan off")
+            if is_bonded(mac):
+                hit = "Pairing successful"
+                break
+            time.sleep(3)  # scan is still on -- let the device re-resolve
         self.send(f"trust {mac}")
         time.sleep(0.5)
         self.send(f"connect {mac}")
@@ -132,9 +179,15 @@ class BtCtl:
 
     def remove(self, mac):
         self.send(f"disconnect {mac}")
-        time.sleep(1.0)
+        time.sleep(1.5)
         self.send(f"remove {mac}")
-        time.sleep(2.0)  # let bluetoothd fully drop it before we rediscover
+        time.sleep(3.0)  # let bluetoothd drop the bond
+        # RemoveDevice suppresses re-discovery briefly -- kick the scan so the
+        # (still-advertising) board reappears in the object tree.
+        self._scan(False)
+        time.sleep(0.5)
+        self._scan(True)
+        time.sleep(2.0)
 
     def close(self):
         try:
@@ -162,6 +215,12 @@ def ensure_paired(btctl, name_contains, known_mac=None, want_fresh=False):
         btctl.remove(mac)
         mac = None
 
+    # A bond we have no state record for (known_mac is None) is untrusted -- it
+    # may be from a different profile / HID descriptor. Drop it and re-pair.
+    if mac and known_mac is None and is_bonded(mac):
+        btctl.remove(mac)
+        mac = None
+
     if mac and is_bonded(mac):
         if not is_connected(mac):
             btctl.connect(mac)
@@ -171,12 +230,18 @@ def ensure_paired(btctl, name_contains, known_mac=None, want_fresh=False):
     if mac is None:
         mac = btctl.scan_find(name_contains)
         if mac is None:
+            # one hard reset of discovery, then a longer look
+            btctl._scan(False)
+            time.sleep(2)
+            btctl._scan(True)
+            mac = btctl.scan_find(name_contains, timeout=90)
+        if mac is None:
             raise RuntimeError(
                 f"no BLE device named ~{name_contains!r} found to pair "
                 "(is the board powered and advertising? check `bluetoothctl scan on`)")
 
     btctl.pair(mac)
-    for _ in range(8):
+    for _ in range(12):
         if is_bonded(mac):
             break
         time.sleep(1)
@@ -185,7 +250,7 @@ def ensure_paired(btctl, name_contains, known_mac=None, want_fresh=False):
             f"pairing {mac} did not complete (bluetoothd needs the agent this "
             f"session holds; check `journalctl -u bluetooth`). Last output:\n{btctl._tail(40)}")
 
-    for _ in range(10):
+    for _ in range(12):
         if is_connected(mac):
             return mac
         btctl.connect(mac)

@@ -13,17 +13,19 @@ import pathlib
 from . import latency
 
 
-def run_sweep(dev, cap, cfg, *, board, profile, lib_describe="", quick=False):
+def run_sweep(serial, cap, cfg, *, board, profile, lib_describe="", quick=False):
+    """serial = the SerialDev (hil_runner command channel); cap = the Capture
+    wrapping the DUT's evdev node."""
     n = 40 if quick else 200
     gaps = [0, 3000, 10000] if quick else [0, 1000, 2000, 5000, 10000, 20000]
 
     peer = {}
     try:
-        peer = dev.peer_info()
+        peer = serial.peer_info()
     except Exception as e:  # noqa: BLE001
         peer = {"error": str(e)}
     try:
-        sizes = dev.report_sizes()
+        sizes = serial.report_sizes()
     except Exception as e:  # noqa: BLE001
         sizes = {"error": str(e)}
 
@@ -45,9 +47,9 @@ def run_sweep(dev, cap, cfg, *, board, profile, lib_describe="", quick=False):
         "conn_latency": peer.get("latency"),
         "conn_timeout_ms": peer.get("timeout_ms"),
         "mtu": peer.get("mtu"),
-        "ping_rtt_ms": latency.ping_rtt(dev, n=30),
-        "latency_ms": {k: latency.input_latency(dev, cap, k, cfg, n=n) for k in kinds},
-        "burst": [latency.burst_rate(dev, cap, count=300 if quick else 500, gap_us=g)
+        "ping_rtt_ms": latency.ping_rtt(serial, n=30),
+        "latency_ms": {k: latency.input_latency(serial, cap, k, cfg, n=n) for k in kinds},
+        "burst": [latency.burst_rate(serial, cap, count=300 if quick else 500, gap_us=g)
                   for g in gaps],
     }
 

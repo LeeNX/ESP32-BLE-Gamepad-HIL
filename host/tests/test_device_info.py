@@ -1,8 +1,9 @@
 """The GATT side: Device Information (0x180A) + PnP ID (0x2A50).
 
 These characteristics stay readable by a generic GATT client even after BlueZ
-bridges the HID service into the kernel, so the host reads them with bleak and
-checks they match what the firmware configured (echoed via `DIS?` / `PNP?`).
+bridges the HID service into the kernel, so the host reads them straight off the
+existing BlueZ connection (D-Bus, via hil.gatt) and checks they match what the
+firmware configured (echoed via `DIS?` / `PNP?`).
 """
 
 import pytest

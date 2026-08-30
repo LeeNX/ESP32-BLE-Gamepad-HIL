@@ -38,7 +38,13 @@ STAMP=$(date +%Y%m%d-%H%M%S)
 tag="${BOARD}-${PROFILE}-${STAMP}"
 xml="results/junit-${tag}.xml"
 rc=0
-"$VENV/bin/pytest" --bundle "$BUNDLE" --board "$BOARD" --profile "$PROFILE" \
+# Pin rootdir/ini explicitly: the bundle dir passed via --bundle is an absolute
+# path outside the repo, and pytest's first-pass arg parse (before conftest is
+# loaded) treats it as a positional test path -> rootdir discovery would walk
+# up from ~/hil-bundles/ and never find this pytest.ini, so conftest.py (which
+# defines --bundle) would never load.
+"$VENV/bin/pytest" -c "$REPO/pytest.ini" --rootdir "$REPO" "$REPO/host/tests" \
+  --bundle "$BUNDLE" --board "$BOARD" --profile "$PROFILE" \
   --junit-xml="$xml" "${PYTEST_EXTRA[@]}" 2>&1 | tee "results/log-${tag}.txt" || rc=$?
 "$VENV/bin/python" host/hil/summarize.py "$xml" "results/summary-${tag}.md" || rc=$?
 cp "results/summary-${tag}.md" results/summary.md

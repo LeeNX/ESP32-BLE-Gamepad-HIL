@@ -191,9 +191,11 @@ def bt_mac(rigcfg, connected_dut, btctl, pytestconfig):
     state = _load_state()
     prev = state.get(name, {})
     # A profile change alters the HID report descriptor, which the host has
-    # cached against the old bond -> must re-pair.
+    # cached against the old bond -> must re-pair. So does a state record that
+    # doesn't confirm the current profile (or ensure_paired finding an
+    # untracked bond).
     want_fresh = (pytestconfig.getoption("repair")
-                  or prev.get("profile") not in (None, rigcfg["profile"]))
+                  or (bool(prev) and prev.get("profile") != rigcfg["profile"]))
 
     if pytestconfig.getoption("no_pair") and prev.get("mac") and not want_fresh:
         return prev["mac"]
@@ -230,12 +232,12 @@ def all_nodes(rigcfg, bt_mac):
 # --- GATT / Device Information -------------------------------------------
 @pytest.fixture(scope="session")
 def gatt():
-    """The hil.gatt module, with bleak confirmed importable (skip otherwise)."""
+    """The hil.gatt module, with dbus-fast confirmed importable (skip otherwise)."""
     from hil import gatt as _gatt
     try:
-        import bleak  # noqa: F401
+        import dbus_fast  # noqa: F401
     except ImportError as e:
-        pytest.skip(f"bleak not installed -- GATT reads unavailable: {e}")
+        pytest.skip(f"dbus-fast not installed -- GATT reads unavailable: {e}")
     return _gatt
 
 
