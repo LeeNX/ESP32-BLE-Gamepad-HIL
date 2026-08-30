@@ -37,10 +37,12 @@ id "$TARGET_USER" >/dev/null 2>&1 || { echo "no such user: $TARGET_USER" >&2; ex
 echo "== apt deps"
 apt-get update -qq
 apt-get install -y --no-install-recommends \
-  bluez rfkill \
+  bluez rfkill upower \
   python3-venv python3-dev build-essential \
   git rsync openssh-client \
   locales-all
+# upower: userland battery cross-check (test_battery.py). It reads BlueZ's
+# org.bluez.Battery1 interface, which the tests also check directly via D-Bus.
 # locales-all: sshd forwards the operator's LANG/LC_* (a Mac sends
 # LC_ALL=en_US.UTF-8) and bash/python warn if that locale isn't built. Shipping
 # every locale is simplest for a box many people ssh into; pin the node's own

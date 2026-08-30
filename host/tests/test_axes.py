@@ -31,7 +31,11 @@ def axis_sweep(connected_dut, gamepad):
     lo, hi = cfg["axesMin"], cfg["axesMax"]
     span = hi - lo
     probes = [lo + int(span * f) for f in (0.15, 0.5, 0.85)]
-    baseline = 0 if lo <= 0 <= hi else lo
+    # For a signed axis the 0.5 probe lands on 0 -- which is also the natural
+    # baseline, so commanding it produces no event. Baseline from lo instead so
+    # every probe is a real change.
+    baseline = lo
+    probes = [p for p in probes if p != baseline]
 
     result = {}
     for tok in cfg["axes"]:

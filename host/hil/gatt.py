@@ -144,6 +144,27 @@ def read_power_state(mac):
     return _decode_power_state(raw)
 
 
+async def _battery1(mac):
+    """org.bluez.Battery1.Percentage -- what BlueZ ingested from the Battery
+    Service, and what UPower in turn consumes. None if the interface is absent."""
+    bus = await _connect_bus()
+    try:
+        path = _dev_path(mac)
+        obj = bus.get_proxy_object(BLUEZ, path, await bus.introspect(BLUEZ, path))
+        try:
+            b1 = obj.get_interface("org.bluez.Battery1")
+        except Exception:
+            return None
+        return int(await b1.get_percentage())
+    finally:
+        bus.disconnect()
+
+
+def read_battery_bluez(mac):
+    """Blocking: BlueZ's Battery1.Percentage (int) or None."""
+    return asyncio.run(_battery1(mac))
+
+
 def read_battery_upower(mac):
     """Independent battery-% cross-check via UPower (no BLE code). Returns an
     int percentage or None. See LinuxHIDTesting.md "Battery level via upower"."""

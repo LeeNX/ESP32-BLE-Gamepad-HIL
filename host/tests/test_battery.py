@@ -16,16 +16,30 @@ LEVELS = [0, 1, 42, 99, 100]
 def test_battery_level_roundtrips(connected_dut, gatt, bt_mac, level):
     connected_dut.battery(level)
     time.sleep(1.0)  # let the notification propagate to BlueZ
-    assert gatt.read_battery_level(bt_mac) == level
+    assert gatt.read_battery_level(bt_mac) == level          # raw 0x2A19 read
+    assert gatt.read_battery_bluez(bt_mac) == level          # BlueZ Battery1 ingested it
 
 
-def test_battery_level_matches_upower(connected_dut, gatt, bt_mac):
-    connected_dut.battery(77)
+def test_battery_level_userland(connected_dut, gatt, bt_mac):
+    """Battery reaches Linux userland. This library's battery is the BLE Battery
+    Service (not a HID battery usage), so it surfaces via BlueZ's Battery1
+    D-Bus interface (-> UPower where installed) and NOT in
+    /sys/class/power_supply/hid-*."""
+    import pathlib
+
+    connected_dut.battery(63)
     time.sleep(1.5)
+    assert gatt.read_battery_bluez(bt_mac) == 63
+
     up = gatt.read_battery_upower(bt_mac)
-    if up is None:
-        pytest.skip("UPower does not list this device")
-    assert up == 77
+    if up is not None:            # UPower present -> must agree with BlueZ
+        assert up == 63
+    else:
+        print("UPower not installed -- Battery1 D-Bus check stands alone")
+
+    hid_ps = [p for p in pathlib.Path("/sys/class/power_supply").glob("*")
+              if bt_mac.replace(":", "-").lower() in p.name.lower()]
+    assert not hid_ps, f"unexpected /sys/class/power_supply entry: {hid_ps}"
 
 
 def test_battery_level_out_of_range_rejected(connected_dut):

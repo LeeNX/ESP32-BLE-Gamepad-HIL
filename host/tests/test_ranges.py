@@ -112,11 +112,20 @@ def test_minimal_profile_is_minimal(connected_dut, gamepad):
     assert not abs_codes & HAT_ABS_CODES
 
 
-def test_maxbtn_profile_surfaces_128_buttons(connected_dut, gamepad):
+def test_maxbtn_button_ceiling(connected_dut, gamepad):
+    """The library advertises 128 buttons, but Linux's hid-input maps a
+    gamepad-application Button usage to `BTN_GAMEPAD + n` and runs out of the
+    named gamepad/joystick key block at 0x17e -- so a host sees ~79 buttons,
+    not 128. Pin that as the known ceiling (a game using evdev/SDL sees the
+    same); test_buttons::test_buttons_beyond_80 covers the dropped ones."""
     cfg = connected_dut.config()
     if cfg["profile"] != "maxbtn":
         pytest.skip("not the maxbtn profile")
     dev, _ = gamepad
     assert cfg["buttons"] == 128
-    key_codes = dev.capabilities().get(ecodes.EV_KEY, [])
-    assert len(key_codes) >= 128
+    key_codes = sorted(dev.capabilities().get(ecodes.EV_KEY, []))
+    print(f"maxbtn: {len(key_codes)} evdev key codes, "
+          f"0x{key_codes[0]:x}..0x{key_codes[-1]:x}")
+    assert 64 <= len(key_codes) <= 128
+    assert key_codes[0] == ecodes.BTN_GAMEPAD  # 0x130 / 304
+    assert len(key_codes) < 100  # the finding: nowhere near 128

@@ -73,8 +73,18 @@ class BtCtl:
         for cmd in ("power on", "agent NoInputNoOutput", "default-agent"):
             self.send(cmd)
             time.sleep(0.3)
-        self.send("scan on")   # stays on until close() -- see module docstring
+        self._scan(True)   # stays on until close() -- see module docstring
         time.sleep(1.5)
+
+    def _scan(self, on):
+        self.send("scan on" if on else "scan off")
+
+    def _ensure_scanning(self):
+        """BlueZ discovery can stop on its own; re-arm it if it has."""
+        out = _run(["bluetoothctl", "show"]).stdout
+        if "Discovering: yes" not in out:
+            self._scan(True)
+            time.sleep(2)
 
     def _pump(self):
         """Read raw bytes (agent prompts have no trailing newline, so line
@@ -125,14 +135,18 @@ class BtCtl:
             time.sleep(0.3)
         return None
 
-    def scan_find(self, name_contains, timeout=35):
-        """Wait until `bluetoothctl devices` lists a match. Discovery is already
-        running; only trust the devices list, never scrollback."""
+    def scan_find(self, name_contains, timeout=70):
+        """Wait until `bluetoothctl devices` lists a match, re-arming discovery
+        as needed. Only trust the devices list, never scrollback."""
         deadline = time.time() + timeout
+        last_kick = 0.0
         while time.time() < deadline:
             for mac, nm in known_devices().items():
                 if name_contains in nm:
                     return mac
+            if time.time() - last_kick > 10:
+                self._ensure_scanning()
+                last_kick = time.time()
             time.sleep(1.5)
         return None
 
@@ -165,9 +179,15 @@ class BtCtl:
 
     def remove(self, mac):
         self.send(f"disconnect {mac}")
-        time.sleep(1.0)
+        time.sleep(1.5)
         self.send(f"remove {mac}")
-        time.sleep(2.0)  # let bluetoothd drop the bond before we rediscover
+        time.sleep(3.0)  # let bluetoothd drop the bond
+        # RemoveDevice suppresses re-discovery briefly -- kick the scan so the
+        # (still-advertising) board reappears in the object tree.
+        self._scan(False)
+        time.sleep(0.5)
+        self._scan(True)
+        time.sleep(2.0)
 
     def close(self):
         try:
@@ -195,6 +215,12 @@ def ensure_paired(btctl, name_contains, known_mac=None, want_fresh=False):
         btctl.remove(mac)
         mac = None
 
+    # A bond we have no state record for (known_mac is None) is untrusted -- it
+    # may be from a different profile / HID descriptor. Drop it and re-pair.
+    if mac and known_mac is None and is_bonded(mac):
+        btctl.remove(mac)
+        mac = None
+
     if mac and is_bonded(mac):
         if not is_connected(mac):
             btctl.connect(mac)
@@ -203,6 +229,12 @@ def ensure_paired(btctl, name_contains, known_mac=None, want_fresh=False):
 
     if mac is None:
         mac = btctl.scan_find(name_contains)
+        if mac is None:
+            # one hard reset of discovery, then a longer look
+            btctl._scan(False)
+            time.sleep(2)
+            btctl._scan(True)
+            mac = btctl.scan_find(name_contains, timeout=90)
         if mac is None:
             raise RuntimeError(
                 f"no BLE device named ~{name_contains!r} found to pair "
