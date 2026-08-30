@@ -1,0 +1,4 @@
+# taplo is used for TOML *lint* (syntax) only -- see .pre-commit-config.yaml.
+# Formatting is intentionally not enforced: `taplo fmt` collapses the aligned
+# end-of-line comments that make hil_config.toml readable.
+exclude = ["bundles/**", "results/**", "firmware/.pio/**"]

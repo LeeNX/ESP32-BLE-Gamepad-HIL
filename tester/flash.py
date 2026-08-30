@@ -61,11 +61,22 @@ def main():
     # default reset-before / hard-reset-after are the esptool defaults; naming
     # them explicitly just trips deprecation warnings across the 4.x/5.x split.
     cmd = esptool_cmd() + [
-        "--chip", chip, "--port", args.port, "--baud", str(baud),
-        "write_flash", *write_args,
+        "--chip",
+        chip,
+        "--port",
+        args.port,
+        "--baud",
+        str(baud),
+        "write_flash",
+        *write_args,
     ]
-    print("flash:", manifest["board"], manifest["profile"],
-          manifest["lib_describe"], f"({chip} @ {baud})")
+    print(
+        "flash:",
+        manifest["board"],
+        manifest["profile"],
+        manifest["lib_describe"],
+        f"({chip} @ {baud})",
+    )
 
     for attempt in range(1, args.retries + 1):
         r = subprocess.run(cmd)

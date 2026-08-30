@@ -7,9 +7,23 @@ import serial
 
 # First token of every command reply. The boot banner ("HIL hil_runner ready
 # ...") is deliberately not here so it gets skipped like any other stray line.
-REPLY_PREFIXES = ("OK", "ERR", "PONG", "CONN", "ID", "CONFIG",
-                  "DIS", "PNP", "RSIZE", "RMAP", "PEER", "BURST", "T",
-                  "FEATURE", "OUTPUT")
+REPLY_PREFIXES = (
+    "OK",
+    "ERR",
+    "PONG",
+    "CONN",
+    "ID",
+    "CONFIG",
+    "DIS",
+    "PNP",
+    "RSIZE",
+    "RMAP",
+    "PEER",
+    "BURST",
+    "T",
+    "FEATURE",
+    "OUTPUT",
+)
 
 
 class SerialError(RuntimeError):
@@ -37,8 +51,9 @@ class SerialDev:
             try:
                 # dsrdtr/rtscts off so opening a USB-CDC port doesn't block on
                 # modem lines and doesn't pulse a UART-bridge board into reset.
-                result[0] = serial.Serial(self.port, self.baud, timeout=0.2,
-                                          dsrdtr=False, rtscts=False)
+                result[0] = serial.Serial(
+                    self.port, self.baud, timeout=0.2, dsrdtr=False, rtscts=False
+                )
             except (serial.SerialException, OSError) as e:  # noqa: BLE001
                 last[0] = repr(e)
 

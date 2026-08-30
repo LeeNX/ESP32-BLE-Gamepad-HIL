@@ -57,10 +57,9 @@ def test_button_codes_are_known_gamepad_keys(button_sweep):
     (0x120..0x17e). Not asserting the exact code per button (kernel-version
     sensitive), just that they land in that space."""
     mapping, _ = button_sweep
-    ok_lo = ecodes.BTN_JOYSTICK                 # 0x120
-    ok_hi = ecodes.BTN_TRIGGER_HAPPY1 + 63      # 0x2ff -- generous upper bound
-    strays = {i: c for i, c in mapping.items()
-              if not (ok_lo <= c <= ok_hi)}
+    ok_lo = ecodes.BTN_JOYSTICK  # 0x120
+    ok_hi = ecodes.BTN_TRIGGER_HAPPY1 + 63  # 0x2ff -- generous upper bound
+    strays = {i: c for i, c in mapping.items() if not (ok_lo <= c <= ok_hi)}
     assert not strays, f"buttons mapped outside the gamepad key range: {strays}"
 
 
@@ -72,12 +71,15 @@ def test_buttons_beyond_80(button_sweep, connected_dut):
         pytest.skip("profile has <=80 buttons")
     mapping, problems = button_sweep
     high = {i: c for i, c in mapping.items() if i > 80}
-    missing = [i for i in range(81, connected_dut.config()["buttons"] + 1)
-               if i not in high or high[i] == 0]
+    missing = [
+        i for i in range(81, connected_dut.config()["buttons"] + 1) if i not in high or high[i] == 0
+    ]
     if missing:
-        pytest.xfail(f"Linux gave no usable key code to buttons {missing[:8]}"
-                     f"{'...' if len(missing) > 8 else ''} "
-                     f"(HID Button usages past the BTN_TRIGGER_HAPPY block)")
+        pytest.xfail(
+            f"Linux gave no usable key code to buttons {missing[:8]}"
+            f"{'...' if len(missing) > 8 else ''} "
+            f"(HID Button usages past the BTN_TRIGGER_HAPPY block)"
+        )
     assert len(set(high.values())) == len(high), "high buttons collide on codes"
 
 

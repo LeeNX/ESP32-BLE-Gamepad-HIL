@@ -14,11 +14,6 @@ import time
 
 import pytest
 
-try:
-    import tomllib  # py3.11+
-except ModuleNotFoundError:  # pragma: no cover
-    import tomli as tomllib
-
 REPO = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(REPO / "host"))
 from hil import bluetooth  # noqa: E402
@@ -31,27 +26,43 @@ STATE = pathlib.Path.home() / ".cache" / "esp32-hil" / "state.json"
 
 def pytest_addoption(parser):
     parser.addoption("--board", default=os.environ.get("HIL_BOARD", "esp32dev"))
-    parser.addoption("--port", default=os.environ.get("HIL_PORT"),
-                     help="serial command channel to hil_runner")
-    parser.addoption("--flash-port", default=os.environ.get("HIL_FLASH_PORT"),
-                     help="port esptool/pio flash on, if different from --port "
-                          "(esp32-c3: native USB to flash, UART bridge to talk)")
+    parser.addoption(
+        "--port", default=os.environ.get("HIL_PORT"), help="serial command channel to hil_runner"
+    )
+    parser.addoption(
+        "--flash-port",
+        default=os.environ.get("HIL_FLASH_PORT"),
+        help="port esptool/pio flash on, if different from --port "
+        "(esp32-c3: native USB to flash, UART bridge to talk)",
+    )
     parser.addoption("--profile", default=os.environ.get("HIL_PROFILE"))
-    parser.addoption("--no-flash", action="store_true",
-                     help="skip building/flashing; use firmware already on the board")
-    parser.addoption("--bundle", default=os.environ.get("HIL_BUNDLE"),
-                     help="flash a prebuilt firmware bundle (builder/make_bundle.py) "
-                          "with esptool instead of running PlatformIO")
-    parser.addoption("--no-pair", action="store_true",
-                     help="assume the DUT is already bonded+connected")
-    parser.addoption("--repair", action="store_true",
-                     help="drop the existing bond and pair fresh")
-    parser.addoption("--bench", action="store_true",
-                     help="run the slow latency/throughput benchmark tests "
-                          "(test_latency.py) and let bench.py record results")
-    parser.addoption("--update-golden", action="store_true",
-                     help="rewrite firmware/golden/<profile>.hiddesc from the "
-                          "live device instead of asserting against it")
+    parser.addoption(
+        "--no-flash",
+        action="store_true",
+        help="skip building/flashing; use firmware already on the board",
+    )
+    parser.addoption(
+        "--bundle",
+        default=os.environ.get("HIL_BUNDLE"),
+        help="flash a prebuilt firmware bundle (builder/make_bundle.py) "
+        "with esptool instead of running PlatformIO",
+    )
+    parser.addoption(
+        "--no-pair", action="store_true", help="assume the DUT is already bonded+connected"
+    )
+    parser.addoption("--repair", action="store_true", help="drop the existing bond and pair fresh")
+    parser.addoption(
+        "--bench",
+        action="store_true",
+        help="run the slow latency/throughput benchmark tests "
+        "(test_latency.py) and let bench.py record results",
+    )
+    parser.addoption(
+        "--update-golden",
+        action="store_true",
+        help="rewrite firmware/golden/<profile>.hiddesc from the "
+        "live device instead of asserting against it",
+    )
 
 
 # --- config -----------------------------------------------------------------
@@ -71,20 +82,25 @@ def rigcfg(pytestconfig):
     # flash_port defaults to the command port -- only boards whose flash channel
     # and command channel are physically different interfaces set it (esp32-c3
     # with an external UART bridge; see README "ESP32-C3 serial bridge").
-    b["flash_port"] = (pytestconfig.getoption("flash_port")
-                       or b.get("flash_port") or b["port"])
+    b["flash_port"] = pytestconfig.getoption("flash_port") or b.get("flash_port") or b["port"]
     b["device_name"] = f"{cfg['rig']['device_name']} {board}"
     for key in ("port", "flash_port"):
         if "CHANGE-ME" in b[key]:
-            pytest.exit(f"set {key} for board '{board}' in hil_config.toml "
-                        f"(or pass --{key.replace('_', '-')}); got {b[key]!r}")
+            pytest.exit(
+                f"set {key} for board '{board}' in hil_config.toml "
+                f"(or pass --{key.replace('_', '-')}); got {b[key]!r}"
+            )
     return b
 
 
 # --- firmware --------------------------------------------------------------
 PROFILE_ENV_SUFFIX = {
-    "default": "", "signed-axes": "-signed", "specials": "-specials",
-    "minimal": "-minimal", "maxbtn": "-maxbtn", "reports": "-reports",
+    "default": "",
+    "signed-axes": "-signed",
+    "specials": "-specials",
+    "minimal": "-minimal",
+    "maxbtn": "-maxbtn",
+    "reports": "-reports",
 }
 
 
@@ -93,8 +109,10 @@ def _flash_bundle(bundle_dir, port):
     bundle = pathlib.Path(bundle_dir)
     manifest = json.loads((bundle / "manifest.json").read_text())
     cmd = [sys.executable, str(REPO / "tester" / "flash.py"), str(bundle), "--port", port]
-    print(f"\n[firmware] bundle {bundle.name}  ({manifest['lib_describe']}, "
-          f"profile={manifest['profile']})")
+    print(
+        f"\n[firmware] bundle {bundle.name}  ({manifest['lib_describe']}, "
+        f"profile={manifest['profile']})"
+    )
     r = subprocess.run(cmd)
     if r.returncode != 0:
         pytest.exit(f"flashing bundle {bundle} failed")
@@ -112,14 +130,26 @@ def firmware(rigcfg, pytestconfig):
     if bundle:
         manifest = _flash_bundle(bundle, rigcfg["flash_port"])
         if manifest["board"] != rigcfg["name"] or manifest["profile"] != rigcfg["profile"]:
-            pytest.exit(f"bundle is {manifest['board']}/{manifest['profile']}, "
-                        f"expected {rigcfg['name']}/{rigcfg['profile']}")
+            pytest.exit(
+                f"bundle is {manifest['board']}/{manifest['profile']}, "
+                f"expected {rigcfg['name']}/{rigcfg['profile']}"
+            )
         time.sleep(2)
         return env_name
 
     pio = rigcfg["rig"]["pio"]
-    cmd = [pio, "run", "-e", env_name, "-t", "upload",
-           "--upload-port", rigcfg["flash_port"], "-d", str(REPO / "firmware")]
+    cmd = [
+        pio,
+        "run",
+        "-e",
+        env_name,
+        "-t",
+        "upload",
+        "--upload-port",
+        rigcfg["flash_port"],
+        "-d",
+        str(REPO / "firmware"),
+    ]
     # platformio.ini resolves the library-under-test via symlink://${sysenv.HIL_LIB_DIR}
     env = {**os.environ, "HIL_LIB_DIR": rigcfg["rig"].get("lib_dir", "")}
     print(f"\n[firmware] {' '.join(cmd)}")
@@ -149,8 +179,10 @@ def dut(rigcfg, firmware):
     want = rigcfg["profile"]
     if cfg.get("profile") != want:
         d.close()
-        pytest.exit(f"firmware profile {cfg.get('profile')!r} != expected {want!r} "
-                    f"(flash the right env or fix hil_config.toml)")
+        pytest.exit(
+            f"firmware profile {cfg.get('profile')!r} != expected {want!r} "
+            f"(flash the right env or fix hil_config.toml)"
+        )
     yield d
     d.close()
 
@@ -163,8 +195,10 @@ def connected_dut(dut):
     # no bounds check -- an over-large descriptor corrupts the stack here. If the
     # firmware stops answering right after BEGIN, that's the most likely cause.
     if not dut.ping():
-        pytest.exit("firmware stopped responding right after BEGIN -- likely a HID "
-                    "report descriptor overflow in bleGamepad.begin() for this profile")
+        pytest.exit(
+            "firmware stopped responding right after BEGIN -- likely a HID "
+            "report descriptor overflow in bleGamepad.begin() for this profile"
+        )
     return dut
 
 
@@ -197,14 +231,14 @@ def bt_mac(rigcfg, connected_dut, btctl, pytestconfig):
     # cached against the old bond -> must re-pair. So does a state record that
     # doesn't confirm the current profile (or ensure_paired finding an
     # untracked bond).
-    want_fresh = (pytestconfig.getoption("repair")
-                  or (bool(prev) and prev.get("profile") != rigcfg["profile"]))
+    want_fresh = pytestconfig.getoption("repair") or (
+        bool(prev) and prev.get("profile") != rigcfg["profile"]
+    )
 
     if pytestconfig.getoption("no_pair") and prev.get("mac") and not want_fresh:
         return prev["mac"]
 
-    mac = bluetooth.ensure_paired(btctl, name, known_mac=prev.get("mac"),
-                                  want_fresh=want_fresh)
+    mac = bluetooth.ensure_paired(btctl, name, known_mac=prev.get("mac"), want_fresh=want_fresh)
     connected_dut.wait_connected()
     state[name] = {"mac": mac, "profile": rigcfg["profile"]}
     _save_state(state)
@@ -269,6 +303,7 @@ def all_nodes(rigcfg, bt_mac):
 def gatt():
     """The hil.gatt module, with dbus-fast confirmed importable (skip otherwise)."""
     from hil import gatt as _gatt
+
     try:
         import dbus_fast  # noqa: F401
     except ImportError as e:
@@ -298,9 +333,13 @@ def _reset(request):
         dut = request.getfixturevalue("connected_dut")
         _, cap = request.getfixturevalue("gamepad")
         if not _evdev_alive(cap.dev):
-            _recover_link(request.getfixturevalue("rigcfg"),
-                          request.getfixturevalue("btctl"), dut, cap,
-                          request.getfixturevalue("bt_mac"))
+            _recover_link(
+                request.getfixturevalue("rigcfg"),
+                request.getfixturevalue("btctl"),
+                dut,
+                cap,
+                request.getfixturevalue("bt_mac"),
+            )
         dut.reset()
         cap.drain()
     yield

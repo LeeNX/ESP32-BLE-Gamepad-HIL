@@ -42,8 +42,7 @@ def test_feature_device_to_host(connected_dut, feat):
     connected_dut.set_feature_report(payload)
     with hidraw.HidRaw(node) as h:
         got = h.get_feature(rid, length)
-    assert got[:length + USABLE] == payload[:length + USABLE], \
-        f"{got.hex()} vs {payload.hex()}"
+    assert got[: length + USABLE] == payload[: length + USABLE], f"{got.hex()} vs {payload.hex()}"
 
 
 def test_feature_host_to_device(connected_dut, feat):
@@ -53,8 +52,9 @@ def test_feature_host_to_device(connected_dut, feat):
         h.set_feature(rid, payload)
     recv, data = connected_dut.feature_report()
     assert recv, "firmware isFeatureReceived() stayed false after host write"
-    assert data[:length + USABLE] == payload[:length + USABLE], \
+    assert data[: length + USABLE] == payload[: length + USABLE], (
         f"device saw {data.hex()} vs {payload.hex()}"
+    )
 
 
 def test_feature_roundtrip_both_ways(connected_dut, feat):
@@ -70,9 +70,11 @@ def test_feature_roundtrip_both_ways(connected_dut, feat):
     assert recv and data[:n] == b[:n]
 
 
-@pytest.mark.xfail(reason="last byte of setFeatureReportLength() does not "
-                          "round-trip -- host reads length-1 + trailing 0",
-                   strict=True)
+@pytest.mark.xfail(
+    reason="last byte of setFeatureReportLength() does not "
+    "round-trip -- host reads length-1 + trailing 0",
+    strict=True,
+)
 def test_feature_full_length_roundtrips(connected_dut, feat):
     node, length, rid = feat
     payload = bytes((0x30 + i) & 0xFF for i in range(length))

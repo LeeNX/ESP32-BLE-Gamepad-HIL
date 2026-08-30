@@ -13,8 +13,12 @@ ALL_AXES = ["x", "y", "z", "rx", "ry", "rz", "s1", "s2"]
 PROFILE_LAYOUT = {
     "default": dict(buttons=64, hats=4, special="none", axes=ALL_AXES),
     "signed-axes": dict(buttons=64, hats=4, special="none", axes=ALL_AXES),
-    "specials": dict(buttons=16, hats=1, axes=ALL_AXES,
-                     special="start,select,menu,home,back,volinc,voldec,volmute"),
+    "specials": dict(
+        buttons=16,
+        hats=1,
+        axes=ALL_AXES,
+        special="start,select,menu,home,back,volinc,voldec,volmute",
+    ),
     "minimal": dict(buttons=1, hats=0, special="none", axes=["x"]),
     "maxbtn": dict(buttons=128, hats=0, special="none", axes=[]),
     "reports": dict(buttons=16, hats=0, special="none", axes=["x", "y"]),
@@ -37,7 +41,8 @@ def test_descriptor_within_buffer(connected_dut):
     sizes = connected_dut.report_sizes()
     assert 0 < sizes["descriptor"] <= 150, (
         f"HID report descriptor is {sizes['descriptor']} bytes -- "
-        f"tempHidReportDescriptor[150] overflow risk")
+        f"tempHidReportDescriptor[150] overflow risk"
+    )
     assert 0 < sizes["report"] <= 63, f"unexpected input report size {sizes['report']}"
 
 

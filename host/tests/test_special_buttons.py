@@ -10,8 +10,14 @@ import pytest
 from evdev import ecodes
 
 SPECIALS = {
-    0: "start", 1: "select", 2: "menu", 3: "home",
-    4: "back", 5: "volinc", 6: "voldec", 7: "volmute",
+    0: "start",
+    1: "select",
+    2: "menu",
+    3: "home",
+    4: "back",
+    5: "volinc",
+    6: "voldec",
+    7: "volmute",
 }
 DESKTOP = {0, 1, 2}  # expected on the gamepad node
 
@@ -69,8 +75,9 @@ def test_desktop_specials_on_gamepad_node(special_sweep, rigcfg):
 
 
 def test_all_specials_produce_exactly_one_event(special_sweep):
-    problems = [f"{r['name']}: {r['downs']}" for r in special_sweep.values()
-               if len(r["downs"]) != 1]
+    problems = [
+        f"{r['name']}: {r['downs']}" for r in special_sweep.values() if len(r["downs"]) != 1
+    ]
     assert not problems, "specials not producing exactly one key-down:\n" + "\n".join(problems)
 
 

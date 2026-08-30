@@ -18,8 +18,12 @@ from evdev import ecodes
 from hil.evdev_utils import HAT_ABS_CODES
 
 WELL_KNOWN = {
-    "x": ecodes.ABS_X, "y": ecodes.ABS_Y, "z": ecodes.ABS_Z,
-    "rx": ecodes.ABS_RX, "ry": ecodes.ABS_RY, "rz": ecodes.ABS_RZ,
+    "x": ecodes.ABS_X,
+    "y": ecodes.ABS_Y,
+    "z": ecodes.ABS_Z,
+    "rx": ecodes.ABS_RX,
+    "ry": ecodes.ABS_RY,
+    "rz": ecodes.ABS_RZ,
     "s1": ecodes.ABS_THROTTLE,
 }
 
@@ -51,8 +55,7 @@ def endpoints(connected_dut, gamepad):
             cap.collect(settle=0.15)
             cap.drain()
             connected_dut.axis(tok, cmd)
-            ch = {c: v for c, v in cap.abs_changes(cap.collect()).items()
-                  if c not in HAT_ABS_CODES}
+            ch = {c: v for c, v in cap.abs_changes(cap.collect()).items() if c not in HAT_ABS_CODES}
             seen[name] = (cmd, ch.get(code))
         out[tok] = {"absinfo": ai, "seen": seen}
     connected_dut.reset()
@@ -75,7 +78,8 @@ def test_axis_endpoints_land_at_absinfo_extremes(endpoints):
             elif abs(got - targets[name]) > tol:
                 problems.append(
                     f"{tok} {name}: commanded {cmd} -> evdev {got}, "
-                    f"expected ~{targets[name]} (+/-{tol:.0f})")
+                    f"expected ~{targets[name]} (+/-{tol:.0f})"
+                )
     assert not problems, "\n".join(problems)
 
 
@@ -96,7 +100,9 @@ def test_signed_axis_reaches_negative_rail(connected_dut, endpoints, rigcfg):
         lo_cmd, lo_evdev = d["seen"]["lo"]
         assert lo_cmd < 0
         if lo_evdev is not None:
-            assert lo_evdev < 0, f"{tok}: negative command {lo_cmd} -> non-negative evdev {lo_evdev}"
+            assert lo_evdev < 0, (
+                f"{tok}: negative command {lo_cmd} -> non-negative evdev {lo_evdev}"
+            )
 
 
 def test_minimal_profile_is_minimal(connected_dut, gamepad):
@@ -124,8 +130,7 @@ def test_maxbtn_button_ceiling(connected_dut, gamepad):
     dev, _ = gamepad
     assert cfg["buttons"] == 128
     key_codes = sorted(dev.capabilities().get(ecodes.EV_KEY, []))
-    print(f"maxbtn: {len(key_codes)} evdev key codes, "
-          f"0x{key_codes[0]:x}..0x{key_codes[-1]:x}")
+    print(f"maxbtn: {len(key_codes)} evdev key codes, 0x{key_codes[0]:x}..0x{key_codes[-1]:x}")
     assert 64 <= len(key_codes) <= 128
     assert key_codes[0] == ecodes.BTN_GAMEPAD  # 0x130 / 304
     assert len(key_codes) < 100  # the finding: nowhere near 128

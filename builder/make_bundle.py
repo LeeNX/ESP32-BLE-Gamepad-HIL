@@ -43,15 +43,19 @@ def extract_idedata(text):
 
 
 def git(lib_dir, *args):
-    return subprocess.run(["git", "-C", str(lib_dir), *args],
-                          capture_output=True, text=True).stdout.strip()
+    return subprocess.run(
+        ["git", "-C", str(lib_dir), *args], capture_output=True, text=True
+    ).stdout.strip()
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--build-dir", required=True, help=".pio/build/<env>")
-    ap.add_argument("--idedata", required=True,
-                    help="file with captured `pio run -t idedata` output, or - for stdin")
+    ap.add_argument(
+        "--idedata",
+        required=True,
+        help="file with captured `pio run -t idedata` output, or - for stdin",
+    )
     ap.add_argument("--env", required=True)
     ap.add_argument("--profile", required=True)
     ap.add_argument("--board", required=True)
@@ -65,8 +69,12 @@ def main():
     extra = extract_idedata(ide_text).get("extra", {})
 
     images = list(extra.get("flash_images", []))
-    images.append({"offset": extra.get("application_offset", "0x10000"),
-                   "path": str(build_dir / "firmware.bin")})
+    images.append(
+        {
+            "offset": extra.get("application_offset", "0x10000"),
+            "path": str(build_dir / "firmware.bin"),
+        }
+    )
 
     lib_sha = git(args.lib_dir, "rev-parse", "HEAD")
     lib_describe = git(args.lib_dir, "describe", "--tags", "--always", "--dirty") or lib_sha[:8]
@@ -81,12 +89,15 @@ def main():
             raise SystemExit(f"missing build artifact: {src}")
         dst = out / src.name
         shutil.copy2(src, dst)
-        manifest_images.append({
-            "offset": img["offset"] if str(img["offset"]).startswith("0x")
-                      else hex(int(img["offset"])),
-            "file": src.name,
-            "sha256": sha256(dst),
-        })
+        manifest_images.append(
+            {
+                "offset": img["offset"]
+                if str(img["offset"]).startswith("0x")
+                else hex(int(img["offset"])),
+                "file": src.name,
+                "sha256": sha256(dst),
+            }
+        )
 
     manifest = {
         "board": args.board,

@@ -46,9 +46,15 @@ class Stats(dict):
         def pct(p):
             return s[min(len(s) - 1, int(round(p / 100 * (len(s) - 1))))]
 
-        return cls(n=len(s), min=round(s[0], 3), p50=round(pct(50), 3),
-                   p90=round(pct(90), 3), p99=round(pct(99), 3),
-                   max=round(s[-1], 3), mean=round(statistics.fmean(s), 3))
+        return cls(
+            n=len(s),
+            min=round(s[0], 3),
+            p50=round(pct(50), 3),
+            p90=round(pct(90), 3),
+            p99=round(pct(99), 3),
+            max=round(s[-1], 3),
+            mean=round(statistics.fmean(s), 3),
+        )
 
 
 def ping_rtt(dev, n=50):
@@ -99,8 +105,7 @@ def input_latency(dev, cap, kind, cfg, n=200, settle=0.03):
         ble.append((t_evt - t_ok) * 1000)
         e2e.append((t_evt - t0) * 1000)
         time.sleep(settle)
-    return {"n": n, "dropped": dropped,
-            "ble": Stats.of(ble), "e2e": Stats.of(e2e)}
+    return {"n": n, "dropped": dropped, "ble": Stats.of(ble), "e2e": Stats.of(e2e)}
 
 
 def burst_rate(dev, cap, count=500, gap_us=0, button=1):
@@ -110,14 +115,14 @@ def burst_rate(dev, cap, count=500, gap_us=0, button=1):
     see clean_rate() for the meaningful number."""
     cap.drain()
     t0 = time.perf_counter()
-    fw_count, fw_us = dev.burst(button, count, gap_us,
-                                timeout=max(30.0, count * 0.05))
+    fw_count, fw_us = dev.burst(button, count, gap_us, timeout=max(30.0, count * 0.05))
     evs = cap.collect(settle=0.6, hard_timeout=max(8.0, count * 0.03))
     wall = time.perf_counter() - t0
     got = sum(1 for e in evs if e.type == ecodes.EV_KEY)
     expected = count + 1  # firmware sends one extra release at the end
     return {
-        "requested": count, "gap_us": gap_us,
+        "requested": count,
+        "gap_us": gap_us,
         "fw_send_hz": round(count / (fw_us / 1e6), 1) if fw_us else None,
         "host_transitions": got,
         "delivered_frac": round(got / expected, 3) if expected else 0.0,
@@ -141,16 +146,23 @@ def clean_rate(dev, cap, cfg, steps=40):
         # past ~15 is too sparse for a gamepad collection to use as a proxy).
         return {"curve": [], "clean_hz": None, "note": "no axis to measure"}
 
-    code = {"x": ecodes.ABS_X, "y": ecodes.ABS_Y, "z": ecodes.ABS_Z,
-            "rx": ecodes.ABS_RX, "ry": ecodes.ABS_RY, "rz": ecodes.ABS_RZ,
-            "s1": ecodes.ABS_THROTTLE}.get(axes[0])
+    code = {
+        "x": ecodes.ABS_X,
+        "y": ecodes.ABS_Y,
+        "z": ecodes.ABS_Z,
+        "rx": ecodes.ABS_RX,
+        "ry": ecodes.ABS_RY,
+        "rz": ecodes.ABS_RZ,
+        "s1": ecodes.ABS_THROTTLE,
+    }.get(axes[0])
     lo, hi = cfg["axesMin"], cfg["axesMax"]
     span = hi - lo
     step = max(1, span // (steps + 4))
     send = lambda i: dev.axis(axes[0], lo + (i + 1) * step)  # noqa: E731
-    rest = lambda: dev.axis(axes[0], lo)                     # noqa: E731
-    count_seen = lambda evs: len({e.value for e in evs       # noqa: E731
-                                  if e.type == ecodes.EV_ABS and e.code == code})
+    rest = lambda: dev.axis(axes[0], lo)  # noqa: E731
+    count_seen = lambda evs: len(  # noqa: E731
+        {e.value for e in evs if e.type == ecodes.EV_ABS and e.code == code}
+    )
 
     curve = []
     best = None
@@ -169,8 +181,15 @@ def clean_rate(dev, cap, cfg, steps=40):
         span_s = ts[-1] - ts[0]
         rate = round((steps - 1) / span_s, 1) if span_s > 0 else None
         delivered = round(seen / steps, 3)
-        curve.append({"gap_ms": gap_ms, "rate_hz": rate,
-                      "delivered_frac": delivered, "seen": seen, "sent": steps})
+        curve.append(
+            {
+                "gap_ms": gap_ms,
+                "rate_hz": rate,
+                "delivered_frac": delivered,
+                "seen": seen,
+                "sent": steps,
+            }
+        )
         if delivered >= 0.95 and rate and (best is None or rate > best):
             best = rate
         if delivered < 0.6:

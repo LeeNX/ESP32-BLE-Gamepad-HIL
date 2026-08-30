@@ -62,8 +62,11 @@ class BtCtl:
 
     def __init__(self):
         self.p = subprocess.Popen(
-            ["bluetoothctl"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, bufsize=0,
+            ["bluetoothctl"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=0,
         )
         self._buf = deque(maxlen=8000)
         self._lock = threading.Lock()
@@ -73,7 +76,7 @@ class BtCtl:
         for cmd in ("power on", "agent NoInputNoOutput", "default-agent"):
             self.send(cmd)
             time.sleep(0.3)
-        self._scan(True)   # stays on until close() -- see module docstring
+        self._scan(True)  # stays on until close() -- see module docstring
         time.sleep(1.5)
 
     def _scan(self, on):
@@ -157,8 +160,15 @@ class BtCtl:
         for attempt in range(4):
             self.send(f"pair {mac}")
             hit = self.wait_for(
-                ["Pairing successful", "Failed to pair", "org.bluez.Error",
-                 "AlreadyExists", "not available"], timeout)
+                [
+                    "Pairing successful",
+                    "Failed to pair",
+                    "org.bluez.Error",
+                    "AlreadyExists",
+                    "not available",
+                ],
+                timeout,
+            )
             if hit in ("Pairing successful", "AlreadyExists"):
                 break
             if is_bonded(mac):
@@ -168,14 +178,14 @@ class BtCtl:
         self.send(f"trust {mac}")
         time.sleep(0.5)
         self.send(f"connect {mac}")
-        self.wait_for(["Connection successful", "ServicesResolved: yes",
-                       "Failed to connect"], 20)
+        self.wait_for(["Connection successful", "ServicesResolved: yes", "Failed to connect"], 20)
         return hit
 
     def connect(self, mac, timeout=20):
         self.send(f"connect {mac}")
-        return self.wait_for(["Connection successful", "ServicesResolved: yes",
-                              "Failed to connect"], timeout)
+        return self.wait_for(
+            ["Connection successful", "ServicesResolved: yes", "Failed to connect"], timeout
+        )
 
     def remove(self, mac):
         self.send(f"disconnect {mac}")
@@ -238,7 +248,8 @@ def ensure_paired(btctl, name_contains, known_mac=None, want_fresh=False):
         if mac is None:
             raise RuntimeError(
                 f"no BLE device named ~{name_contains!r} found to pair "
-                "(is the board powered and advertising? check `bluetoothctl scan on`)")
+                "(is the board powered and advertising? check `bluetoothctl scan on`)"
+            )
 
     btctl.pair(mac)
     for _ in range(12):
@@ -248,7 +259,8 @@ def ensure_paired(btctl, name_contains, known_mac=None, want_fresh=False):
     else:
         raise RuntimeError(
             f"pairing {mac} did not complete (bluetoothd needs the agent this "
-            f"session holds; check `journalctl -u bluetooth`). Last output:\n{btctl._tail(40)}")
+            f"session holds; check `journalctl -u bluetooth`). Last output:\n{btctl._tail(40)}"
+        )
 
     for _ in range(12):
         if is_connected(mac):

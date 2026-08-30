@@ -1,0 +1,28 @@
+# Tooling config only -- this project is a test harness, not a distributable
+# package (host/ is put on sys.path by conftest.py / pytest.ini, not installed).
+
+[tool.ruff]
+# host/ = pytest support lib, tester/ + builder/ = role scripts, conftest.py = fixtures
+target-version = "py310"          # tester still supports 3.10 via the tomli fallback
+line-length = 100
+extend-exclude = ["bundles", "results", "firmware/.pio"]
+
+[tool.ruff.lint]
+# Intentionally conservative for a first pass -- everything here is either
+# auto-fixable or a real bug. flake8-bugbear ("B"), flake8-simplify ("SIM")
+# and flake8-comprehensions ("C4") are good next steps once the team is used
+# to the gate.
+select = [
+    "E4", "E7", "E9",  # pycodestyle errors (not E501 -- the formatter owns line length)
+    "F",               # pyflakes
+    "W",               # pycodestyle warnings
+    "I",               # isort
+    "UP",              # pyupgrade
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["hil"]
+
+[tool.ruff.lint.per-file-ignores]
+# fixtures import after a sys.path.insert; that is the point of the file
+"conftest.py" = ["E402"]

@@ -24,6 +24,7 @@ def _cmd(args):
 def _pkg(name):
     try:
         from importlib.metadata import version
+
         return version(name)
     except Exception:
         return None
@@ -50,7 +51,7 @@ def _cpu_model():
 
 
 def _bluez_version():
-    v = _cmd(["bluetoothctl", "--version"])          # "bluetoothctl: 5.82"
+    v = _cmd(["bluetoothctl", "--version"])  # "bluetoothctl: 5.82"
     m = re.search(r"(\d+\.\d+)", v)
     return m.group(1) if m else (v or None)
 
@@ -59,8 +60,10 @@ def _adapter():
     out = _cmd(["bluetoothctl", "show"])
     name = re.search(r"Name:\s*(.+)", out)
     mfr = re.search(r"Manufacturer:.*\((\d+)\)", _cmd(["hciconfig", "-a"]))
-    return {"name": name.group(1).strip() if name else None,
-            "manufacturer_id": int(mfr.group(1)) if mfr else None}
+    return {
+        "name": name.group(1).strip() if name else None,
+        "manufacturer_id": int(mfr.group(1)) if mfr else None,
+    }
 
 
 @functools.lru_cache(maxsize=1)
@@ -92,7 +95,7 @@ def _cpu_temp_c():
             return round(int(open(p).read()) / 1000, 1)
         except Exception:
             pass
-    v = _cmd(["vcgencmd", "measure_temp"])            # "temp=61.0'C"
+    v = _cmd(["vcgencmd", "measure_temp"])  # "temp=61.0'C"
     m = re.search(r"([\d.]+)", v)
     return float(m.group(1)) if m else None
 
@@ -106,7 +109,7 @@ def _cpu_freq_mhz():
 
 
 def _throttled():
-    v = _cmd(["vcgencmd", "get_throttled"])           # "throttled=0x0"
+    v = _cmd(["vcgencmd", "get_throttled"])  # "throttled=0x0"
     m = re.search(r"0x[0-9a-fA-F]+", v)
     return m.group(0) if m else None
 
@@ -123,4 +126,5 @@ def dynamic():
 
 if __name__ == "__main__":
     import json
+
     print(json.dumps({"static": static_env(), "dynamic": dynamic()}, indent=2))

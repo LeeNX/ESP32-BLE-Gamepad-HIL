@@ -17,8 +17,12 @@ from evdev import ecodes
 from hil.evdev_utils import HAT_ABS_CODES
 
 KNOWN = {
-    "x": ecodes.ABS_X, "y": ecodes.ABS_Y, "z": ecodes.ABS_Z,
-    "rx": ecodes.ABS_RX, "ry": ecodes.ABS_RY, "rz": ecodes.ABS_RZ,
+    "x": ecodes.ABS_X,
+    "y": ecodes.ABS_Y,
+    "z": ecodes.ABS_Z,
+    "rx": ecodes.ABS_RX,
+    "ry": ecodes.ABS_RY,
+    "rz": ecodes.ABS_RZ,
     "s1": ecodes.ABS_THROTTLE,
 }
 LINUX_UNMAPPED = {"s2"}
@@ -45,8 +49,11 @@ def axis_sweep(connected_dut, gamepad):
             cap.collect(settle=0.15)
             cap.drain()
             connected_dut.axis(tok, v)
-            changes = {c: val for c, val in cap.abs_changes(cap.collect()).items()
-                       if c not in HAT_ABS_CODES}
+            changes = {
+                c: val
+                for c, val in cap.abs_changes(cap.collect()).items()
+                if c not in HAT_ABS_CODES
+            }
             seen.append((v, changes))
         connected_dut.axis(tok, baseline)
         result[tok] = seen
@@ -102,8 +109,9 @@ def test_well_known_axis_codes(axis_sweep, tok, code):
     assert codes == {code}, f"{tok} -> {codes}, expected {{{code}}} ({ecodes.ABS[code]})"
 
 
-@pytest.mark.xfail(reason="a 2nd bare HID Usage(Slider) gets no distinct evdev "
-                          "ABS code on Linux", strict=True)
+@pytest.mark.xfail(
+    reason="a 2nd bare HID Usage(Slider) gets no distinct evdev ABS code on Linux", strict=True
+)
 def test_slider2_maps_to_an_abs(axis_sweep):
     if "s2" not in axis_sweep:
         pytest.skip("profile has no s2 axis")
