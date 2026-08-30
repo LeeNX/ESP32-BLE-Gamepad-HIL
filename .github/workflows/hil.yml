@@ -38,6 +38,11 @@ concurrency:
   group: hil-rig          # one physical rig -- never run two at once
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  actions: read           # dorny/test-reporter lists run artifacts
+  checks: write           # dorny/test-reporter creates the check run
+
 env:
   LIB_REPO: ${{ inputs.lib_repo || github.event.client_payload.lib_repo || 'https://github.com/LeeNX/ESP32-BLE-Gamepad.git' }}
   LIB_REF:  ${{ inputs.lib_ref  || github.event.client_payload.lib_ref  || 'master' }}
@@ -49,7 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout harness
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Checkout library under test
         run: |
@@ -58,7 +63,7 @@ jobs:
           git -C "$HOME/ci-lib" checkout "$LIB_REF"
           git -C "$HOME/ci-lib" rev-parse --short HEAD
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -66,7 +71,7 @@ jobs:
         run: pip install --upgrade platformio
 
       - name: Cache PlatformIO
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.platformio
           key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini') }}
@@ -80,7 +85,7 @@ jobs:
           EOF
           ./builder/build.sh --boards "$BOARDS" --profiles "$PROFILES"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: hil-bundles
           path: bundles/
@@ -91,15 +96,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout harness            # the ref under test drives the tester too
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: hil-bundles
           path: bundles/
 
       - name: Join tailnet (ephemeral)
-        uses: tailscale/github-action@v3
+        uses: tailscale/github-action@v4
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
@@ -137,7 +142,7 @@ jobs:
             exit $rc'
           rsync -a -e "$SSH" hil-tester:ESP32-BLE-Gamepad-HIL/results/ results/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: hil-results
@@ -145,7 +150,7 @@ jobs:
 
       - name: Publish test report
         if: always()
-        uses: dorny/test-reporter@v1
+        uses: dorny/test-reporter@v3
         with:
           name: HIL
           path: results/junit-*.xml
