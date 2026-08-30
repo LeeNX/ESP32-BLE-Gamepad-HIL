@@ -37,6 +37,7 @@ One box can be both (`./run.sh` does builder then tester locally).
 |---|---|
 | `firmware/` | PlatformIO project — `hil_runner` serial-command firmware, `hil_profile.h` layout profiles (`default`, `signed-axes`, `specials`) |
 | `builder/build.sh` `builder/make_bundle.py` | compile → firmware bundle(s) → optional `--push` rsync to the tester |
+| `tester/bootstrap.sh` | one-time, idempotent tester provisioning (apt deps, venv, groups, udev) |
 | `tester/flash.py` `tester/test.sh` | flash a bundle with esptool, run the suite, write `results/` |
 | `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite: fixtures, serial/evdev/bluetooth helpers, the tests |
 | `hil_config.toml` (+ gitignored `hil_config.local.toml`) | per-machine ports, ssh host, builder board/profile matrix |
@@ -60,16 +61,17 @@ they differ from the template, plus `[tester] ssh_host` for `--push`.
 ### Tester (has the ESP32 + a BLE adapter — e.g. the Pi)
 
 ```bash
-sudo apt install -y bluez python3-venv build-essential python3-dev
-python3 -m venv ~/.venvs/hil
-~/.venvs/hil/bin/pip install -r ~/src/esp32-ble-gamepad-hil/tester/requirements.txt
+git clone <gitea>/leet/esp32-ble-gamepad-hil ~/esp32-ble-gamepad-hil
+~/esp32-ble-gamepad-hil/tester/bootstrap.sh          # idempotent; re-run after updates
 ```
 
-- Groups: add your user to `dialout` (serial), `input` (`/dev/input/event*`),
-  `plugdev` (`/dev/hidraw*`); log out/in.
-- udev: add `SUBSYSTEM=="hidraw", KERNELS=="0005:1D34:8010.*", MODE="0660",
-  GROUP="plugdev"` to `/etc/udev/rules.d/99-esp32-gamepad.rules`
-  (`udevadm control --reload-rules && udevadm trigger`).
+`tester/bootstrap.sh` does the apt deps (`bluez` + `rfkill` + build tools), the
+`~/.venvs/hil` venv from `tester/requirements.txt`, the `dialout` / `input` /
+`plugdev` group adds, the udev rule, and a `hil_config.local.toml` stub. It
+prints the remaining manual steps. For a managed fleet, mirror it as an Ansible
+role — the step list is in that script's header. What it deliberately leaves
+manual:
+
 - **Power**: a Pi 3B+ can't reliably power an ESP32 doing BLE off its own USB —
   brownouts show up as a reset loop that never advertises (seen on cylon too).
   Use a **powered USB hub** for the ESP32.
@@ -79,7 +81,69 @@ python3 -m venv ~/.venvs/hil
   (`ls -l /dev/serial/by-id/`).
 
 First run pairs the device automatically (`NoInputNoOutput` agent, Just Works),
-or pair by hand per `LinuxHIDTesting.md` §3 — the device name is `HILpad <board>`.
+or pair by hand: `bluetoothctl` → `scan on`, wait for `HILpad <board>`, then
+`pair <mac>` / `trust <mac>` / `connect <mac>` (the persistent agent the suite
+runs is only needed for unattended re-pairs).
+
+### Local (one box)
+
+Do **both** the Builder and Tester setup above on one machine, plug the ESP32
+into it (still via a powered hub), and `./run.sh` builds, flashes and tests in
+one go — no SSH, no `--push`. This is the fastest edit/test loop.
+
+**This one box must be Linux.** The suite asserts on `/dev/input/event*` via
+`evdev` and pairs through BlueZ `bluetoothctl`; both are Linux-only, as are the
+`evdev` / `pyudev` deps.
+
+**macOS can be the Builder only** — PlatformIO builds fine there, so
+`builder/build.sh --push` from a Mac to a Linux tester (a Pi, or a Linux
+desktop) works. Running the pytest suite on macOS does not — see below for
+what that would take.
+
+### macOS as a tester (unsupported — gap list)
+
+Flashing and the serial command channel already work on macOS: `esptool` and
+`pyserial` are cross-platform, just point `[board.<b>].port` at a
+`/dev/cu.usbserial-*` path. The two things the suite needs from the OS —
+initiating the BLE bond and reading the resulting HID events as ground truth —
+have no macOS implementation. What's missing:
+
+1. **A CoreBluetooth pairing backend** to replace BlueZ `bluetoothctl`
+   (`host/hil/bluetooth.py` — `BtCtl`, `ensure_paired`, and
+   scan/pair/trust/connect/remove-bond). *Blocker:* macOS hands a BLE-HID
+   device's GATT service to the system HID stack, so a CoreBluetooth app can't
+   touch it to trigger pairing, and `blueutil` / `IOBluetoothDevicePair` are
+   Classic-BT oriented and won't pair a BLE-only peripheral. Pairing would stay
+   a **one-time manual step in System Settings ▸ Bluetooth**, with the suite run
+   as `--no-pair`. The `--repair` / automatic re-pair-on-profile-change path
+   (`conftest.py` `bt_mac`) would then need a manual "Forget This Device" first.
+
+2. **An IOHIDManager read backend** to replace `host/hil/evdev_utils.py`
+   (`find_gamepad`, `find_all_nodes`, `Capture.collect` / `key_changes` /
+   `abs_changes`): enumerate `IOHIDDevice`s by product name (`HILpad <board>`),
+   open, subscribe to input-value callbacks. Needs `pyobjc-framework-IOKit` (or
+   a ctypes IOKit shim) in place of `evdev` / `pyudev`. *Blocker:* reading HID
+   input from a device the process doesn't own requires the **Input Monitoring**
+   TCC permission, granted by hand in System Settings (or via an MDM PPPC
+   profile) to the python running pytest — not scriptable from a bootstrap.
+
+3. **macOS ground-truth mapping tables.** Every `host/tests/test_*.py` asserts
+   against Linux `hid-input` codes (`BTN_SOUTH…`, `ABS_THROTTLE` for `s1`,
+   `ABS_HAT0*`), and the two strict xfails (`s2`, hats 2-4) pin *Linux kernel*
+   behaviour. IOKit parses the report descriptor itself and exposes raw HID
+   usage-page/usage, so the expected values — and which quirks even exist — must
+   be re-characterised once on macOS and kept as a parallel table chosen by
+   platform.
+
+4. **Backend selection + a macOS bootstrap.** `conftest.py` fixtures (`gamepad`,
+   `all_nodes`, `_reset`) and `tester/requirements.txt` are hardwired to evdev;
+   they'd dispatch on `sys.platform`. `tester/bootstrap.sh` is apt/systemd/udev
+   — a `bootstrap-macos.sh` would do Homebrew python + the pyobjc deps and print
+   the manual TCC / pairing steps.
+
+5. **CI**: a headless Mac runner needs a logged-in GUI session for BLE plus the
+   TCC grants pre-provisioned (MDM PPPC or a seeded TCC.db). More friction than
+   the Linux/Pi path — a Linux tester stays the recommended CI node.
 
 ## Running
 
@@ -124,14 +188,64 @@ xfail -> they flip to failures if the library/kernel ever start exposing them):
   (report field 0 = `_hat4`), the *one* working hat is driven by `HAT 4` --
   `bleGamepad.setHat1()` on a multi-hat config does nothing visible on Linux.
 
-`--board esp32c3`: flashes and pairs, but the C3's **native USB-Serial/JTAG**
-port is unreliable as the command channel — it disappears when the chip resets
-and `serial.Serial()` can block on a half-open handle (`SerialDev._open` now
-guards that with a threaded timeout, so it fails fast instead of hanging, but a
-run can still lose the port mid-test). **Recommended fix: wire the C3's *other*
-USB port** (the CP210x UART bridge on the DevKitC-02) and point
-`hil_config.toml`'s `[board.esp32c3].port` at that — native USB for flashing,
-the bridge for serial, same stable setup as esp32dev.
+`--board esp32c3`: flashes and pairs, but the command channel needs a wiring
+change — see **ESP32-C3 serial bridge** below. Not in the CI matrix
+(`.gitea/workflows/hil.yml` runs `esp32dev` only) until that's done.
+
+## ESP32-C3 serial bridge
+
+`hil_runner` writes the command protocol to `Serial`, and on the C3 with this
+rig's build (`ARDUINO_USB_CDC_ON_BOOT` unset → `0`) `Serial` is **UART0**
+(`GPIO21` TX / `GPIO20` RX), *not* the USB-C port. The USB-C connector on a C3 is
+the native USB-Serial/JTAG peripheral — great for flashing, but it carries no
+`hil_runner` I/O in this build, and even with CDC-on-boot it re-enumerates on
+every chip reset and `serial.Serial()` can wedge on the half-open handle
+(`SerialDev._open` guards that with a threaded timeout so it fails fast, but a
+run can still lose the port mid-test).
+
+So the C3 wants **two interfaces**: flash over USB-C, talk over an external
+3.3 V USB-UART bridge on UART0. The harness supports this with a `flash_port`
+distinct from `port`:
+
+```toml
+[board.esp32c3]
+port       = "/dev/serial/by-id/usb-<CP2102-or-CH340-bridge>-if00-port0"   # UART0
+flash_port = "/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_…-if00"  # USB-C
+```
+
+(`flash_port` defaults to `port`; `--flash-port` / `HIL_FLASH_PORT` override it.)
+
+### Wiring — ESP32-C3 SuperMini
+
+The SuperMini has **no onboard USB-UART chip** (unlike the DevKitC/DevKitM, which
+expose a CP2102 on a second connector), so an external adapter is mandatory,
+not just recommended. Any FTDI / CP2102 / CH340 dongle set to **3.3 V logic**
+(the C3 is **not** 5 V tolerant):
+
+| USB-UART adapter | C3 SuperMini | |
+|---|---|---|
+| `GND` | `GND` | common ground is required |
+| `TX` (adapter → C3) | `GPIO20` (U0RXD) | pin nearest the USB-C shell, one side |
+| `RX` (adapter ← C3) | `GPIO21` (U0TXD) | pin nearest the USB-C shell, other side |
+| `VCC` / `5V` / `3V3` | **leave unconnected** | board is powered + flashed via USB-C |
+
+Both cables plug into the powered hub. Don't wire the adapter's VCC *and* USB-C —
+pick one power source (USB-C is simplest, and it's needed for flashing anyway).
+
+### Approaches, trade-offs
+
+| | Flash | Command channel | Verdict |
+|---|---|---|---|
+| **Native USB-C only** (`ARDUINO_USB_CDC_ON_BOOT=0`, today) | USB-C ✓ (slow, retries) | none — `Serial` is UART0, not exposed | broken for the suite |
+| **Native USB-C only**, rebuild with `-D ARDUINO_USB_CDC_ON_BOOT=1` | USB-C ✓ | USB-C CDC — re-enumerates on every reset, races NimBLE for USB IRQ budget, "port vanished" mid-run | fragile; not for CI |
+| **USB-C + external UART bridge** (recommended) | USB-C ✓ | FTDI/CP210x on UART0 — never resets when the C3 does, fully isolated from the flash path, identical to the stable esp32dev setup, works with the default build | **use this** |
+| **External bridge for flash too** | UART0 — needs holding `BOOT` (GPIO9) + tapping `RST` by hand (SuperMini has no auto-reset on UART0) | UART0 ✓ | no good for unattended CI |
+
+**Pros of the bridge approach:** rock-solid command channel (a real UART, not
+the C3's shared USB peripheral); flashing resets never disturb it; no firmware
+rebuild; same code path and reliability as esp32dev. **Cons:** a $2 adapter and
+three jumper wires per C3; two USB devices per board on the hub; you must set
+both `port` and `flash_port`.
 
 ## Serial protocol (`firmware/src/hil_runner.cpp`)
 
@@ -213,12 +327,17 @@ Prerequisites:
 - Push this harness repo and the library to your Gitea. Enable Actions on the
   repo; make sure the runners can fetch `actions/checkout` etc. (Gitea
   `DEFAULT_ACTIONS_URL`).
-- The Pi has this repo at `~/esp32-ble-gamepad-hil` with `hil_config.local.toml`
-  filled in, `~/.venvs/hil` built, udev + groups done, ESP32 + BLE attached.
+- The Pi has this repo at `~/esp32-ble-gamepad-hil`, `tester/bootstrap.sh` run,
+  `hil_config.local.toml` port set (or the committed template already matches),
+  ESP32 + BLE attached. The bootstrap health check must show a powered BT
+  controller and ≥1 readable input node — the two things a fresh Pi image gets
+  wrong are BT left **rfkill soft-blocked** and the CI user missing from the
+  **`input`** group (`evdev.list_devices()` then returns `[]` and every test
+  times out).
 - Repo secrets: `HIL_PI_HOST`, `HIL_PI_USER`, `HIL_PI_SSH_KEY` (a passphrase-less
   key authorised on the Pi).
 
-Triggers: push to `master` / `hil-*`, manual dispatch (with `lib_repo` /
+Triggers: push to `main` / `hil-*`, manual dispatch (with `lib_repo` /
 `lib_ref` inputs), or `repository_dispatch` type `hil` from the library repo.
 A `concurrency: hil-pi` group serialises runs — there's one physical rig.
 

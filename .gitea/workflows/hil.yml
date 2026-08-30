@@ -18,7 +18,7 @@ name: HIL
 
 on:
   push:
-    branches: [master, "hil-*"]
+    branches: [main, "hil-*"]
   workflow_dispatch:
     inputs:
       lib_repo:

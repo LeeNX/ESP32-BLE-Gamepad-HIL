@@ -7,7 +7,8 @@ the bluetoothctl process that registered it. So pairing runs inside one
 long-lived `bluetoothctl` session (`BtCtl`) that holds the agent the whole
 time. Read-only queries (`info`, `devices`) still shell out one-shot.
 
-See LinuxHIDTesting.md sections 3-4 for the manual equivalents.
+Manual equivalent: `bluetoothctl` -> `scan on` / `pair` / `trust` / `connect`
+(see README "Setup / Tester").
 """
 
 import re

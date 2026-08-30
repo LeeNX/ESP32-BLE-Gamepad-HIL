@@ -31,7 +31,11 @@ STATE = pathlib.Path.home() / ".cache" / "esp32-hil" / "state.json"
 
 def pytest_addoption(parser):
     parser.addoption("--board", default=os.environ.get("HIL_BOARD", "esp32dev"))
-    parser.addoption("--port", default=os.environ.get("HIL_PORT"))
+    parser.addoption("--port", default=os.environ.get("HIL_PORT"),
+                     help="serial command channel to hil_runner")
+    parser.addoption("--flash-port", default=os.environ.get("HIL_FLASH_PORT"),
+                     help="port esptool/pio flash on, if different from --port "
+                          "(esp32-c3: native USB to flash, UART bridge to talk)")
     parser.addoption("--profile", default=os.environ.get("HIL_PROFILE"))
     parser.addoption("--no-flash", action="store_true",
                      help="skip building/flashing; use firmware already on the board")
@@ -58,10 +62,16 @@ def rigcfg(pytestconfig):
         b["port"] = pytestconfig.getoption("port")
     if pytestconfig.getoption("profile"):
         b["profile"] = pytestconfig.getoption("profile")
+    # flash_port defaults to the command port -- only boards whose flash channel
+    # and command channel are physically different interfaces set it (esp32-c3
+    # with an external UART bridge; see README "ESP32-C3 serial bridge").
+    b["flash_port"] = (pytestconfig.getoption("flash_port")
+                       or b.get("flash_port") or b["port"])
     b["device_name"] = f"{cfg['rig']['device_name']} {board}"
-    if "CHANGE-ME" in b["port"]:
-        pytest.exit(f"set the serial port for board '{board}' in hil_config.toml "
-                    f"(or pass --port); got {b['port']!r}")
+    for key in ("port", "flash_port"):
+        if "CHANGE-ME" in b[key]:
+            pytest.exit(f"set {key} for board '{board}' in hil_config.toml "
+                        f"(or pass --{key.replace('_', '-')}); got {b[key]!r}")
     return b
 
 
@@ -91,7 +101,7 @@ def firmware(rigcfg, pytestconfig):
         return env_name  # --no-flash wins over everything
 
     if bundle:
-        manifest = _flash_bundle(bundle, rigcfg["port"])
+        manifest = _flash_bundle(bundle, rigcfg["flash_port"])
         if manifest["board"] != rigcfg["name"] or manifest["profile"] != rigcfg["profile"]:
             pytest.exit(f"bundle is {manifest['board']}/{manifest['profile']}, "
                         f"expected {rigcfg['name']}/{rigcfg['profile']}")
@@ -100,7 +110,7 @@ def firmware(rigcfg, pytestconfig):
 
     pio = rigcfg["rig"]["pio"]
     cmd = [pio, "run", "-e", env_name, "-t", "upload",
-           "--upload-port", rigcfg["port"], "-d", str(REPO / "firmware")]
+           "--upload-port", rigcfg["flash_port"], "-d", str(REPO / "firmware")]
     print(f"\n[firmware] {' '.join(cmd)}")
     # Native USB-Serial/JTAG (C3/S3) uploads are flaky -- "Packet content
     # transfer stopped" -- and usually succeed on a retry.
