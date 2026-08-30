@@ -29,6 +29,7 @@ def find_gamepad(name_contains, timeout=25.0):
     last_seen = []
     while time.time() < deadline:
         last_seen = []
+        fallback = None  # a keys-only node, used only if nothing better shows up
         for path in evdev.list_devices():
             dev = _open(path)
             if dev is None:
@@ -38,9 +39,18 @@ def find_gamepad(name_contains, timeout=25.0):
                 caps = dev.capabilities()
                 abs_codes = {c for c, _ in caps.get(ecodes.EV_ABS, [])}
                 stick_axes = abs_codes - HAT_ABS_CODES
+                has_gamepad_keys = any(
+                    ecodes.BTN_JOYSTICK <= c <= ecodes.BTN_TRIGGER_HAPPY1 + 63
+                    for c in caps.get(ecodes.EV_KEY, []))
                 if ecodes.EV_KEY in caps and stick_axes:
                     return dev
+                if has_gamepad_keys and fallback is None:
+                    fallback = dev
+                    continue  # keep it open
             dev.close()
+        # a buttons-only profile (maxbtn) has no stick axes at all
+        if fallback is not None:
+            return fallback
         time.sleep(0.5)
     raise TimeoutError(
         f"no gamepad evdev node matching {name_contains!r} within {timeout}s "

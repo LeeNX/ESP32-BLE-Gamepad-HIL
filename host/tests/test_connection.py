@@ -9,10 +9,14 @@ def test_firmware_alive(dut):
     assert dut.ping()
 
 
+ALL_AXES = ["x", "y", "z", "rx", "ry", "rz", "s1", "s2"]
 PROFILE_LAYOUT = {
-    "default": dict(buttons=64, hats=4, special="none"),
-    "signed-axes": dict(buttons=64, hats=4, special="none"),
-    "specials": dict(buttons=16, hats=1, special="start,select,menu,home,back,volinc,voldec,volmute"),
+    "default": dict(buttons=64, hats=4, special="none", axes=ALL_AXES),
+    "signed-axes": dict(buttons=64, hats=4, special="none", axes=ALL_AXES),
+    "specials": dict(buttons=16, hats=1, axes=ALL_AXES,
+                     special="start,select,menu,home,back,volinc,voldec,volmute"),
+    "minimal": dict(buttons=1, hats=0, special="none", axes=["x"]),
+    "maxbtn": dict(buttons=128, hats=0, special="none", axes=[]),
 }
 
 
@@ -23,7 +27,17 @@ def test_config_matches_profile(dut, rigcfg):
     assert cfg["buttons"] == expected["buttons"]
     assert cfg["hats"] == expected["hats"]
     assert cfg.get("special") == expected["special"]
-    assert cfg["axes"] == ["x", "y", "z", "rx", "ry", "rz", "s1", "s2"]
+    assert cfg["axes"] == expected["axes"]
+
+
+def test_descriptor_within_buffer(connected_dut):
+    """BleGamepad assembles the HID report descriptor into a fixed 150-byte
+    buffer with no bounds check. RSIZE? reports the size the library computed."""
+    sizes = connected_dut.report_sizes()
+    assert 0 < sizes["descriptor"] <= 150, (
+        f"HID report descriptor is {sizes['descriptor']} bytes -- "
+        f"tempHidReportDescriptor[150] overflow risk")
+    assert 0 < sizes["report"] <= 63, f"unexpected input report size {sizes['report']}"
 
 
 def test_ble_connects(connected_dut):
@@ -33,15 +47,21 @@ def test_ble_connects(connected_dut):
 
 def test_evdev_node_capabilities(gamepad, dut):
     dev, _ = gamepad
+    cfg = dut.config()
     caps = dev.capabilities()
     key_codes = set(caps.get(ecodes.EV_KEY, []))
     abs_codes = {c for c, _ in caps.get(ecodes.EV_ABS, [])}
+    stick_codes = abs_codes - HAT_ABS_CODES
 
-    # 64 gamepad buttons -> at least 64 distinct key codes.
-    assert len(key_codes) >= dut.config()["buttons"]
-    # 6 sticks + 2 sliders -> some non-hat ABS axes; 4 hats -> hat ABS pairs.
-    assert len(abs_codes - HAT_ABS_CODES) >= 6
-    assert abs_codes & HAT_ABS_CODES
+    # every configured button -> at least that many distinct key codes (Linux
+    # runs out of gamepad key codes past ~80 -- see test_buttons_beyond_80).
+    assert len(key_codes) >= min(cfg["buttons"], 80)
+    # enabled non-hat axes surface as non-hat ABS codes (Linux drops the 2nd
+    # bare Usage(Slider) -- see test_axes.py -- so allow one short).
+    want_axes = len(cfg["axes"])
+    assert len(stick_codes) >= max(0, want_axes - 1)
+    # Linux only ever creates one hat (ABS_HAT0) regardless of hat count.
+    assert bool(abs_codes & HAT_ABS_CODES) == (cfg["hats"] > 0)
 
 
 def test_all_input_nodes_listed(all_nodes, rigcfg):

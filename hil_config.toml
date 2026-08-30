@@ -8,16 +8,18 @@ lib_dir = "/home/leet/src/ESP32-BLE-Gamepad"   # library checkout the builder co
 device_name = "HILpad"                         # firmware advertises "<device_name> <board>"
 pio = "/home/leet/.local/bin/pio"
 
-# BUILDER role -- what builder/build.sh compiles by default.
+# BUILDER role -- what builder/build.sh compiles by default. Profiles:
+# default | signed-axes | specials | minimal | maxbtn  (see firmware/include/hil_profile.h)
 [builder]
-boards = "esp32dev"                 # space separated
-profiles = "default specials"       # space separated
+boards = "esp32dev esp32c3"                              # space separated
+profiles = "default signed-axes specials minimal maxbtn" # space separated
 
-# TESTER role -- where builder/build.sh --push rsyncs bundles, and the SSH
-# target the CI orchestrator job drives.
+# TESTER role -- the Raspberry Pi 3B+ with both MCUs attached. builder/build.sh
+# --push rsyncs bundles here; scripts/hil.sh (in the library repo) and the CI
+# orchestrator job both drive it over SSH. Never builds -- esptool flash only.
 [tester]
-ssh_host = ""                       # e.g. "hil-pi.lan" -- empty = no push
-ssh_user = "leet"
+ssh_host = "192.168.101.16"         # empty = no push
+ssh_user = "bot-gitea-esp32-hil"
 bundle_dir = "~/hil-bundles"
 
 [board.esp32dev]

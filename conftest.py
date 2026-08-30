@@ -46,6 +46,9 @@ def pytest_addoption(parser):
                      help="assume the DUT is already bonded+connected")
     parser.addoption("--repair", action="store_true",
                      help="drop the existing bond and pair fresh")
+    parser.addoption("--bench", action="store_true",
+                     help="run the slow latency/throughput benchmark tests "
+                          "(test_latency.py) and let bench.py record results")
 
 
 # --- config -----------------------------------------------------------------
@@ -76,7 +79,10 @@ def rigcfg(pytestconfig):
 
 
 # --- firmware --------------------------------------------------------------
-PROFILE_ENV_SUFFIX = {"default": "", "signed-axes": "-signed", "specials": "-specials"}
+PROFILE_ENV_SUFFIX = {
+    "default": "", "signed-axes": "-signed", "specials": "-specials",
+    "minimal": "-minimal", "maxbtn": "-maxbtn",
+}
 
 
 def _flash_bundle(bundle_dir, port):
@@ -111,11 +117,13 @@ def firmware(rigcfg, pytestconfig):
     pio = rigcfg["rig"]["pio"]
     cmd = [pio, "run", "-e", env_name, "-t", "upload",
            "--upload-port", rigcfg["flash_port"], "-d", str(REPO / "firmware")]
+    # platformio.ini resolves the library-under-test via symlink://${sysenv.HIL_LIB_DIR}
+    env = {**os.environ, "HIL_LIB_DIR": rigcfg["rig"].get("lib_dir", "")}
     print(f"\n[firmware] {' '.join(cmd)}")
     # Native USB-Serial/JTAG (C3/S3) uploads are flaky -- "Packet content
     # transfer stopped" -- and usually succeed on a retry.
     for attempt in range(3):
-        r = subprocess.run(cmd, capture_output=True, text=True)
+        r = subprocess.run(cmd, capture_output=True, text=True, env=env)
         if r.returncode == 0:
             break
         print(f"[firmware] upload attempt {attempt + 1} failed, retrying")
@@ -217,6 +225,32 @@ def all_nodes(rigcfg, bt_mac):
     yield nodes
     for n in nodes:
         n.close()
+
+
+# --- GATT / Device Information -------------------------------------------
+@pytest.fixture(scope="session")
+def gatt():
+    """The hil.gatt module, with bleak confirmed importable (skip otherwise)."""
+    from hil import gatt as _gatt
+    try:
+        import bleak  # noqa: F401
+    except ImportError as e:
+        pytest.skip(f"bleak not installed -- GATT reads unavailable: {e}")
+    return _gatt
+
+
+@pytest.fixture(scope="session")
+def device_info(gatt, bt_mac):
+    """DIS strings + PnP + battery + power-state, read over GATT (not HID)."""
+    return gatt.read_all(bt_mac)
+
+
+# --- benchmark gate -----------------------------------------------------
+@pytest.fixture(scope="session")
+def bench_enabled(pytestconfig):
+    if not pytestconfig.getoption("bench"):
+        pytest.skip("latency/throughput benchmark is opt-in; pass --bench")
+    return True
 
 
 # --- per-test reset --------------------------------------------------------

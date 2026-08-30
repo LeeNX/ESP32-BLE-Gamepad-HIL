@@ -42,5 +42,13 @@ rc=0
   --junit-xml="$xml" "${PYTEST_EXTRA[@]}" 2>&1 | tee "results/log-${tag}.txt" || rc=$?
 "$VENV/bin/python" host/hil/summarize.py "$xml" "results/summary-${tag}.md" || rc=$?
 cp "results/summary-${tag}.md" results/summary.md
+
+# Regenerate the benchmark table + charts from every results/bench-*.json seen
+# so far (a --bench run just added this profile's; others persist across runs).
+if ls results/bench-*.json >/dev/null 2>&1; then
+  PYTHONPATH=host "$VENV/bin/python" -m hil.charts results/ || true
+  [[ -f results/bench-table.md ]] && { echo; cat results/bench-table.md; } >> results/summary.md
+fi
+
 cat results/summary.md
 exit $rc

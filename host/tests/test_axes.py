@@ -101,5 +101,7 @@ def test_well_known_axis_codes(axis_sweep, tok, code):
 @pytest.mark.xfail(reason="a 2nd bare HID Usage(Slider) gets no distinct evdev "
                           "ABS code on Linux", strict=True)
 def test_slider2_maps_to_an_abs(axis_sweep):
+    if "s2" not in axis_sweep:
+        pytest.skip("profile has no s2 axis")
     codes = {c for _, ch in axis_sweep["s2"] for c in ch}
     assert len(codes) == 1, f"s2 moved {codes}"

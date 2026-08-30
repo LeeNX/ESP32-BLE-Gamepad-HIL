@@ -7,7 +7,8 @@ import serial
 
 # First token of every command reply. The boot banner ("HIL hil_runner ready
 # ...") is deliberately not here so it gets skipped like any other stray line.
-REPLY_PREFIXES = ("OK", "ERR", "PONG", "CONN", "ID", "CONFIG")
+REPLY_PREFIXES = ("OK", "ERR", "PONG", "CONN", "ID", "CONFIG",
+                  "DIS", "PNP", "RSIZE", "PEER", "BURST", "T")
 
 
 class SerialError(RuntimeError):
@@ -180,5 +181,59 @@ class SerialDev:
     def battery(self, level):
         self.ok(f"BATTERY {level}")
 
+    def power_state(self, info, discharging, charging, level):
+        self.ok(f"POWERSTATE {info} {discharging} {charging} {level}")
+
     def reset(self):
         self.ok("RESET")
+
+    # --- introspection ------------------------------------------------------
+    @staticmethod
+    def _kv(line):
+        out = {"_raw": line}
+        for tok in line.split(" ")[1:]:
+            if "=" in tok:
+                k, v = tok.split("=", 1)
+                out[k] = v
+        return out
+
+    def device_info(self):
+        """`DIS?` -> {model, serial, fw, hw, sw, mfr}."""
+        return self._kv(self.command("DIS?"))
+
+    def pnp(self):
+        """`PNP?` -> {vidsrc, vid, pid, ver} (hex strings for vid/pid/ver)."""
+        return self._kv(self.command("PNP?"))
+
+    def report_sizes(self):
+        """`RSIZE?` -> {report, descriptor} as ints."""
+        d = self._kv(self.command("RSIZE?"))
+        return {"report": int(d["report"]), "descriptor": int(d["descriptor"])}
+
+    def peer_info(self):
+        """`PEERINFO?` -> connection params, intervals converted to ms."""
+        d = self._kv(self.command("PEERINFO?"))
+        return {
+            "interval_ms": int(d["interval"]) * 1.25,
+            "latency": int(d["latency"]),
+            "timeout_ms": int(d["timeout"]) * 10,
+            "mtu": int(d["mtu"]),
+        }
+
+    # --- timed / bulk input ----------------------------------------------
+    def tpress(self, n, down=True):
+        """Timed press/release: firmware replies `T <micros_before_sendReport>`."""
+        cmd = f"TPRESS {n}" if down else f"TRELEASE {n}"
+        r = self.command(cmd)
+        if not r.startswith("T "):
+            raise SerialError(f"{cmd!r} -> {r!r} (expected 'T <micros>')")
+        return int(r.split(" ", 1)[1])
+
+    def burst(self, button, count, gap_us=0, timeout=30.0):
+        """Fire <count> toggles of <button>, <gap_us> apart. Returns
+        (count, elapsed_us) from the firmware's own clock."""
+        r = self.command(f"BURST {button} {count} {gap_us}", timeout=timeout)
+        parts = r.split()
+        if len(parts) != 4 or parts[:2] != ["BURST", "OK"]:
+            raise SerialError(f"BURST -> {r!r}")
+        return int(parts[2]), int(parts[3])
