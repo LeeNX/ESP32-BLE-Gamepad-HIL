@@ -13,8 +13,10 @@ REPO=$(pwd)
 
 cfg() { python3 host/hil/config.py "$1"; }
 
-PIO=$(cfg rig.pio); PIO=${PIO:-$HOME/.local/bin/pio}
+PIO=${HIL_PIO:-$(cfg rig.pio)}; PIO=${PIO:-$HOME/.local/bin/pio}
 LIB_DIR=$(cfg rig.lib_dir); LIB_DIR=${LIB_DIR:-$HOME/src/ESP32-BLE-Gamepad}
+# platformio.ini resolves the library-under-test via symlink://${sysenv.HIL_LIB_DIR}
+export HIL_LIB_DIR="$LIB_DIR"
 BOARDS=(${HIL_BOARDS:-$(cfg builder.boards)}); BOARDS=(${BOARDS[@]:-esp32dev})
 PROFILES=(${HIL_PROFILES:-$(cfg builder.profiles)}); PROFILES=(${PROFILES[@]:-default})
 OUT_ROOT=${HIL_BUNDLES:-$REPO/bundles}
@@ -30,6 +32,7 @@ done
 
 profile_suffix() { case "$1" in
   default) echo "" ;; signed-axes) echo "-signed" ;; specials) echo "-specials" ;;
+  minimal) echo "-minimal" ;; maxbtn) echo "-maxbtn" ;;
   *) echo "unknown profile: $1" >&2; exit 2 ;; esac; }
 board_chip() { case "$1" in
   esp32dev) echo esp32 ;; esp32c3) echo esp32c3 ;; esp32s3) echo esp32s3 ;; esp32c6) echo esp32c6 ;;

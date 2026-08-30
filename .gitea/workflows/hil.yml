@@ -6,13 +6,15 @@
 # "Gitea CI"). `lib_ref` selects the ESP32-BLE-Gamepad ref under test.
 #
 # Required repo secrets:
-#   HIL_PI_HOST      hostname/IP of the Pi tester
-#   HIL_PI_USER      ssh user on the Pi
+#   HIL_PI_HOST      hostname/IP of the Pi tester (currently 192.168.101.16)
+#   HIL_PI_USER      ssh user on the Pi          (currently bot-gitea-esp32-hil)
 #   HIL_PI_SSH_KEY   private key authorised on the Pi (no passphrase)
 #
-# The Pi must already have the harness checked out at ~/esp32-ble-gamepad-hil
-# with hil_config.local.toml filled in, its ~/.venvs/hil built from
-# tester/requirements.txt, the udev rule, and the ESP32 + BLE adapter attached.
+# The Pi 3B+ has both MCUs attached (esp32dev + esp32c3), the harness checked
+# out at ~/esp32-ble-gamepad-hil with hil_config.local.toml filled in (both
+# board ports), its ~/.venvs/hil built from tester/requirements.txt, the udev
+# rule, and a BLE adapter. It only ever flashes prebuilt bundles -- no
+# PlatformIO on the Pi.
 
 name: HIL
 
@@ -37,8 +39,8 @@ concurrency:
 env:
   LIB_REPO: ${{ inputs.lib_repo || github.event.client_payload.lib_repo || 'https://github.com/LeeNX/ESP32-BLE-Gamepad.git' }}
   LIB_REF:  ${{ inputs.lib_ref  || github.event.client_payload.lib_ref  || 'master' }}
-  BOARDS: esp32dev
-  PROFILES: default specials
+  BOARDS: esp32dev esp32c3
+  PROFILES: default signed-axes specials minimal maxbtn
 
 jobs:
   build:
@@ -78,6 +80,9 @@ jobs:
     needs: build
     runs-on: self-hosted     # only needs ssh + rsync; no hardware here
     steps:
+      - name: Checkout harness            # the ref under test drives the Pi too
+        uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           name: hil-bundles
@@ -94,13 +99,17 @@ jobs:
         run: |
           PI="${{ secrets.HIL_PI_USER }}@${{ secrets.HIL_PI_HOST }}"
           SSH="ssh -i ~/.ssh/hil_pi"
+          # push this exact harness checkout (keep the Pi's real serial-port config)
+          rsync -a -e "$SSH" --delete \
+            --exclude '.git' --exclude '.pio' --exclude 'bundles' --exclude 'results' \
+            --exclude 'hil_config.local.toml' --exclude '__pycache__' --exclude '*.pyc' \
+            ./ "$PI:esp32-ble-gamepad-hil/"
           rsync -a -e "$SSH" --delete bundles/ "$PI:hil-bundles/"
           $SSH "$PI" 'set -e
             cd ~/esp32-ble-gamepad-hil
-            git pull --ff-only --quiet || true
             rm -rf results && mkdir results
             rc=0
-            for b in ~/hil-bundles/*/; do ./tester/test.sh "$b" || rc=$?; done
+            for b in ~/hil-bundles/*/; do ./tester/test.sh "$b" --bench || rc=$?; done
             exit $rc'
           rsync -a -e "$SSH" "$PI:esp32-ble-gamepad-hil/results/" results/
 

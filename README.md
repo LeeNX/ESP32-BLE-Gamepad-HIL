@@ -6,19 +6,25 @@ the compile-only CI can't: does `press(5)` actually produce one distinct key
 event on a host, do axes/hats/special buttons map correctly, does a config
 change survive a re-pair.
 
-The rig is split into two roles so the BLE host can be a small board (a
-Raspberry Pi 3B+) that can't build firmware in reasonable time:
+The rig is split into two roles so the BLE host can be a small board (the
+dedicated Raspberry Pi 3B+ tester at `192.168.101.16`, ssh `bot-gitea-esp32-hil`,
+with both MCUs — `esp32dev` + `esp32c3` — attached) that can't build firmware in
+reasonable time:
 
 ```
- BUILDER (cylon / a CI runner)              TESTER (Raspberry Pi 3B+ / cylon)
+ BUILDER (CI runner / dev machine)          TESTER (Raspberry Pi 3B+, 192.168.101.16)
  ┌────────────────────────────┐   bundle   ┌──────────────────────────────────┐
  │ builder/build.sh:          │  (rsync/   │ tester/test.sh:                  │
  │  pio run  (lib under test) │   CI       │  tester/flash.py  (esptool only) │
- │  -> bundles/<b>-<p>-<sha>/ │  artifact) │  pytest  (pyserial+evdev+bluez)  │
- │     *.bin + manifest.json  │──────────►│   USB─► ESP32 ─BLE─► /dev/input/  │
- └────────────────────────────┘            │  -> results/junit-*.xml summary  │
+ │  -> bundles/<b>-<p>-<sha>/ │  artifact) │  pytest  (pyserial+evdev+bluez   │
+ │     *.bin + manifest.json  │──────────►│         +bleak)                   │
+ └────────────────────────────┘            │   USB─► ESP32 ─BLE─► /dev/input/  │
+                                           │  -> results/ junit + bench + svg │
                                            └──────────────────────────────────┘
 ```
+
+The library repo drives this end to end with `scripts/hil.sh` (build here,
+push, test on the Pi, pull results) — see that repo's `HilTesting.md`.
 
 - **builder** needs PlatformIO. `builder/build.sh` compiles `hil_runner`
   against the library-under-test and writes a **bundle**: the flashable
@@ -35,11 +41,11 @@ One box can be both (`./run.sh` does builder then tester locally).
 
 | Path | What |
 |---|---|
-| `firmware/` | PlatformIO project — `hil_runner` serial-command firmware, `hil_profile.h` layout profiles (`default`, `signed-axes`, `specials`) |
-| `builder/build.sh` `builder/make_bundle.py` | compile → firmware bundle(s) → optional `--push` rsync to the tester |
+| `firmware/` | PlatformIO project — `hil_runner` serial-command firmware, `hil_profile.h` layout profiles: `default` (64 btn/4 hat/8 axis), `signed-axes` (same, −32767 axis min), `specials` (16 btn/1 hat/8 axis/8 special), `minimal` (1 btn/1 axis), `maxbtn` (128 btn, no hats/axes) |
+| `builder/build.sh` `builder/make_bundle.py` | compile → firmware bundle(s) → optional `--push` rsync to the tester. Library path comes from `$HIL_LIB_DIR` (exported from `rig.lib_dir`) |
 | `tester/bootstrap.sh` | one-time, idempotent tester provisioning (apt deps, venv, groups, udev) |
-| `tester/flash.py` `tester/test.sh` | flash a bundle with esptool, run the suite, write `results/` |
-| `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite: fixtures, serial/evdev/bluetooth helpers, the tests |
+| `tester/flash.py` `tester/test.sh` | flash a bundle with esptool, run the suite + benchmark, write `results/` |
+| `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite. Helpers: `serialdev` (hil_runner protocol), `evdev_utils`, `bluetooth`, `gatt` (DIS/PnP/battery over bleak), `latency` + `bench` (the benchmark), `charts` (JSON → table + SVGs), `summarize` |
 | `hil_config.toml` (+ gitignored `hil_config.local.toml`) | per-machine ports, ssh host, builder board/profile matrix |
 | `run.sh` | one-box: build all bundles then flash+test each |
 | `.gitea/workflows/hil.yml` | Gitea CI: build job → SSH-to-Pi test job |
@@ -165,16 +171,54 @@ tester/test.sh ~/hil-bundles/esp32dev-default-<sha>/
 
 Useful pytest options: `--bundle <dir>` (flash a bundle via esptool),
 `--no-flash`, `--no-pair`, `--repair` (drop bond + pair fresh),
-`--profile specials`.
+`--profile specials`, `--bench` (run the latency/throughput tests too).
+
+## GATT + Device Information
+
+`test_device_info.py` / `test_battery.py` cover the non-HID side. Once the
+device is bonded, BlueZ still exposes Device Information (`0x180A`), PnP ID
+(`0x2A50`) and Battery (`0x180F`) to a generic GATT client, so `host/hil/gatt.py`
+reads them with `bleak` and the tests assert they match what the firmware set
+(`DIS?` / `PNP?`). Battery level is also cross-checked against `upower`. The
+`0x2A1A` Battery Power State bitfield (`setPowerStateAll()`) is read raw and
+decoded; those tests skip if BlueZ doesn't surface that characteristic.
+
+## Benchmarking (`--bench`)
+
+`test_latency.py` runs one sweep per flashed profile via `host/hil/bench.py`:
+
+- `ping_rtt` — serial PING/PONG baseline (USB-serial + parse overhead).
+- `input_latency` — per-event latency for button / axis / hat, measured
+  host-side as `t_evdev − t_serial_reply` (BLE + host stack) and
+  `t_evdev − t_serial_write` (end to end). p50/p90/p99/max.
+- `burst_rate` — `BURST` a few hundred toggles at several `gap_us` spacings,
+  count the evdev transitions that actually arrive → effective Hz + drop rate.
+- `PEERINFO?` connection interval + MTU, `RSIZE?` report/descriptor bytes.
+
+Each run writes `results/bench-<board>-<profile>-<stamp>.json`; `tester/test.sh`
+then runs `python -m hil.charts results/` to (re)generate `results/bench-table.md`
+and three SVGs — latency vs report size, sustained rate per profile, latency
+distribution. The 5 profiles span input-report sizes ~1 B (`minimal`) to 16 B
+(`maxbtn`) so the latency-vs-size curve has real spread. The pytest assertions
+are deliberately loose (button p50 < 60 ms, ≥ 20 Hz sustained) — the recorded
+JSON is the actual deliverable, not pass/fail.
 
 ## Current status
 
-`--board esp32dev` is green on both profiles:
+`--board esp32dev` is green on `default` + `specials`. The `signed-axes`,
+`minimal` and `maxbtn` profiles and the GATT / `--bench` suites landed together
+and need a first hardware run on the Pi to record their baselines (`maxbtn`
+depends on the library's `getHidReportDescriptorSize()` fitting the 128-button
+descriptor inside `tempHidReportDescriptor[150]` — `test_descriptor_within_buffer`
+verifies that).
 
-| Profile | Result |
-|---|---|
-| `default` (64 btn, 4 hat, 8 axes) | 21 passed, 3 skipped (specials), 2 xfail |
-| `specials` (16 btn, 1 hat, 8 axes, 8 special btns) | 24 passed, 1 skipped, 1 xfail |
+| Profile | Layout | Result |
+|---|---|---|
+| `default` | 64 btn, 4 hat, 8 axes | 21 passed, 3 skipped, 2 xfail |
+| `specials` | 16 btn, 1 hat, 8 axes, 8 special | 24 passed, 1 skipped, 1 xfail |
+| `signed-axes` | 64 btn, 4 hat, 8 axes, −32767 min | baseline TBD |
+| `minimal` | 1 btn, 1 axis (X) | baseline TBD |
+| `maxbtn` | 128 btn, no hats/axes | baseline TBD |
 
 The 2 xfails are **real Linux HID-mapping limitations the rig found** (strict
 xfail -> they flip to failures if the library/kernel ever start exposing them):
@@ -255,14 +299,21 @@ both `port` and `flash_port`.
 |---|---|
 | `PING` | `PONG` |
 | `ID?` | `ID hil_runner profile=… board=… built=…` |
-| `CONFIG?` | `CONFIG buttons=64 hats=4 axes=x,y,z,rx,ry,rz,s1,s2 special=none axesMin=0 axesMax=32767 vid=1D34 pid=8010 reportId=3 profile=default` |
+| `CONFIG?` | `CONFIG buttons=64 hats=4 axes=x,y,z,rx,ry,rz,s1,s2 special=none axesMin=0 axesMax=32767 vid=1D34 pid=8010 ver=0110 reportId=3 profile=default` (`axes=` empty for `maxbtn`) |
+| `DIS?` | `DIS model=HIL-MODEL serial=HIL-SN-0001 fw=HIL-FW-<profile> hw=HIL-HW-1 sw=HIL-SW-1 mfr=LeeNX-HIL` — the DIS strings the firmware configured |
+| `PNP?` | `PNP vidsrc=1 vid=1D34 pid=8010 ver=0110` |
+| `RSIZE?` | `RSIZE report=<n> descriptor=<n>` — HID input report + report-descriptor sizes (needs the library's `getHidReportDescriptorSize()`) |
+| `PEERINFO?` | `PEER interval=<1.25ms units> latency=<n> timeout=<10ms units> mtu=<n>` / `ERR notconnected` |
 | `BEGIN` | `OK` — handshake only; `bleGamepad.begin()` already ran in `setup()` |
 | `CONN?` | `CONN 0` / `CONN 1` |
 | `PRESS <n>` / `RELEASE <n>` | `OK` / `ERR range` |
+| `TPRESS <n>` / `TRELEASE <n>` | `T <micros>` — like PRESS/RELEASE, replies the `micros()` captured just before `sendReport()` (latency benchmark) |
+| `BURST <btn> <count> <gap_us>` | `BURST OK <count> <elapsed_us>` — toggle `btn` `count` times, one report each, `gap_us` apart (throughput benchmark; `count` ≤ 2000) |
 | `SPECIAL PRESS\|RELEASE <0..7>` | `OK` / `ERR disabled` |
-| `AXIS <x\|y\|z\|rx\|ry\|rz\|s1\|s2> <int16>` | `OK` |
-| `HAT <1..4> <0..8>` | `OK` |
+| `AXIS <x\|y\|z\|rx\|ry\|rz\|s1\|s2> <int16>` | `OK` / `ERR disabled` (axis not in this profile) |
+| `HAT <1..4> <0..8>` | `OK` / `ERR disabled` (0-hat profile) |
 | `BATTERY <0..100>` | `OK` |
+| `POWERSTATE <info> <discharging> <charging> <level>` | `OK` — 2-bit fields for `setPowerStateAll()`, read back from the 0x2A1A characteristic |
 | `RESET` | `OK` — zero buttons, axes, hats |
 
 `begin()` runs in `setup()` (like the TestAll example): calling it lazily from
@@ -317,19 +368,22 @@ calls are still used for read-only queries.
 
 `.gitea/workflows/hil.yml` — a **build** job on any Gitea runner (installs
 PlatformIO fresh, runs `builder/build.sh`, uploads the bundles as an artifact),
-then a **hil-test** job on a normal runner that downloads the bundles, `rsync`s
-them to the Pi and `ssh`es in to run `tester/test.sh`, then publishes the JUnit
-report. The Pi is a plain **SSH target**, not a runner — nothing untrusted
-executes on it directly.
+then a **hil-test** job on a normal runner that `rsync`s **both** the checked-out
+harness code (so the Pi runs the same ref) and the bundles to the Pi, `ssh`es in
+to run `tester/test.sh --bench` per bundle, then publishes the JUnit report and
+`hil-results/` (summary, `bench-table.md`, SVG charts). The Pi is a plain **SSH
+target**, not a runner — nothing untrusted executes on it directly. Its own
+`hil_config.local.toml` (real serial ports for both boards) is never overwritten.
 
 Prerequisites:
 
 - Push this harness repo and the library to your Gitea. Enable Actions on the
   repo; make sure the runners can fetch `actions/checkout` etc. (Gitea
   `DEFAULT_ACTIONS_URL`).
-- The Pi has this repo at `~/esp32-ble-gamepad-hil`, `tester/bootstrap.sh` run,
-  `hil_config.local.toml` port set (or the committed template already matches),
-  ESP32 + BLE attached. The bootstrap health check must show a powered BT
+- The Pi has this repo at `~/esp32-ble-gamepad-hil`, `tester/bootstrap.sh` run
+  (re-run it after `tester/requirements.txt` changes — e.g. the `bleak` add for
+  the GATT tests), `hil_config.local.toml` with **both** board ports set, both
+  ESP32s + BLE attached. The bootstrap health check must show a powered BT
   controller and ≥1 readable input node — the two things a fresh Pi image gets
   wrong are BT left **rfkill soft-blocked** and the CI user missing from the
   **`input`** group (`evdev.list_devices()` then returns `[]` and every test
