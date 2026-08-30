@@ -138,11 +138,11 @@ def _bar_chart(title, groups, series_names, ylabel, unit=""):
 def chart_polling_rate(records):
     groups = []
     for r in sorted(records, key=lambda r: r.get("report_bytes") or 0):
-        best = max((b["effective_hz"] for b in r.get("burst", [])), default=None)
-        fw = max((b.get("fw_send_hz") or 0 for b in r.get("burst", [])), default=None)
-        groups.append((f'{r["profile"]} {r["board"]}', [best, fw]))
-    return _bar_chart("Sustained report rate (button toggles)", groups,
-                      ["host-observed Hz", "firmware send Hz"], "Hz")
+        clean = r.get("clean_rate_hz")
+        ceiling = 1000 / r["conn_interval_ms"] if r.get("conn_interval_ms") else None
+        groups.append((f'{r["profile"]} {r["board"]}', [clean, ceiling]))
+    return _bar_chart("Fastest rate with 100% delivery", groups,
+                      ["measured clean Hz", "conn-interval ceiling"], "Hz")
 
 
 def chart_latency_distribution(records):
@@ -156,21 +156,31 @@ def chart_latency_distribution(records):
 
 
 # --- table --------------------------------------------------------------
+def _env_line(records):
+    e = next((r.get("env") for r in records if r.get("env")), None)
+    if not e:
+        return ""
+    load = next((r["load"]["start"]["loadavg"] for r in records
+                 if r.get("load", {}).get("start", {}).get("loadavg")), None)
+    l1 = f", load {load[0]:.1f}" if load else ""
+    return (f"_{e.get('distro')} · kernel {e.get('kernel')} · {e.get('arch')} · "
+            f"BlueZ {e.get('bluez')} · Python {e.get('python')}{l1}_\n\n")
+
+
 def table_md(records):
     rows = ["| Board | Profile | Report B | Descr B | Conn ms | MTU | "
-            "btn p50/p99 ms | axis p50 ms | max Hz | drop@0µs |",
+            "btn e2e p50/p99 ms | axis p50 ms | clean Hz | dropped |",
             "|---|---|---|---|---|---|---|---|---|---|"]
     for r in sorted(records, key=lambda r: (r["board"], r.get("report_bytes") or 0)):
         b = r["latency_ms"].get("button", {}).get("e2e", {})
         ax = r["latency_ms"].get("axis", {}).get("e2e", {})
-        b0 = next((x for x in r.get("burst", []) if x["gap_us"] == 0), {})
-        best_hz = max((x["effective_hz"] for x in r.get("burst", [])), default=0)
+        dropped = sum(d.get("dropped", 0) for d in r["latency_ms"].values())
         rows.append(
             f'| {r["board"]} | {r["profile"]} | {r.get("report_bytes")} | '
             f'{r.get("descriptor_bytes")} | {r.get("conn_interval_ms")} | '
             f'{r.get("mtu")} | {b.get("p50")}/{b.get("p99")} | {ax.get("p50", "-")} | '
-            f'{best_hz} | {b0.get("dropped", "-")} |')
-    return "\n".join(rows) + "\n"
+            f'{r.get("clean_rate_hz", "-")} | {dropped} |')
+    return _env_line(records) + "\n".join(rows) + "\n"
 
 
 # --- driver -----------------------------------------------------------

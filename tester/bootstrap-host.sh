@@ -3,8 +3,8 @@
 # everything that needs root; the CI/test user then runs tester/bootstrap.sh
 # (no sudo) for the venv + config. Idempotent -- safe to re-run.
 #
-#   sudo tester/bootstrap-host.sh --user bot-gitea-esp32-hil
-#   sudo HIL_USER=bot-gitea-esp32-hil tester/bootstrap-host.sh
+#   sudo tester/bootstrap-host.sh --user hil
+#   sudo HIL_USER=hil tester/bootstrap-host.sh
 #
 # What it does: apt deps, system locale, the bluetooth service + rfkill unblock,
 # adds the target user to dialout/input/plugdev, and installs the DUT udev rule.

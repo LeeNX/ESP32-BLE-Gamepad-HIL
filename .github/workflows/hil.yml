@@ -1,20 +1,18 @@
-# Gitea Actions: build hil_runner firmware on any runner, then flash + run the
-# BLE HID suite on the Raspberry Pi tester over SSH.
+# Build hil_runner firmware on a runner, then flash + run the BLE HID suite on
+# the Raspberry Pi tester over SSH.
 #
-# Runs when this harness repo is pushed, on manual dispatch, and on
-# repository_dispatch (so the library repo can trigger it -- see README
-# "Gitea CI"). `lib_ref` selects the ESP32-BLE-Gamepad ref under test.
+# Runs on push, on manual dispatch, and on repository_dispatch (so the library
+# repo can trigger it). `lib_ref` selects the ESP32-BLE-Gamepad ref under test.
 #
 # Required repo secrets:
-#   HIL_PI_HOST      hostname/IP of the Pi tester (currently 192.168.101.16)
-#   HIL_PI_USER      ssh user on the Pi          (currently bot-gitea-esp32-hil)
-#   HIL_PI_SSH_KEY   private key authorised on the Pi (no passphrase)
+#   HIL_TESTER_HOST      hostname / IP of the tester (a Tailscale name works)
+#   HIL_TESTER_USER      ssh user on the tester
+#   HIL_TESTER_SSH_KEY   private key authorised on the tester (no passphrase)
 #
-# The Pi 3B+ has both MCUs attached (esp32dev + esp32c3), the harness checked
-# out at ~/esp32-ble-gamepad-hil with hil_config.local.toml filled in (both
-# board ports), its ~/.venvs/hil built from tester/requirements.txt, the udev
-# rule, and a BLE adapter. It only ever flashes prebuilt bundles -- no
-# PlatformIO on the Pi.
+# The tester has this repo checked out at ~/ESP32-BLE-Gamepad-HIL with
+# hil_config.local.toml filled in (board ports), its ~/.venvs/hil built from
+# tester/requirements.txt, the udev rule, the ESP32(s) + a BLE adapter. It only
+# ever flashes prebuilt bundles -- no PlatformIO on the tester.
 
 name: HIL
 
@@ -33,14 +31,14 @@ on:
     types: [hil]
 
 concurrency:
-  group: hil-pi          # one physical rig -- never run two at once
+  group: hil-rig          # one physical rig -- never run two at once
   cancel-in-progress: false
 
 env:
   LIB_REPO: ${{ inputs.lib_repo || github.event.client_payload.lib_repo || 'https://github.com/LeeNX/ESP32-BLE-Gamepad.git' }}
   LIB_REF:  ${{ inputs.lib_ref  || github.event.client_payload.lib_ref  || 'master' }}
-  BOARDS: esp32dev esp32c3
-  PROFILES: default signed-axes specials minimal maxbtn
+  BOARDS: esp32dev
+  PROFILES: default signed-axes specials minimal maxbtn reports
 
 jobs:
   build:
@@ -80,7 +78,7 @@ jobs:
     needs: build
     runs-on: self-hosted     # only needs ssh + rsync; no hardware here
     steps:
-      - name: Checkout harness            # the ref under test drives the Pi too
+      - name: Checkout harness            # the ref under test drives the tester too
         uses: actions/checkout@v4
 
       - uses: actions/download-artifact@v4
@@ -88,30 +86,31 @@ jobs:
           name: hil-bundles
           path: bundles/
 
-      - name: Set up SSH to the Pi
+      - name: Set up SSH to the tester
         run: |
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          echo "${{ secrets.HIL_PI_SSH_KEY }}" > ~/.ssh/hil_pi
-          chmod 600 ~/.ssh/hil_pi
-          ssh-keyscan -H "${{ secrets.HIL_PI_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          echo "${{ secrets.HIL_TESTER_SSH_KEY }}" > ~/.ssh/hil_tester
+          chmod 600 ~/.ssh/hil_tester
+          ssh-keyscan -H "${{ secrets.HIL_TESTER_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
 
-      - name: Flash + test on the Pi
+      - name: Flash + test on the tester
         run: |
-          PI="${{ secrets.HIL_PI_USER }}@${{ secrets.HIL_PI_HOST }}"
-          SSH="ssh -i ~/.ssh/hil_pi"
-          # push this exact harness checkout (keep the Pi's real serial-port config)
+          T="${{ secrets.HIL_TESTER_USER }}@${{ secrets.HIL_TESTER_HOST }}"
+          SSH="ssh -i ~/.ssh/hil_tester"
+          # push this exact harness checkout (keep the tester's real serial-port config)
           rsync -a -e "$SSH" --delete \
             --exclude '.git' --exclude '.pio' --exclude 'bundles' --exclude 'results' \
             --exclude 'hil_config.local.toml' --exclude '__pycache__' --exclude '*.pyc' \
-            ./ "$PI:esp32-ble-gamepad-hil/"
-          rsync -a -e "$SSH" --delete bundles/ "$PI:hil-bundles/"
-          $SSH "$PI" 'set -e
-            cd ~/esp32-ble-gamepad-hil
+            ./ "$T:ESP32-BLE-Gamepad-HIL/"
+          rsync -a -e "$SSH" --delete bundles/ "$T:hil-bundles/"
+          $SSH "$T" 'set -e
+            cd ~/ESP32-BLE-Gamepad-HIL
             rm -rf results && mkdir results
             rc=0
             for b in ~/hil-bundles/*/; do ./tester/test.sh "$b" --bench || rc=$?; done
+            echo; cat results/run-verdicts.md || true
             exit $rc'
-          rsync -a -e "$SSH" "$PI:esp32-ble-gamepad-hil/results/" results/
+          rsync -a -e "$SSH" "$T:ESP32-BLE-Gamepad-HIL/results/" results/
 
       - uses: actions/upload-artifact@v4
         if: always()

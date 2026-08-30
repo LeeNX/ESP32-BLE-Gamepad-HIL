@@ -60,15 +60,26 @@ def test_no_dropped_input(sweep):
         assert d["dropped"] == 0, f"{kind}: {d['dropped']}/{d['n']} paced events lost"
 
 
-def test_burst_curve_recorded(sweep):
-    """Firing sendReport() faster than ~1/connection-interval overflows NimBLE's
-    TX queue and the ESP32 drops silently -- so a gap=0 burst delivers almost
-    nothing. Just assert the curve was measured; the numbers live in the JSON
-    and bench-table.md. A proper 'fastest clean rate' metric is TODO."""
-    assert sweep["burst"], "no burst data"
-    assert any(b["gap_us"] == 0 for b in sweep["burst"])
-    ci = sweep["conn_interval_ms"]
-    assert ci is None or 5 <= ci <= 100
+def test_clean_rate(sweep):
+    """Fastest rate at which every distinct paced state change still reaches the
+    host (>=95% of values seen). NimBLE sends several packets per connection
+    event, so paced traffic keeps up well past 1/connection-interval -- here
+    it's the rig's own serial command channel that's the limit, not BLE. (The
+    unpaced-burst ceiling is much lower -- see the `burst` curve.)"""
+    clean = sweep["clean_rate_hz"]
+    assert clean is not None, "clean_rate never hit 95% delivery -- check the curve"
+    assert 5 <= clean <= 1000, f"clean rate {clean} Hz out of any plausible range"
+    # the slowest curve point should be a clean 100% -- if even ~10 Hz drops,
+    # something is wrong with delivery, not just rate.
+    slow = min(sweep["clean_rate_curve"], key=lambda c: c["rate_hz"] or 1e9)
+    assert slow["delivered_frac"] >= 0.95, (
+        f"only {slow['delivered_frac']:.0%} delivered at {slow['rate_hz']} Hz")
+
+
+def test_env_recorded(sweep):
+    e = sweep["env"]
+    assert e["kernel"] and e["arch"] and e["bluez"]
+    assert sweep["load"]["start"]["loadavg"] is not None
 
 
 def test_report_size_recorded(sweep):

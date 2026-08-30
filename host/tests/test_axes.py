@@ -107,5 +107,9 @@ def test_well_known_axis_codes(axis_sweep, tok, code):
 def test_slider2_maps_to_an_abs(axis_sweep):
     if "s2" not in axis_sweep:
         pytest.skip("profile has no s2 axis")
-    codes = {c for _, ch in axis_sweep["s2"] for c in ch}
-    assert len(codes) == 1, f"s2 moved {codes}"
+    # a real mapping moves exactly one ABS code on *every* probe, consistently.
+    # (Just "1 code somewhere in the union" lets a stray late event from the
+    # previous axis masquerade as a mapping.)
+    per_probe = [set(ch) for _, ch in axis_sweep["s2"]]
+    assert per_probe and all(len(p) == 1 for p in per_probe), f"s2 per-probe: {per_probe}"
+    assert len(set().union(*per_probe)) == 1

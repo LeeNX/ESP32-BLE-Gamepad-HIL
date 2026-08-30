@@ -17,6 +17,7 @@ PROFILE_LAYOUT = {
                      special="start,select,menu,home,back,volinc,voldec,volmute"),
     "minimal": dict(buttons=1, hats=0, special="none", axes=["x"]),
     "maxbtn": dict(buttons=128, hats=0, special="none", axes=[]),
+    "reports": dict(buttons=16, hats=0, special="none", axes=["x", "y"]),
 }
 
 

@@ -30,6 +30,7 @@
 #define HIL_PROFILE_SPECIALS 3
 #define HIL_PROFILE_MINIMAL 4
 #define HIL_PROFILE_MAXBTN 5
+#define HIL_PROFILE_REPORTS 6
 
 #ifndef HIL_PROFILE
 #define HIL_PROFILE HIL_PROFILE_DEFAULT
@@ -112,8 +113,35 @@
 #define HIL_AX_RZ 0
 #define HIL_AX_S1 0
 #define HIL_AX_S2 0
+#elif HIL_PROFILE == HIL_PROFILE_REPORTS
+// Output Report (host->device) + Feature Report (bidirectional) enabled, so
+// the host can exercise them via hidraw. Small button/axis set keeps the
+// descriptor well under 150 (the Output/Feature items add ~30 bytes).
+#define HIL_PROFILE_NAME "reports"
+#define HIL_BUTTON_COUNT 16
+#define HIL_HAT_COUNT 0
+#define HIL_AXES_MIN 0x0000
+#define HIL_AXES_MAX 0x7FFF
+#define HIL_SPECIALS 0
+#define HIL_AX_X 1
+#define HIL_AX_Y 1
+#define HIL_AX_Z 0
+#define HIL_AX_RX 0
+#define HIL_AX_RY 0
+#define HIL_AX_RZ 0
+#define HIL_AX_S1 0
+#define HIL_AX_S2 0
+#define HIL_OUTPUT_REPORT_LEN 16
+#define HIL_FEATURE_REPORT_LEN 16
 #else
 #error "unknown HIL_PROFILE"
+#endif
+
+#ifndef HIL_OUTPUT_REPORT_LEN
+#define HIL_OUTPUT_REPORT_LEN 0
+#endif
+#ifndef HIL_FEATURE_REPORT_LEN
+#define HIL_FEATURE_REPORT_LEN 0
 #endif
 
 #ifndef HIL_AX_X
@@ -169,6 +197,14 @@ static inline void hilApplyProfile(BleGamepadConfiguration &cfg)
     cfg.setWhichSpecialButtons(false, false, false, false, false, false, false, false);
 #endif
     cfg.setWhichSimulationControls(false, false, false, false, false);
+#if HIL_OUTPUT_REPORT_LEN
+    cfg.setEnableOutputReport(true);
+    cfg.setOutputReportLength(HIL_OUTPUT_REPORT_LEN);
+#endif
+#if HIL_FEATURE_REPORT_LEN
+    cfg.setEnableFeatureReport(true);
+    cfg.setFeatureReportLength(HIL_FEATURE_REPORT_LEN);
+#endif
     cfg.setAxesMin(HIL_AXES_MIN);
     cfg.setAxesMax(HIL_AXES_MAX);
     cfg.setVid(HIL_VID);

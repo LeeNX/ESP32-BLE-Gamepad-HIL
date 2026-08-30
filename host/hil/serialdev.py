@@ -8,7 +8,8 @@ import serial
 # First token of every command reply. The boot banner ("HIL hil_runner ready
 # ...") is deliberately not here so it gets skipped like any other stray line.
 REPLY_PREFIXES = ("OK", "ERR", "PONG", "CONN", "ID", "CONFIG",
-                  "DIS", "PNP", "RSIZE", "PEER", "BURST", "T")
+                  "DIS", "PNP", "RSIZE", "RMAP", "PEER", "BURST", "T",
+                  "FEATURE", "OUTPUT")
 
 
 class SerialError(RuntimeError):
@@ -142,11 +143,9 @@ class SerialDev:
             if "profile" in out and "buttons" in out:
                 break
             time.sleep(0.5)
-        out["buttons"] = int(out.get("buttons", 0))
-        out["hats"] = int(out.get("hats", 0))
+        for k in ("buttons", "hats", "axesMin", "axesMax", "feat", "out"):
+            out[k] = int(out.get(k, 0))
         out["axes"] = out.get("axes", "").split(",") if out.get("axes") else []
-        out["axesMin"] = int(out.get("axesMin", 0))
-        out["axesMax"] = int(out.get("axesMax", 0))
         return out
 
     def begin(self):
@@ -209,6 +208,39 @@ class SerialDev:
         """`RSIZE?` -> {report, descriptor} as ints."""
         d = self._kv(self.command("RSIZE?"))
         return {"report": int(d["report"]), "descriptor": int(d["descriptor"])}
+
+    def feature_report(self):
+        """`FEATURE?` -> (received: bool, data: bytes)."""
+        return self._recv_hex(self.command("FEATURE?"), "FEATURE")
+
+    def set_feature_report(self, data):
+        """`FEATURE SET <hex>` on the device."""
+        self.ok(f"FEATURE SET {bytes(data).hex().upper()}")
+
+    def output_report(self):
+        """`OUTPUT?` -> (received: bool, data: bytes)."""
+        return self._recv_hex(self.command("OUTPUT?"), "OUTPUT")
+
+    @staticmethod
+    def _recv_hex(line, tag):
+        parts = line.split(" ")
+        if parts[0] != tag or not parts[1].startswith("recv="):
+            raise SerialError(f"{tag}? -> {line!r}")
+        recv = parts[1] == "recv=1"
+        data = bytes.fromhex(parts[2]) if len(parts) > 2 and parts[2] else b""
+        return recv, data
+
+    def report_descriptor(self):
+        """`RMAP?` -> the HID report descriptor bytes the library generated."""
+        r = self.command("RMAP?", timeout=8.0)
+        parts = r.split(" ", 2)
+        if len(parts) != 3 or parts[0] != "RMAP":
+            raise SerialError(f"RMAP? -> {r!r}")
+        length, hexstr = int(parts[1]), parts[2].strip()
+        data = bytes.fromhex(hexstr)
+        if len(data) != length:
+            raise SerialError(f"RMAP? length {length} != {len(data)} hex bytes")
+        return data
 
     def peer_info(self):
         """`PEERINFO?` -> connection params, intervals converted to ms."""

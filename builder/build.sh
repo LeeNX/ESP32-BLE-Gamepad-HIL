@@ -32,7 +32,7 @@ done
 
 profile_suffix() { case "$1" in
   default) echo "" ;; signed-axes) echo "-signed" ;; specials) echo "-specials" ;;
-  minimal) echo "-minimal" ;; maxbtn) echo "-maxbtn" ;;
+  minimal) echo "-minimal" ;; maxbtn) echo "-maxbtn" ;; reports) echo "-reports" ;;
   *) echo "unknown profile: $1" >&2; exit 2 ;; esac; }
 board_chip() { case "$1" in
   esp32dev) echo esp32 ;; esp32c3) echo esp32c3 ;; esp32s3) echo esp32s3 ;; esp32c6) echo esp32c6 ;;
