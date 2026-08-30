@@ -19,9 +19,14 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 def sweep(bench_enabled, connected_dut, gamepad, rigcfg, pytestconfig):
     _evdev, cap = gamepad
     cfg = connected_dut.config()
-    result = bench.run_sweep(connected_dut, cap, cfg, board=rigcfg["name"],
-                             profile=rigcfg["profile"],
-                             lib_describe=_lib_describe(pytestconfig))
+    result = bench.run_sweep(
+        connected_dut,
+        cap,
+        cfg,
+        board=rigcfg["name"],
+        profile=rigcfg["profile"],
+        lib_describe=_lib_describe(pytestconfig),
+    )
     path = bench.write_result(result, REPO / "results")
     print(f"\n[bench] wrote {path}")
     return result
@@ -31,9 +36,9 @@ def _lib_describe(pytestconfig):
     bundle = pytestconfig.getoption("bundle")
     if bundle:
         import json
+
         try:
-            return json.loads(
-                (pathlib.Path(bundle) / "manifest.json").read_text())["lib_describe"]
+            return json.loads((pathlib.Path(bundle) / "manifest.json").read_text())["lib_describe"]
         except Exception:
             pass
     return ""
@@ -75,7 +80,8 @@ def test_clean_rate(sweep):
     # something is wrong with delivery, not just rate.
     slow = min(sweep["clean_rate_curve"], key=lambda c: c["rate_hz"] or 1e9)
     assert slow["delivered_frac"] >= 0.95, (
-        f"only {slow['delivered_frac']:.0%} delivered at {slow['rate_hz']} Hz")
+        f"only {slow['delivered_frac']:.0%} delivered at {slow['rate_hz']} Hz"
+    )
 
 
 def test_env_recorded(sweep):

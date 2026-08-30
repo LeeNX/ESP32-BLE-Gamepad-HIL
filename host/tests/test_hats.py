@@ -19,8 +19,15 @@ from evdev import ecodes
 
 # direction code (BleGamepadConfiguration.h DPAD_*) -> (x, y)
 DIR_VECTORS = {
-    0: (0, 0), 1: (0, -1), 2: (1, -1), 3: (1, 0), 4: (1, 1),
-    5: (0, 1), 6: (-1, 1), 7: (-1, 0), 8: (-1, -1),
+    0: (0, 0),
+    1: (0, -1),
+    2: (1, -1),
+    3: (1, 0),
+    4: (1, 1),
+    5: (0, 1),
+    6: (-1, 1),
+    7: (-1, 0),
+    8: (-1, -1),
 }
 HAT0 = (ecodes.ABS_HAT0X, ecodes.ABS_HAT0Y)
 ALL_HAT_CODES = set(range(ecodes.ABS_HAT0X, ecodes.ABS_HAT3Y + 1))
@@ -44,8 +51,9 @@ def hat_sweep(connected_dut, gamepad):
             cap.collect(settle=0.15)
             cap.drain()
             connected_dut.hat(hat, d)
-            dirs[d] = {c: v for c, v in cap.abs_changes(cap.collect()).items()
-                       if c in ALL_HAT_CODES}
+            dirs[d] = {
+                c: v for c, v in cap.abs_changes(cap.collect()).items() if c in ALL_HAT_CODES
+            }
         connected_dut.hat(hat, 0)
         result[hat] = dirs
     return result
@@ -61,7 +69,8 @@ def test_working_hat_is_the_last_index(hat_sweep, connected_dut):
     last = _last_hat(connected_dut)
     codes = {c for ch in hat_sweep[last].values() for c in ch}
     assert codes and codes <= set(HAT0), (
-        f"HAT {last} expected to drive ABS_HAT0, got {codes or 'nothing'}")
+        f"HAT {last} expected to drive ABS_HAT0, got {codes or 'nothing'}"
+    )
     for lower in range(1, last):
         moved = {c for ch in hat_sweep[lower].values() for c in ch}
         assert not moved, f"HAT {lower} unexpectedly moved {moved} (reversal quirk changed?)"
@@ -78,18 +87,20 @@ def test_working_hat_direction_vectors(hat_sweep, connected_dut):
         want = DIR_VECTORS[d]
         if got != want:
             problems.append(f"dir {d}: got {got} want {want}")
-    assert not problems, "HAT {}: ".format(last) + "; ".join(problems)
+    assert not problems, f"HAT {last}: " + "; ".join(problems)
 
 
-@pytest.mark.xfail(reason="Linux hid-input only creates ABS_HAT0 for the first "
-                          "HID Usage(Hat Switch); this library's extra hat "
-                          "fields get no ABS code", strict=True)
+@pytest.mark.xfail(
+    reason="Linux hid-input only creates ABS_HAT0 for the first "
+    "HID Usage(Hat Switch); this library's extra hat "
+    "fields get no ABS code",
+    strict=True,
+)
 def test_extra_hats_map(hat_sweep, connected_dut):
     last = _last_hat(connected_dut)
     if last < 2:
         pytest.skip("single-hat profile")
     # firmware HAT (last-1) should drive ABS_HAT1, etc. -- assert at least one
     # of the lower hats produces any hat-axis motion.
-    moved = {c for lower in range(1, last)
-             for ch in hat_sweep[lower].values() for c in ch}
+    moved = {c for lower in range(1, last) for ch in hat_sweep[lower].values() for c in ch}
     assert moved, "no extra hat surfaced"

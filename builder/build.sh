@@ -7,6 +7,9 @@
 #   LIB_REF=some-branch builder/build.sh               # check the library out first
 #   builder/build.sh --boards "esp32dev" --profiles "default specials"
 #   PUSH=1 builder/build.sh                            # also rsync bundles to [tester].ssh_host
+#
+# SC2206: BOARDS / PROFILES are space-separated lists we deliberately word-split.
+# shellcheck disable=SC2206
 set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO=$(pwd)

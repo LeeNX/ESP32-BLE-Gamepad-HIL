@@ -1,0 +1,55 @@
+# Run on every commit:  pre-commit install       (once, after cloning)
+# Run against everything: pre-commit run --all-files
+#
+# CI runs this same file (see .github/workflows/lint.yml), so a green
+# `pre-commit run --all-files` locally means the lint job will pass.
+#
+# actionlint uses the `-system` hook -- install the binary yourself
+# (`brew install actionlint`, or the download script in CONTRIBUTING.md).
+
+minimum_pre_commit_version: "3.5.0"
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-yaml
+      - id: check-added-large-files
+        args: [--maxkb=512]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.5
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # No shfmt: the shell scripts are hand-formatted for density (compact case
+  # arms, `a; b` one-liners) in a way shfmt can't preserve. shellcheck (below)
+  # is the gate that matters -- it catches real bugs.
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+        args: [-x]
+
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.23.2
+    hooks:
+      - id: markdownlint-cli2   # config in .markdownlint-cli2.yaml
+
+  - repo: https://github.com/ComPWA/taplo-pre-commit
+    rev: v0.9.3
+    hooks:
+      - id: taplo-lint          # TOML syntax check; formatting is not enforced
+        args: [--no-schema]     # offline, and the rig config has no schema anyway
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint-system   # needs actionlint on PATH

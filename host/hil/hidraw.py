@@ -23,7 +23,7 @@ def _IOC(direction, typ, nr, size):
     return (direction << 30) | (ord(typ) << 8) | nr | (size << 16)
 
 
-HIDIOCGRDESCSIZE = _IOC(_IOC_READ, "H", 0x01, 4)              # __u32
+HIDIOCGRDESCSIZE = _IOC(_IOC_READ, "H", 0x01, 4)  # __u32
 _HIDRAW_MAX_DESC = 4096
 HIDIOCGRDESC = _IOC(_IOC_READ, "H", 0x02, 4 + _HIDRAW_MAX_DESC)  # struct {u32 size; u8 value[4096]}
 
@@ -74,12 +74,11 @@ class HidRaw:
             self.fd = None
 
     def descriptor(self):
-        size = struct.unpack("I", fcntl.ioctl(self.fd, HIDIOCGRDESCSIZE,
-                                              struct.pack("I", 0)))[0]
+        size = struct.unpack("I", fcntl.ioctl(self.fd, HIDIOCGRDESCSIZE, struct.pack("I", 0)))[0]
         buf = bytearray(4 + _HIDRAW_MAX_DESC)
         struct.pack_into("I", buf, 0, size)
         fcntl.ioctl(self.fd, HIDIOCGRDESC, buf)
-        return bytes(buf[4:4 + size])
+        return bytes(buf[4 : 4 + size])
 
     def get_feature(self, report_id, length):
         buf = bytearray(length + 1)
@@ -103,12 +102,21 @@ class HidRaw:
 
 # --- minimal HID report-descriptor item walker ----------------------
 _ITEM_TYPE = {0: "Main", 1: "Global", 2: "Local"}
-_MAIN = {0x80: "Input", 0x90: "Output", 0xB0: "Feature",
-         0xA0: "Collection", 0xC0: "EndCollection"}
-_GLOBAL = {0x00: "UsagePage", 0x10: "LogicalMin", 0x20: "LogicalMax",
-           0x30: "PhysicalMin", 0x40: "PhysicalMax", 0x50: "UnitExp",
-           0x60: "Unit", 0x70: "ReportSize", 0x80: "ReportID",
-           0x90: "ReportCount", 0xA0: "Push", 0xB0: "Pop"}
+_MAIN = {0x80: "Input", 0x90: "Output", 0xB0: "Feature", 0xA0: "Collection", 0xC0: "EndCollection"}
+_GLOBAL = {
+    0x00: "UsagePage",
+    0x10: "LogicalMin",
+    0x20: "LogicalMax",
+    0x30: "PhysicalMin",
+    0x40: "PhysicalMax",
+    0x50: "UnitExp",
+    0x60: "Unit",
+    0x70: "ReportSize",
+    0x80: "ReportID",
+    0x90: "ReportCount",
+    0xA0: "Push",
+    0xB0: "Pop",
+}
 _LOCAL = {0x00: "Usage", 0x10: "UsageMin", 0x20: "UsageMax"}
 
 
@@ -123,7 +131,7 @@ def decode_items(desc):
         tag, typ = b & 0xF0, (b >> 2) & 0x03
         val = None
         if size:
-            val = int.from_bytes(desc[i:i + size], "little")
+            val = int.from_bytes(desc[i : i + size], "little")
             i += size
         table = {0: _MAIN, 1: _GLOBAL, 2: _LOCAL}.get(typ, {})
         name = table.get(tag, f"{_ITEM_TYPE.get(typ, '?')}:0x{tag:02X}")

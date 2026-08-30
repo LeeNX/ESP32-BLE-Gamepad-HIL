@@ -11,7 +11,7 @@ arrive intact, and how fast do reports get through the air.
 The rig is split into two roles so the BLE host can be a small board (a
 Raspberry Pi) that can't build firmware in reasonable time:
 
-```
+```text
  BUILDER (CI runner / dev machine)          TESTER (Raspberry Pi + ESP32 + BLE)
  ┌────────────────────────────┐   bundle   ┌──────────────────────────────────┐
  │ builder/build.sh:          │  (rsync/   │ tester/test.sh:                  │
@@ -124,7 +124,7 @@ ESP32 (via a powered hub), and `./run.sh` builds, flashes and tests in one go.
 **The tester box must be Linux** — the suite asserts on `/dev/input/event*` via
 `evdev` and pairs through BlueZ `bluetoothctl`. **macOS can be the builder
 only** (`builder/build.sh --push` to a Linux tester); see
-[macOS as a tester](#macos-as-a-tester--unsupported--gap-list) for what a macOS
+[macOS as a tester](#macos-as-a-tester-unsupported--gap-list) for what a macOS
 tester port would take.
 
 ## Running
@@ -301,6 +301,13 @@ The SuperMini has **no onboard USB-UART chip**, so an external adapter set to
 
 ## CI
 
+Two workflows:
+
+- **`.github/workflows/lint.yml`** — formatting + linting (ruff, shellcheck,
+  markdownlint, taplo, actionlint) via `pre-commit`. Runs on every push and PR,
+  no hardware. See [CONTRIBUTING.md](CONTRIBUTING.md).
+- **`.github/workflows/hil.yml`** — the hardware suite, below.
+
 `.github/workflows/hil.yml` runs entirely on **GitHub-hosted runners** — no
 self-hosted runner, no inbound ports on your network:
 
@@ -321,12 +328,14 @@ serial ports) is never overwritten.
    `sudo tailscale up` (tag it, e.g. `--advertise-tags=tag:hil-rig`). Note its
    MagicDNS name.
 2. **Tailscale ACL**: allow `tag:ci` → the tester on `tcp:22`, e.g.
+
    ```jsonc
    "acls": [
      { "action": "accept", "src": ["tag:ci"], "dst": ["tag:hil-rig:22"] }
    ],
    "tagOwners": { "tag:ci": ["autogroup:admin"], "tag:hil-rig": ["autogroup:admin"] }
    ```
+
 3. **OAuth client** (Tailscale admin → Settings → OAuth clients): scope
    *Auth Keys* (write), tag `tag:ci`. → `TS_OAUTH_CLIENT_ID` / `TS_OAUTH_SECRET`.
 4. **Repo secrets**: `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, `HIL_TESTER_HOST`

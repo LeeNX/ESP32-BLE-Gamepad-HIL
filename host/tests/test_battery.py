@@ -16,8 +16,8 @@ LEVELS = [0, 1, 42, 99, 100]
 def test_battery_level_roundtrips(connected_dut, gatt, bt_mac, level):
     connected_dut.battery(level)
     time.sleep(1.0)  # let the notification propagate to BlueZ
-    assert gatt.read_battery_level(bt_mac) == level          # raw 0x2A19 read
-    assert gatt.read_battery_bluez(bt_mac) == level          # BlueZ Battery1 ingested it
+    assert gatt.read_battery_level(bt_mac) == level  # raw 0x2A19 read
+    assert gatt.read_battery_bluez(bt_mac) == level  # BlueZ Battery1 ingested it
 
 
 def test_battery_level_userland(connected_dut, gatt, bt_mac):
@@ -32,13 +32,16 @@ def test_battery_level_userland(connected_dut, gatt, bt_mac):
     assert gatt.read_battery_bluez(bt_mac) == 63
 
     up = gatt.read_battery_upower(bt_mac)
-    if up is not None:            # UPower present -> must agree with BlueZ
+    if up is not None:  # UPower present -> must agree with BlueZ
         assert up == 63
     else:
         print("UPower not installed -- Battery1 D-Bus check stands alone")
 
-    hid_ps = [p for p in pathlib.Path("/sys/class/power_supply").glob("*")
-              if bt_mac.replace(":", "-").lower() in p.name.lower()]
+    hid_ps = [
+        p
+        for p in pathlib.Path("/sys/class/power_supply").glob("*")
+        if bt_mac.replace(":", "-").lower() in p.name.lower()
+    ]
     assert not hid_ps, f"unexpected /sys/class/power_supply entry: {hid_ps}"
 
 

@@ -8,10 +8,14 @@ from evdev import ecodes
 
 # ABS_HAT0X..ABS_HAT3Y -- the 8 hat axis codes, kept separate from stick axes.
 HAT_ABS_CODES = {
-    ecodes.ABS_HAT0X, ecodes.ABS_HAT0Y,
-    ecodes.ABS_HAT1X, ecodes.ABS_HAT1Y,
-    ecodes.ABS_HAT2X, ecodes.ABS_HAT2Y,
-    ecodes.ABS_HAT3X, ecodes.ABS_HAT3Y,
+    ecodes.ABS_HAT0X,
+    ecodes.ABS_HAT0Y,
+    ecodes.ABS_HAT1X,
+    ecodes.ABS_HAT1Y,
+    ecodes.ABS_HAT2X,
+    ecodes.ABS_HAT2Y,
+    ecodes.ABS_HAT3X,
+    ecodes.ABS_HAT3Y,
 }
 
 
@@ -41,7 +45,8 @@ def find_gamepad(name_contains, timeout=25.0):
                 stick_axes = abs_codes - HAT_ABS_CODES
                 has_gamepad_keys = any(
                     ecodes.BTN_JOYSTICK <= c <= ecodes.BTN_TRIGGER_HAPPY1 + 63
-                    for c in caps.get(ecodes.EV_KEY, []))
+                    for c in caps.get(ecodes.EV_KEY, [])
+                )
                 if ecodes.EV_KEY in caps and stick_axes:
                     return dev
                 if has_gamepad_keys and fallback is None:

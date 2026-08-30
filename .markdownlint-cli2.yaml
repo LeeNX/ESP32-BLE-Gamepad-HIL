@@ -1,0 +1,15 @@
+# markdownlint-cli2 config -- https://github.com/DavidAnson/markdownlint
+config:
+  MD013: false          # line length -- prose and tables run long here
+  MD033: false          # inline HTML is fine in docs
+  MD060: false          # table pipe spacing -- not worth normalising
+  MD024:
+    siblings_only: true  # "Setup" may appear under different parents
+
+globs:
+  - "**/*.md"
+
+ignores:
+  - "bundles/**"
+  - "results/**"
+  - "firmware/.pio/**"

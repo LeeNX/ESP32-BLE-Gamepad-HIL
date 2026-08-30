@@ -24,8 +24,12 @@ def _u(short):
 
 
 DIS_CHARS = {
-    "model": _u(0x2A24), "serial": _u(0x2A25), "fw": _u(0x2A26),
-    "hw": _u(0x2A27), "sw": _u(0x2A28), "mfr": _u(0x2A29),
+    "model": _u(0x2A24),
+    "serial": _u(0x2A25),
+    "fw": _u(0x2A26),
+    "hw": _u(0x2A27),
+    "sw": _u(0x2A28),
+    "mfr": _u(0x2A29),
 }
 PNP_UUID = _u(0x2A50)
 BATTERY_LEVEL_UUID = _u(0x2A19)
@@ -56,8 +60,11 @@ def _decode_power_state(raw):
         return None
     b = raw[0]
     vals = {f: (b >> (2 * i)) & 0b11 for i, f in enumerate(_POWER_FIELDS)}
-    return {"_byte": b, **vals,
-            **{f"{f}_meaning": _POWER_MEANING[f][vals[f]] for f in _POWER_FIELDS}}
+    return {
+        "_byte": b,
+        **vals,
+        **{f"{f}_meaning": _POWER_MEANING[f][vals[f]] for f in _POWER_FIELDS},
+    }
 
 
 def _dev_path(mac):
@@ -90,6 +97,7 @@ async def _read_char(bus, path):
 async def _connect_bus():
     from dbus_fast import BusType
     from dbus_fast.aio import MessageBus
+
     return await MessageBus(bus_type=BusType.SYSTEM).connect()
 
 
@@ -115,7 +123,8 @@ async def _read_uuids(mac, uuids):
 
 async def _read_all(mac):
     raw = await _read_uuids(
-        mac, [*DIS_CHARS.values(), PNP_UUID, BATTERY_LEVEL_UUID, POWER_STATE_UUID])
+        mac, [*DIS_CHARS.values(), PNP_UUID, BATTERY_LEVEL_UUID, POWER_STATE_UUID]
+    )
     di = {}
     for key, uuid in DIS_CHARS.items():
         b = raw.get(uuid.lower())
@@ -174,8 +183,9 @@ def read_battery_upower(mac):
         match = next((ln for ln in listed.splitlines() if path in ln), None)
         if not match:
             return None
-        out = subprocess.run(["upower", "-i", match.strip()],
-                             capture_output=True, text=True, timeout=10).stdout
+        out = subprocess.run(
+            ["upower", "-i", match.strip()], capture_output=True, text=True, timeout=10
+        ).stdout
         m = re.search(r"percentage:\s*([0-9.]+)", out)
         return round(float(m.group(1))) if m else None
     except Exception:
