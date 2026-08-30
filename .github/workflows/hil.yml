@@ -1,0 +1,152 @@
+# Build hil_runner firmware on a GitHub-hosted runner, then flash + run the BLE
+# HID suite on the physical tester -- reached over an ephemeral Tailscale node
+# the runner brings up for the job (no self-hosted runner, no inbound ports).
+#
+# Runs on push, on manual dispatch, and on repository_dispatch (so the library
+# repo can trigger it). `lib_ref` selects the ESP32-BLE-Gamepad ref under test.
+#
+# Required repo secrets:
+#   TS_OAUTH_CLIENT_ID / TS_OAUTH_SECRET   Tailscale OAuth client (scope:
+#       "Auth Keys" write) tagged `tag:ci`. The ACL must let `tag:ci` reach the
+#       tester on tcp:22.
+#   HIL_TESTER_HOST      the tester's Tailscale MagicDNS name (e.g. hil-pi)
+#   HIL_TESTER_USER      ssh user on the tester
+#   HIL_TESTER_SSH_KEY   private key authorised on the tester (no passphrase)
+#
+# The tester has this repo at ~/ESP32-BLE-Gamepad-HIL with hil_config.local.toml
+# filled in (board ports), its ~/.venvs/hil from tester/requirements.txt, the
+# udev rule, the ESP32(s) + a BLE adapter, and Tailscale up (tester/bootstrap-host.sh
+# installs it). It only ever flashes prebuilt bundles -- no PlatformIO.
+
+name: HIL
+
+on:
+  push:
+    branches: [main, "hil-*"]
+  workflow_dispatch:
+    inputs:
+      lib_repo:
+        description: ESP32-BLE-Gamepad git URL
+        default: https://github.com/LeeNX/ESP32-BLE-Gamepad.git
+      lib_ref:
+        description: library ref to test
+        default: master
+  repository_dispatch:
+    types: [hil]
+
+concurrency:
+  group: hil-rig          # one physical rig -- never run two at once
+  cancel-in-progress: false
+
+env:
+  LIB_REPO: ${{ inputs.lib_repo || github.event.client_payload.lib_repo || 'https://github.com/LeeNX/ESP32-BLE-Gamepad.git' }}
+  LIB_REF:  ${{ inputs.lib_ref  || github.event.client_payload.lib_ref  || 'master' }}
+  BOARDS: esp32dev
+  PROFILES: default signed-axes specials minimal maxbtn reports
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout harness
+        uses: actions/checkout@v4
+
+      - name: Checkout library under test
+        run: |
+          git clone --depth 1 --branch "$LIB_REF" "$LIB_REPO" "$HOME/ci-lib" \
+            || git clone "$LIB_REPO" "$HOME/ci-lib"
+          git -C "$HOME/ci-lib" checkout "$LIB_REF"
+          git -C "$HOME/ci-lib" rev-parse --short HEAD
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini') }}
+
+      - name: Build firmware bundles
+        run: |
+          cat > hil_config.local.toml <<EOF
+          [rig]
+          lib_dir = "$HOME/ci-lib"
+          pio = "$(command -v pio)"
+          EOF
+          ./builder/build.sh --boards "$BOARDS" --profiles "$PROFILES"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hil-bundles
+          path: bundles/
+          retention-days: 7
+
+  hil-test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout harness            # the ref under test drives the tester too
+        uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: hil-bundles
+          path: bundles/
+
+      - name: Join tailnet (ephemeral)
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Set up SSH to the tester
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.HIL_TESTER_SSH_KEY }}" > ~/.ssh/hil_tester
+          chmod 600 ~/.ssh/hil_tester
+          cat >> ~/.ssh/config <<EOF
+          Host hil-tester
+            HostName ${{ secrets.HIL_TESTER_HOST }}
+            User ${{ secrets.HIL_TESTER_USER }}
+            IdentityFile ~/.ssh/hil_tester
+            StrictHostKeyChecking accept-new
+            ConnectTimeout 20
+          EOF
+
+      - name: Flash + test on the tester
+        run: |
+          SSH="ssh"
+          # push this exact harness checkout (keep the tester's real serial-port config)
+          rsync -a -e "$SSH" --delete \
+            --exclude '.git' --exclude '.pio' --exclude 'bundles' --exclude 'results' \
+            --exclude 'hil_config.local.toml' --exclude '__pycache__' --exclude '*.pyc' \
+            ./ hil-tester:ESP32-BLE-Gamepad-HIL/
+          rsync -a -e "$SSH" --delete bundles/ hil-tester:hil-bundles/
+          ssh hil-tester 'set -e
+            cd ~/ESP32-BLE-Gamepad-HIL
+            rm -rf results && mkdir results
+            rc=0
+            for b in ~/hil-bundles/*/; do ./tester/test.sh "$b" --bench || rc=$?; done
+            echo; cat results/run-verdicts.md || true
+            exit $rc'
+          rsync -a -e "$SSH" hil-tester:ESP32-BLE-Gamepad-HIL/results/ results/
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hil-results
+          path: results/
+
+      - name: Publish test report
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: HIL
+          path: results/junit-*.xml
+          reporter: java-junit

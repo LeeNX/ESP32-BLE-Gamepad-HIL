@@ -49,6 +49,9 @@ def pytest_addoption(parser):
     parser.addoption("--bench", action="store_true",
                      help="run the slow latency/throughput benchmark tests "
                           "(test_latency.py) and let bench.py record results")
+    parser.addoption("--update-golden", action="store_true",
+                     help="rewrite firmware/golden/<profile>.hiddesc from the "
+                          "live device instead of asserting against it")
 
 
 # --- config -----------------------------------------------------------------
@@ -81,7 +84,7 @@ def rigcfg(pytestconfig):
 # --- firmware --------------------------------------------------------------
 PROFILE_ENV_SUFFIX = {
     "default": "", "signed-axes": "-signed", "specials": "-specials",
-    "minimal": "-minimal", "maxbtn": "-maxbtn",
+    "minimal": "-minimal", "maxbtn": "-maxbtn", "reports": "-reports",
 }
 
 
@@ -221,6 +224,38 @@ def gamepad(rigcfg, bt_mac):
         n.close()
 
 
+def _evdev_alive(dev):
+    try:
+        dev.capabilities()
+        return True
+    except OSError:
+        return False
+
+
+def _recover_link(rigcfg, btctl, connected_dut, cap, mac):
+    """A transient BLE drop takes the evdev node with it (ENODEV). BlueZ
+    auto-reconnects a trusted bond; nudge it and re-acquire the node."""
+    name = rigcfg["device_name"]
+    print(f"\n[recover] evdev node gone -- reconnecting {mac}")
+    for _ in range(20):
+        if not bluetooth.is_connected(mac):
+            btctl.connect(mac)
+        try:
+            connected_dut.wait_connected(timeout=3)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            dev = find_gamepad(name, timeout=5)
+        except Exception:  # noqa: BLE001
+            time.sleep(2)
+            continue
+        cap.dev.close() if cap.dev else None
+        cap.dev = dev
+        print(f"[recover] back on {dev.path}")
+        return
+    pytest.fail(f"lost the BLE link to {mac} and could not reconnect")
+
+
 @pytest.fixture(scope="session")
 def all_nodes(rigcfg, bt_mac):
     nodes = find_all_nodes(rigcfg["device_name"])
@@ -258,7 +293,14 @@ def bench_enabled(pytestconfig):
 # --- per-test reset --------------------------------------------------------
 @pytest.fixture(autouse=True)
 def _reset(request):
-    if "connected_dut" in request.fixturenames and "gamepad" in request.fixturenames:
-        request.getfixturevalue("connected_dut").reset()
-        request.getfixturevalue("gamepad")[1].drain()
+    fx = request.fixturenames
+    if "connected_dut" in fx and "gamepad" in fx:
+        dut = request.getfixturevalue("connected_dut")
+        _, cap = request.getfixturevalue("gamepad")
+        if not _evdev_alive(cap.dev):
+            _recover_link(request.getfixturevalue("rigcfg"),
+                          request.getfixturevalue("btctl"), dut, cap,
+                          request.getfixturevalue("bt_mac"))
+        dut.reset()
+        cap.drain()
     yield

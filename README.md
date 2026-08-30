@@ -1,18 +1,18 @@
 # ESP32-BLE-Gamepad — hardware-in-the-loop test rig
 
 An ESP32 runs the `hil_runner` firmware; this harness drives it over USB serial
-and asserts the resulting BLE HID events on `/dev/input/eventN`. It answers what
-the compile-only CI can't: does `press(5)` actually produce one distinct key
-event on a host, do axes/hats/special buttons map correctly, does a config
-change survive a re-pair.
+and asserts the resulting BLE HID + GATT behaviour on a Linux host. It answers
+what the [library](https://github.com/LeeNX/ESP32-BLE-Gamepad)'s compile-only CI
+can't: does `press(5)` actually produce one distinct key event on a host, do
+axes / hats / special buttons map correctly, does the Device Information / PnP /
+battery data reach a GATT client, does the generated HID report descriptor
+arrive intact, and how fast do reports get through the air.
 
-The rig is split into two roles so the BLE host can be a small board (the
-dedicated Raspberry Pi 3B+ tester at `192.168.101.16`, ssh `bot-gitea-esp32-hil`,
-with both MCUs — `esp32dev` + `esp32c3` — attached) that can't build firmware in
-reasonable time:
+The rig is split into two roles so the BLE host can be a small board (a
+Raspberry Pi) that can't build firmware in reasonable time:
 
 ```
- BUILDER (CI runner / dev machine)          TESTER (Raspberry Pi 3B+, 192.168.101.16)
+ BUILDER (CI runner / dev machine)          TESTER (Raspberry Pi + ESP32 + BLE)
  ┌────────────────────────────┐   bundle   ┌──────────────────────────────────┐
  │ builder/build.sh:          │  (rsync/   │ tester/test.sh:                  │
  │  pio run  (lib under test) │   CI       │  tester/flash.py  (esptool only) │
@@ -23,232 +23,234 @@ reasonable time:
                                            └──────────────────────────────────┘
 ```
 
-The library repo drives this end to end with `scripts/hil.sh` (build here,
-push, test on the Pi, pull results) — see that repo's `HilTesting.md`.
-
 - **builder** needs PlatformIO. `builder/build.sh` compiles `hil_runner`
-  against the library-under-test and writes a **bundle**: the flashable
-  `.bin` parts + `manifest.json` (chip, flash offsets, sha256s, lib git sha).
+  against the library under test and writes a **bundle**: the flashable `.bin`
+  parts + `manifest.json` (chip, flash offsets, sha256s, lib git sha).
 - **tester** needs only `esptool` + the pytest deps (all pure-Python /
   lightweight — fine on a Pi). `tester/test.sh` flashes a bundle and runs the
   suite.
 - Command injection is over USB serial, **not** BLE — an independent channel,
   so the harness never depends on the thing under test being up.
 
-One box can be both (`./run.sh` does builder then tester locally).
+The library repo drives this end to end with its `scripts/hil.sh` (build,
+push to the tester, run, pull results). One box can be both roles
+(`./run.sh` does builder then tester locally).
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `firmware/` | PlatformIO project — `hil_runner` serial-command firmware, `hil_profile.h` layout profiles: `default` (64 btn/4 hat/8 axis), `signed-axes` (same, −32767 axis min), `specials` (16 btn/1 hat/8 axis/8 special), `minimal` (1 btn/1 axis), `maxbtn` (128 btn, no hats/axes) |
+| `firmware/` | PlatformIO project — `hil_runner` serial-command firmware, `hil_profile.h` layout profiles (see below) |
 | `builder/build.sh` `builder/make_bundle.py` | compile → firmware bundle(s) → optional `--push` rsync to the tester. Library path comes from `$HIL_LIB_DIR` (exported from `rig.lib_dir`) |
-| `tester/bootstrap-host.sh` (root) `tester/bootstrap.sh` (user) | tester provisioning, split: privileged half (apt/bluetooth/groups/udev) vs unprivileged half (venv/config/health check) |
+| `tester/bootstrap-host.sh` (root) `tester/bootstrap.sh` (user) | tester provisioning, split: privileged half (apt / bluetooth / groups / udev) vs unprivileged half (venv / config / health check) |
 | `tester/flash.py` `tester/test.sh` | flash a bundle with esptool, run the suite + benchmark, write `results/` |
-| `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite. Helpers: `serialdev` (hil_runner protocol), `evdev_utils`, `bluetooth`, `gatt` (DIS/PnP/battery over BlueZ D-Bus), `latency` + `bench` (the benchmark), `charts` (JSON → table + SVGs), `summarize` |
+| `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite. Helpers: `serialdev`, `evdev_utils`, `bluetooth`, `gatt` (DIS/PnP/battery over BlueZ D-Bus), `hidraw` (Feature/Output reports + descriptor), `latency`+`bench`, `sysinfo`, `charts`, `summarize` |
 | `hil_config.toml` (+ gitignored `hil_config.local.toml`) | per-machine ports, ssh host, builder board/profile matrix |
 | `run.sh` | one-box: build all bundles then flash+test each |
-| `.gitea/workflows/hil.yml` | Gitea CI: build job → SSH-to-Pi test job |
+| `.github/workflows/hil.yml` | CI: build job → SSH-to-tester test job |
+
+### Compile profiles (`firmware/include/hil_profile.h`)
+
+| Profile | Layout | Purpose |
+|---|---|---|
+| `default` | 64 btn, 4 hat, 8 axis (0..32767) | mirrors `TestAll.ino` — known good |
+| `signed-axes` | as default, axis min −32767 | signed-axis convention |
+| `specials` | 16 btn, 1 hat, 8 axis, 8 special buttons | consumer/desktop special usages |
+| `minimal` | 1 btn, 1 axis | smallest possible input report |
+| `maxbtn` | 128 btn, no hats/axes | the library's button ceiling |
+| `reports` | 16 btn, 2 axis, Output + Feature reports | `setEnableOutputReport` / `setEnableFeatureReport` |
+
+Each profile is a distinct HID report descriptor; the host caches the descriptor
+at bond time, so switching profiles on a board makes the old bond stale and the
+harness re-pairs automatically (it records `{mac, profile}` per device in
+`~/.cache/esp32-hil/state.json`).
 
 ## Setup
 
-### Builder (has PlatformIO — e.g. cylon)
+### Builder (has PlatformIO)
 
 ```bash
-git clone <gitea>/leet/esp32-ble-gamepad-hil ~/src/esp32-ble-gamepad-hil
-git clone git@github.com:LeeNX/ESP32-BLE-Gamepad ~/src/ESP32-BLE-Gamepad
+git clone https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL ~/src/ESP32-BLE-Gamepad-HIL
+git clone https://github.com/LeeNX/ESP32-BLE-Gamepad     ~/src/ESP32-BLE-Gamepad
 python3 -m venv ~/.venvs/pio && ~/.venvs/pio/bin/pip install platformio
-ln -sf ~/.venvs/pio/bin/pio ~/.local/bin/pio
 ```
 
 `hil_config.local.toml` on the builder only needs `[rig] lib_dir` / `pio` if
-they differ from the template, plus `[tester] ssh_host` for `--push`.
+they differ from the template, plus `[tester] ssh_host` / `ssh_user` for
+`--push`.
 
-### Tester (has the ESP32 + a BLE adapter — e.g. the Pi)
+### Tester (has the ESP32 + a BLE adapter)
 
-Bootstrap is split so the CI/test user never needs root:
+Bootstrap is split so the CI / test user never needs root:
 
 ```bash
-git clone <gitea>/leenx-foss/esp32-ble-gamepad-hil ~/esp32-ble-gamepad-hil
+git clone https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL ~/ESP32-BLE-Gamepad-HIL
 
 # once, by a host admin -- the only step that touches root:
-sudo ~/esp32-ble-gamepad-hil/tester/bootstrap-host.sh --user bot-gitea-esp32-hil
+sudo ~/ESP32-BLE-Gamepad-HIL/tester/bootstrap-host.sh --user <ci-user>
 
 # then as that user, NO sudo -- re-run freely after a requirements.txt change:
 tester/bootstrap.sh
 ```
 
-- `tester/bootstrap-host.sh` (root): apt deps (`bluez` + `rfkill` + build
-  tools), system locale, the `bluetooth` service + rfkill unblock, adds the
-  `--user` to `dialout` / `input` / `plugdev`, installs the udev rule.
+- `tester/bootstrap-host.sh` (root): apt deps (`bluez` + `rfkill` + `upower` +
+  build tools), system locale, the `bluetooth` service + rfkill unblock, adds
+  `--user` to `dialout` / `input` / `plugdev`, installs the udev rule for the
+  DUT's `/dev/hidraw*` node.
 - `tester/bootstrap.sh` (unprivileged): the `~/.venvs/hil` venv from
   `tester/requirements.txt`, the `hil_config.local.toml` stub, a health check.
-  It **preflights** the privileged bits and tells you to run `bootstrap-host.sh`
-  if they're missing. `--with-host` runs the root half via `sudo` first (handy
-  on a dev box); `--skip-preflight` bypasses the check.
+  It **preflights** the privileged bits and points at `bootstrap-host.sh` if
+  they're missing. `--with-host` runs the root half via `sudo` first (handy on
+  a dev box); `--skip-preflight` bypasses the check.
 
-For a managed fleet, mirror `bootstrap-host.sh` as an Ansible role — the step
-list is in its header. What is still manual:
+Still manual:
 
 - **Power**: a Pi 3B+ can't reliably power an ESP32 doing BLE off its own USB —
-  brownouts show up as a reset loop that never advertises (seen on cylon too).
-  Use a **powered USB hub** for the ESP32.
-- BLE: the Pi 3B+ built-in adapter (BT 4.1, shares the WiFi antenna) works but a
-  USB BT dongle is steadier for a test rig.
-- `hil_config.local.toml` on the tester sets the real `[board.<b>].port`
+  brownouts show up as a reset loop that never advertises. Use a **powered USB
+  hub** for the ESP32.
+- BLE: a built-in Pi adapter works; a USB BT dongle is steadier for a rig.
+- `hil_config.local.toml` sets the real `[board.<b>].port`
   (`ls -l /dev/serial/by-id/`).
 
-First run pairs the device automatically (`NoInputNoOutput` agent, Just Works),
-or pair by hand: `bluetoothctl` → `scan on`, wait for `HILpad <board>`, then
-`pair <mac>` / `trust <mac>` / `connect <mac>` (the persistent agent the suite
-runs is only needed for unattended re-pairs).
+First run pairs the device automatically (`NoInputNoOutput` agent, Just Works).
+To pair by hand: `bluetoothctl` → `scan on`, wait for `HILpad <board>`, then
+`pair` / `trust` / `connect` and answer the agent prompt `yes`.
 
 ### Local (one box)
 
-Do **both** the Builder and Tester setup above on one machine, plug the ESP32
-into it (still via a powered hub), and `./run.sh` builds, flashes and tests in
-one go — no SSH, no `--push`. This is the fastest edit/test loop.
+Do **both** the Builder and Tester setup on one Linux machine, plug in the
+ESP32 (via a powered hub), and `./run.sh` builds, flashes and tests in one go.
 
-**This one box must be Linux.** The suite asserts on `/dev/input/event*` via
-`evdev` and pairs through BlueZ `bluetoothctl`; both are Linux-only, as are the
-`evdev` / `pyudev` deps.
-
-**macOS can be the Builder only** — PlatformIO builds fine there, so
-`builder/build.sh --push` from a Mac to a Linux tester (a Pi, or a Linux
-desktop) works. Running the pytest suite on macOS does not — see below for
-what that would take.
-
-### macOS as a tester (unsupported — gap list)
-
-Flashing and the serial command channel already work on macOS: `esptool` and
-`pyserial` are cross-platform, just point `[board.<b>].port` at a
-`/dev/cu.usbserial-*` path. The two things the suite needs from the OS —
-initiating the BLE bond and reading the resulting HID events as ground truth —
-have no macOS implementation. What's missing:
-
-1. **A CoreBluetooth pairing backend** to replace BlueZ `bluetoothctl`
-   (`host/hil/bluetooth.py` — `BtCtl`, `ensure_paired`, and
-   scan/pair/trust/connect/remove-bond). *Blocker:* macOS hands a BLE-HID
-   device's GATT service to the system HID stack, so a CoreBluetooth app can't
-   touch it to trigger pairing, and `blueutil` / `IOBluetoothDevicePair` are
-   Classic-BT oriented and won't pair a BLE-only peripheral. Pairing would stay
-   a **one-time manual step in System Settings ▸ Bluetooth**, with the suite run
-   as `--no-pair`. The `--repair` / automatic re-pair-on-profile-change path
-   (`conftest.py` `bt_mac`) would then need a manual "Forget This Device" first.
-
-2. **An IOHIDManager read backend** to replace `host/hil/evdev_utils.py`
-   (`find_gamepad`, `find_all_nodes`, `Capture.collect` / `key_changes` /
-   `abs_changes`): enumerate `IOHIDDevice`s by product name (`HILpad <board>`),
-   open, subscribe to input-value callbacks. Needs `pyobjc-framework-IOKit` (or
-   a ctypes IOKit shim) in place of `evdev` / `pyudev`. *Blocker:* reading HID
-   input from a device the process doesn't own requires the **Input Monitoring**
-   TCC permission, granted by hand in System Settings (or via an MDM PPPC
-   profile) to the python running pytest — not scriptable from a bootstrap.
-
-3. **macOS ground-truth mapping tables.** Every `host/tests/test_*.py` asserts
-   against Linux `hid-input` codes (`BTN_SOUTH…`, `ABS_THROTTLE` for `s1`,
-   `ABS_HAT0*`), and the two strict xfails (`s2`, hats 2-4) pin *Linux kernel*
-   behaviour. IOKit parses the report descriptor itself and exposes raw HID
-   usage-page/usage, so the expected values — and which quirks even exist — must
-   be re-characterised once on macOS and kept as a parallel table chosen by
-   platform.
-
-4. **Backend selection + a macOS bootstrap.** `conftest.py` fixtures (`gamepad`,
-   `all_nodes`, `_reset`) and `tester/requirements.txt` are hardwired to evdev;
-   they'd dispatch on `sys.platform`. `tester/bootstrap.sh` is apt/systemd/udev
-   — a `bootstrap-macos.sh` would do Homebrew python + the pyobjc deps and print
-   the manual TCC / pairing steps.
-
-5. **CI**: a headless Mac runner needs a logged-in GUI session for BLE plus the
-   TCC grants pre-provisioned (MDM PPPC or a seeded TCC.db). More friction than
-   the Linux/Pi path — a Linux tester stays the recommended CI node.
+**The tester box must be Linux** — the suite asserts on `/dev/input/event*` via
+`evdev` and pairs through BlueZ `bluetoothctl`. **macOS can be the builder
+only** (`builder/build.sh --push` to a Linux tester); see
+[macOS as a tester](#macos-as-a-tester--unsupported--gap-list) for what a macOS
+tester port would take.
 
 ## Running
 
 ```bash
 # one box (build + flash + test here)
-./run.sh                                    # config defaults, current lib checkout
+./run.sh                                       # config defaults, current lib checkout
 LIB_REF=some-branch ./run.sh --profiles default
 ./run.sh --boards esp32dev --profiles "default specials"
-./run.sh --profiles default -- -k buttons   # args after -- go to pytest
+./run.sh --profiles default -- -k buttons      # args after -- go to pytest
 
-# split: on the builder
+# split: build on the builder, push, test on the tester
 PUSH=1 LIB_REF=some-branch builder/build.sh
-# then on the tester
-tester/test.sh ~/hil-bundles/esp32dev-default-<sha>/
+tester/test.sh ~/hil-bundles/esp32dev-default-<sha>/ --bench
 
 # pytest directly against a hand-flashed board (no builder needed)
 ~/.venvs/hil/bin/pytest --board esp32dev --no-flash --port /dev/ttyUSB0
 ```
 
 Useful pytest options: `--bundle <dir>` (flash a bundle via esptool),
-`--no-flash`, `--no-pair`, `--repair` (drop bond + pair fresh),
-`--profile specials`, `--bench` (run the latency/throughput tests too).
+`--no-flash`, `--no-pair`, `--repair` (drop bond + pair fresh), `--profile`,
+`--bench` (latency / throughput sweep), `--update-golden` (rewrite the HID
+descriptor golden files).
 
-## GATT + Device Information
+## What it covers
 
-`test_device_info.py` / `test_battery.py` cover the non-HID side. Once the
-device is bonded, BlueZ still exposes Device Information (`0x180A`), PnP ID
-(`0x2A50`) and Battery (`0x180F`) to a generic GATT client, so `host/hil/gatt.py`
-reads them straight off the existing BlueZ connection (D-Bus `ReadValue`, no
-connect/disconnect -- bleak would drop the HID link) and the tests assert they
-match what the firmware set
-(`DIS?` / `PNP?`). Battery level is also cross-checked against `upower`. The
-`0x2A1A` Battery Power State bitfield (`setPowerStateAll()`) is read raw and
-decoded; those tests skip if BlueZ doesn't surface that characteristic.
+| Area | Notes |
+|---|---|
+| Buttons | every configured button → one distinct evdev key, one-to-one, in the gamepad key range. `maxbtn` pins the finding that **Linux surfaces only ~79 of 128** buttons for a gamepad-application collection (`BTN_GAMEPAD + n` runs out at `0x17e`) |
+| Axes | each axis → exactly one ABS code, monotonic, exact min/centre/max endpoints; `s1`→`ABS_THROTTLE`; `s2` gets no distinct code (strict xfail); negative rail via `signed-axes` |
+| Hats | 8 directions + centre; Linux creates only `ABS_HAT0` and this library emits hat fields reversed so the working hat is the highest index — both pinned as strict xfails |
+| Special buttons | start/select/menu/home/back/vol± → one event each, across every input node the DUT exposes |
+| HID descriptor | the descriptor the library generated (`getHidReportDescriptor()`) == its reported size == the copy the **kernel received over GATT** == a checked-in golden per profile |
+| Device Information | model / serial / fw / hw / sw revision + manufacturer, read over GATT, match the firmware config |
+| PnP ID | `0x2A50` vendor / product / version match `setVid` / `setPid` / `setGuidVersion` |
+| Battery | `setBatteryLevel()` via raw `0x2A19`, BlueZ `Battery1` D-Bus, and `upower` where installed; nothing in `/sys/class/power_supply` (BLE Battery Service, not a HID battery usage). `setPowerStateAll()` bitfield via `0x2A1A` |
+| Feature / Output reports | `reports` profile — Feature Report both directions (`setFeatureBuffer` ↔ `HIDIOCGFEATURE`, `HIDIOCSFEATURE` ↔ `getFeatureBuffer`); Output Report host→device via `write(/dev/hidraw*)` → `getOutputBuffer` |
+| Latency / throughput | `--bench`, see below |
 
 ## Benchmarking (`--bench`)
 
-`test_latency.py` runs one sweep per flashed profile via `host/hil/bench.py`:
+`test_latency.py` runs one sweep per flashed profile via `host/hil/bench.py`,
+recording a JSON blob with an environment fingerprint (distro / kernel / arch /
+BlueZ version, load average + CPU temp/freq sampled around the measurement):
 
 - `ping_rtt` — serial PING/PONG baseline (USB-serial + parse overhead).
-- `input_latency` — per-event latency for button / axis / hat, measured
-  host-side as `t_evdev − t_serial_reply` (BLE + host stack) and
-  `t_evdev − t_serial_write` (end to end). p50/p90/p99/max.
-- `burst_rate` — `BURST` a few hundred toggles at several `gap_us` spacings,
-  count the evdev transitions that actually arrive → effective Hz + drop rate.
-- `PEERINFO?` connection interval + MTU, `RSIZE?` report/descriptor bytes.
+- `input_latency` — per-event latency for button / axis / hat, host-side, split
+  into `t_evdev − t_serial_reply` (BLE + host stack) and `t_evdev − t_serial_write`
+  (end to end). p50 / p90 / p99 / max, plus a dropped count.
+- `clean_rate` — fastest paced rate at which **every** distinct state change
+  still reaches the host (≥95% delivery).
+- `burst` — `BURST` a few hundred toggles at decreasing gaps; shows where
+  NimBLE's TX queue overflows and the ESP32 starts dropping before air.
+- `PEERINFO?` connection interval + MTU, `RSIZE?` sizes.
 
-Each run writes `results/bench-<board>-<profile>-<stamp>.json`; `tester/test.sh`
-then runs `python -m hil.charts results/` to (re)generate `results/bench-table.md`
-and three SVGs — latency vs report size, sustained rate per profile, latency
-distribution. The 5 profiles span input-report sizes ~1 B (`minimal`) to 16 B
-(`maxbtn`) so the latency-vs-size curve has real spread. The pytest assertions
-are deliberately loose (button p50 < 60 ms, ≥ 20 Hz sustained) — the recorded
-JSON is the actual deliverable, not pass/fail.
+`tester/test.sh` then runs `python -m hil.charts results/` → `bench-table.md`
+plus three SVGs (latency vs report size, clean rate per profile, latency
+distribution). The pytest gates are deliberately loose — the recorded JSON is
+the deliverable.
 
-## Current status
+### Findings (esp32dev, Raspberry Pi 3B+, kernel 6.18, BlueZ 5.82)
 
-`--board esp32dev` is green on `default` + `specials`. The `signed-axes`,
-`minimal` and `maxbtn` profiles and the GATT / `--bench` suites landed together
-and need a first hardware run on the Pi to record their baselines (`maxbtn`
-depends on the library's `getHidReportDescriptorSize()` fitting the 128-button
-descriptor inside `tempHidReportDescriptor[150]` — `test_descriptor_within_buffer`
-verifies that).
+- Single button press → host in **~18.6 ms** median (p99 ~67), **0 dropped**
+  across 200 paced presses per profile.
+- **Latency is flat vs HID report size** (3–28 B).
+- **Connection interval 48.75 ms** on every profile — the library doesn't
+  request a fast one. It bounds *latency*, not paced *rate*: NimBLE sends
+  several packets per connection event, so paced input delivers ~100% past
+  80 Hz (here it's the serial channel, not BLE, that runs out first).
+- **Unpaced `sendReport()` bursts overflow and drop silently** — at gap=0 only
+  ~2% of a 500-report burst survives. Don't call `sendReport()` faster than you
+  can transmit.
+- **Feature Report off-by-one**: the last byte of `setFeatureReportLength()`
+  doesn't round-trip (host reads back length−1 data + a trailing zero) — pinned
+  as a strict xfail (`test_feature_full_length_roundtrips`).
 
-| Profile | Layout | Result |
-|---|---|---|
-| `default` | 64 btn, 4 hat, 8 axes | 21 passed, 3 skipped, 2 xfail |
-| `specials` | 16 btn, 1 hat, 8 axes, 8 special | 24 passed, 1 skipped, 1 xfail |
-| `signed-axes` | 64 btn, 4 hat, 8 axes, −32767 min | baseline TBD |
-| `minimal` | 1 btn, 1 axis (X) | baseline TBD |
-| `maxbtn` | 128 btn, no hats/axes | baseline TBD |
+## Serial protocol (`firmware/src/hil_runner.cpp`)
 
-The 2 xfails are **real Linux HID-mapping limitations the rig found** (strict
-xfail -> they flip to failures if the library/kernel ever start exposing them):
+115200 8N1, one `\n`-terminated command per line, one reply line each. The boot
+banner and any debug lines are skipped by the host.
 
-- **`s2` (second slider)** gets no distinct evdev `ABS_*` code. The kernel maps
-  the first HID `Usage(Slider)` to `ABS_THROTTLE`; a second bare `Usage(Slider)`
-  in the same collection is dropped. A game using evdev/SDL sees the same.
-- **Hats 2-4** get no `ABS_HAT*` code. Linux `hid-input` only creates
-  `ABS_HAT0X/Y` for the first HID `Usage(Hat Switch)`; this library's extra hat
-  fields don't surface. And because the library emits hat fields reversed
-  (report field 0 = `_hat4`), the *one* working hat is driven by `HAT 4` --
-  `bleGamepad.setHat1()` on a multi-hat config does nothing visible on Linux.
+| Command | Reply |
+|---|---|
+| `PING` | `PONG` |
+| `ID?` | `ID hil_runner profile=… board=… built=…` |
+| `CONFIG?` | `CONFIG buttons=… hats=… axes=… special=… axesMin=… axesMax=… vid=… pid=… ver=… reportId=… feat=… out=… profile=…` |
+| `DIS?` | `DIS model=… serial=… fw=… hw=… sw=… mfr=…` — the DIS strings the firmware configured |
+| `PNP?` | `PNP vidsrc=1 vid=… pid=… ver=…` |
+| `RSIZE?` | `RSIZE report=<n> descriptor=<n>` |
+| `RMAP?` | `RMAP <len> <hex>` — the generated HID report descriptor bytes |
+| `PEERINFO?` | `PEER interval=<1.25ms units> latency=<n> timeout=<10ms units> mtu=<n>` / `ERR notconnected` |
+| `BEGIN` | `OK` — handshake only; `bleGamepad.begin()` already ran in `setup()` |
+| `CONN?` | `CONN 0` / `CONN 1` |
+| `PRESS <n>` / `RELEASE <n>` | `OK` / `ERR range` |
+| `TPRESS <n>` / `TRELEASE <n>` | `T <micros>` — like PRESS/RELEASE, replies `micros()` captured just before `sendReport()` |
+| `BURST <btn> <count> <gap_us>` | `BURST OK <count> <elapsed_us>` — `count` ≤ 2000 |
+| `SPECIAL PRESS\|RELEASE <0..7>` | `OK` / `ERR disabled` |
+| `AXIS <x\|y\|z\|rx\|ry\|rz\|s1\|s2> <int16>` | `OK` / `ERR disabled` |
+| `HAT <1..4> <0..8>` | `OK` / `ERR disabled` |
+| `BATTERY <0..100>` | `OK` |
+| `POWERSTATE <info> <discharging> <charging> <level>` | `OK` — 2-bit fields for `setPowerStateAll()` |
+| `FEATURE?` | `FEATURE recv=0\|1 <hex>` — `isFeatureReceived()` + `getFeatureBuffer()` |
+| `FEATURE SET <hex>` | `OK` — `setFeatureBuffer()` |
+| `OUTPUT?` | `OUTPUT recv=0\|1 <hex>` — `isOutputReceived()` + `getOutputBuffer()` |
+| `RESET` | `OK` — zero buttons, axes, hats |
 
-`--board esp32c3`: flashes and pairs, but the command channel needs a wiring
-change — see **ESP32-C3 serial bridge** below. Not in the CI matrix
-(`.gitea/workflows/hil.yml` runs `esp32dev` only) until that's done.
+`begin()` runs in `setup()` (like `TestAll.ino`): calling it lazily from
+`loop()` on the BEGIN command wedged the NimBLE server task on the classic
+ESP32. So the firmware always advertises once booted; the two boards carry
+distinct names (`HILpad esp32dev` / `HILpad esp32c3`) so the harness bonds the
+right one. The name is kept short — a longer one didn't fit the legacy BLE
+advertising packet and NimBLE silently truncated it.
+
+Hand-test: `python3 -m serial.tools.miniterm <port> 115200`, type `PING`,
+`CONFIG?`, `CONN?`, `PRESS 5`, `AXIS x 16000`, `HAT 4 3`.
+
+## How pairing works
+
+BlueZ needs a registered agent to confirm even a no-MITM "Just Works" pairing,
+and an agent only lives as long as the `bluetoothctl` that registered it. BlueZ
+5.82 additionally drops discovered-but-unconnected devices the moment scanning
+stops, and its `NoInputNoOutput` agent still prompts `[agent] Accept pairing
+(yes/no)`. So `host/hil/bluetooth.py` keeps one long-lived `bluetoothctl`
+session (`BtCtl`) open for the whole run: it holds the agent, keeps discovery
+running, auto-answers any `(yes/no)` prompt with `yes`, and drops any bond it
+has no state record for (unknown provenance → re-pair).
 
 ## ESP32-C3 serial bridge
 
@@ -257,13 +259,11 @@ rig's build (`ARDUINO_USB_CDC_ON_BOOT` unset → `0`) `Serial` is **UART0**
 (`GPIO21` TX / `GPIO20` RX), *not* the USB-C port. The USB-C connector on a C3 is
 the native USB-Serial/JTAG peripheral — great for flashing, but it carries no
 `hil_runner` I/O in this build, and even with CDC-on-boot it re-enumerates on
-every chip reset and `serial.Serial()` can wedge on the half-open handle
-(`SerialDev._open` guards that with a threaded timeout so it fails fast, but a
-run can still lose the port mid-test).
+every chip reset and `serial.Serial()` can wedge on the half-open handle.
 
 So the C3 wants **two interfaces**: flash over USB-C, talk over an external
-3.3 V USB-UART bridge on UART0. The harness supports this with a `flash_port`
-distinct from `port`:
+3.3 V USB-UART bridge on UART0. The harness supports a `flash_port` distinct
+from `port`:
 
 ```toml
 [board.esp32c3]
@@ -271,147 +271,95 @@ port       = "/dev/serial/by-id/usb-<CP2102-or-CH340-bridge>-if00-port0"   # UAR
 flash_port = "/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_…-if00"  # USB-C
 ```
 
-(`flash_port` defaults to `port`; `--flash-port` / `HIL_FLASH_PORT` override it.)
+(`flash_port` defaults to `port`; `--flash-port` / `HIL_FLASH_PORT` override.)
 
 ### Wiring — ESP32-C3 SuperMini
 
-The SuperMini has **no onboard USB-UART chip** (unlike the DevKitC/DevKitM, which
-expose a CP2102 on a second connector), so an external adapter is mandatory,
-not just recommended. Any FTDI / CP2102 / CH340 dongle set to **3.3 V logic**
-(the C3 is **not** 5 V tolerant):
+The SuperMini has **no onboard USB-UART chip**, so an external adapter set to
+**3.3 V logic** (the C3 is not 5 V tolerant) is mandatory:
 
 | USB-UART adapter | C3 SuperMini | |
 |---|---|---|
 | `GND` | `GND` | common ground is required |
 | `TX` (adapter → C3) | `GPIO20` (U0RXD) | pin nearest the USB-C shell, one side |
 | `RX` (adapter ← C3) | `GPIO21` (U0TXD) | pin nearest the USB-C shell, other side |
-| `VCC` / `5V` / `3V3` | **leave unconnected** | board is powered + flashed via USB-C |
-
-Both cables plug into the powered hub. Don't wire the adapter's VCC *and* USB-C —
-pick one power source (USB-C is simplest, and it's needed for flashing anyway).
-
-### Approaches, trade-offs
-
-| | Flash | Command channel | Verdict |
-|---|---|---|---|
-| **Native USB-C only** (`ARDUINO_USB_CDC_ON_BOOT=0`, today) | USB-C ✓ (slow, retries) | none — `Serial` is UART0, not exposed | broken for the suite |
-| **Native USB-C only**, rebuild with `-D ARDUINO_USB_CDC_ON_BOOT=1` | USB-C ✓ | USB-C CDC — re-enumerates on every reset, races NimBLE for USB IRQ budget, "port vanished" mid-run | fragile; not for CI |
-| **USB-C + external UART bridge** (recommended) | USB-C ✓ | FTDI/CP210x on UART0 — never resets when the C3 does, fully isolated from the flash path, identical to the stable esp32dev setup, works with the default build | **use this** |
-| **External bridge for flash too** | UART0 — needs holding `BOOT` (GPIO9) + tapping `RST` by hand (SuperMini has no auto-reset on UART0) | UART0 ✓ | no good for unattended CI |
-
-**Pros of the bridge approach:** rock-solid command channel (a real UART, not
-the C3's shared USB peripheral); flashing resets never disturb it; no firmware
-rebuild; same code path and reliability as esp32dev. **Cons:** a $2 adapter and
-three jumper wires per C3; two USB devices per board on the hub; you must set
-both `port` and `flash_port`.
-
-## Serial protocol (`firmware/src/hil_runner.cpp`)
-
-115200 8N1, one `\n`-terminated command per line, one reply line each.
-
-| Command | Reply |
-|---|---|
-| `PING` | `PONG` |
-| `ID?` | `ID hil_runner profile=… board=… built=…` |
-| `CONFIG?` | `CONFIG buttons=64 hats=4 axes=x,y,z,rx,ry,rz,s1,s2 special=none axesMin=0 axesMax=32767 vid=1D34 pid=8010 ver=0110 reportId=3 profile=default` (`axes=` empty for `maxbtn`) |
-| `DIS?` | `DIS model=HIL-MODEL serial=HIL-SN-0001 fw=HIL-FW-<profile> hw=HIL-HW-1 sw=HIL-SW-1 mfr=LeeNX-HIL` — the DIS strings the firmware configured |
-| `PNP?` | `PNP vidsrc=1 vid=1D34 pid=8010 ver=0110` |
-| `RSIZE?` | `RSIZE report=<n> descriptor=<n>` — HID input report + report-descriptor sizes (needs the library's `getHidReportDescriptorSize()`) |
-| `PEERINFO?` | `PEER interval=<1.25ms units> latency=<n> timeout=<10ms units> mtu=<n>` / `ERR notconnected` |
-| `BEGIN` | `OK` — handshake only; `bleGamepad.begin()` already ran in `setup()` |
-| `CONN?` | `CONN 0` / `CONN 1` |
-| `PRESS <n>` / `RELEASE <n>` | `OK` / `ERR range` |
-| `TPRESS <n>` / `TRELEASE <n>` | `T <micros>` — like PRESS/RELEASE, replies the `micros()` captured just before `sendReport()` (latency benchmark) |
-| `BURST <btn> <count> <gap_us>` | `BURST OK <count> <elapsed_us>` — toggle `btn` `count` times, one report each, `gap_us` apart (throughput benchmark; `count` ≤ 2000) |
-| `SPECIAL PRESS\|RELEASE <0..7>` | `OK` / `ERR disabled` |
-| `AXIS <x\|y\|z\|rx\|ry\|rz\|s1\|s2> <int16>` | `OK` / `ERR disabled` (axis not in this profile) |
-| `HAT <1..4> <0..8>` | `OK` / `ERR disabled` (0-hat profile) |
-| `BATTERY <0..100>` | `OK` |
-| `POWERSTATE <info> <discharging> <charging> <level>` | `OK` — 2-bit fields for `setPowerStateAll()`, read back from the 0x2A1A characteristic |
-| `RESET` | `OK` — zero buttons, axes, hats |
-
-`begin()` runs in `setup()` (like the TestAll example): calling it lazily from
-`loop()` on the BEGIN command wedged the NimBLE server task on the classic
-ESP32. So the firmware always advertises once booted; the two boards carry
-distinct names (`HILpad esp32dev` / `HILpad esp32c3`) so the harness bonds the
-right one. The name is kept short on purpose — 30 chars didn't fit the legacy
-BLE advertising packet and NimBLE silently truncated it.
-
-Hand-test: `python3 -m serial.tools.miniterm <port> 115200` (or
-`pio device monitor` on the builder), type `PING`, `CONFIG?`, `CONN?`,
-`PRESS 5`, `AXIS x 16000`, `HAT 4 3`.
-
-## Switching profiles
-
-A profile = a distinct HID report descriptor. Hosts cache the descriptor at
-bond time, so after switching the profile on a board the old bond is stale.
-The harness detects this (it records `{mac, profile}` per device in
-`~/.cache/esp32-hil/state.json`) and re-pairs automatically. By hand:
-`bluetoothctl remove <mac>` then re-pair.
-
-## How pairing works here
-
-BlueZ needs a registered agent to auto-confirm even a no-MITM "Just Works"
-pairing (`bluetoothd: new_auth() No agent available for request type 2`
-otherwise), and an agent only lives as long as the `bluetoothctl` that
-registered it. So `host/hil/bluetooth.py` keeps **one long-lived `bluetoothctl`
-session** (`BtCtl`) open for the whole pytest run, holding a `NoInputNoOutput`
-agent, and drives pair/trust/connect through it. One-shot `bluetoothctl info`
-calls are still used for read-only queries.
+| `VCC` | **leave unconnected** | board is powered + flashed via USB-C |
 
 ## Known mapping quirks the tests pin down
 
-- **Buttons**: kernel `hid-input` maps HID Button usages 1..16 to
-  `BTN_SOUTH, BTN_EAST, …`, then 17+ to `BTN_TRIGGER_HAPPY1..` (which runs to
-  +63, past the named `BTN_TRIGGER_HAPPY40`). Tests don't hard-code per-button
-  codes — they assert the sweep is one-to-one and every code is in the gamepad
-  key space. All 64 buttons round-trip.
-- **Axes**: `x y z rx ry rz` → `ABS_X..ABS_RZ`, `s1` → `ABS_THROTTLE`, each
-  tracking monotonically. `s2` → nothing (see Current status).
-- **Hats**: only `ABS_HAT0` exists; it's driven by the *highest* firmware hat
-  index because the library emits hat fields reversed (`BleGamepad.cpp`, report
-  field 0 = `_hat4`). See Current status.
-- **Special buttons**: all 8 (start/select/menu/home/back/vol±/mute) produce
-  exactly one distinct key event; `test_special_buttons` watches every event
-  node the DUT exposes since Consumer-page usages can land on a separate node.
+- **Buttons**: kernel `hid-input` maps a gamepad-application Button usage to
+  `BTN_GAMEPAD + n`, running out of the named key block at `0x17e` (~79 codes).
+  Tests don't hard-code per-button codes; they assert the sweep is one-to-one
+  and in range. Buttons past ~79 (`maxbtn`) get no usable code — pinned.
+- **Axes**: `x y z rx ry rz` → `ABS_X..ABS_RZ`, `s1` → `ABS_THROTTLE`. A second
+  bare `Usage(Slider)` (`s2`) gets no distinct code — strict xfail.
+- **Hats**: only `ABS_HAT0` exists, driven by the *highest* firmware hat index
+  because the library emits hat fields reversed — strict xfail.
 - **`setAxes()` arg order**: the firmware uses per-axis setters
-  (`setX/setRX/…`) to avoid `setAxes()`'s positional quirk (its `rX` arg lands
-  in the Rx field). See the library's `IndividualAxes` example header.
+  (`setX/setRX/…`) to avoid `setAxes()`'s positional quirk. See the library's
+  `IndividualAxes` example.
 
-## Gitea CI
+## CI
 
-`.gitea/workflows/hil.yml` — a **build** job on any Gitea runner (installs
-PlatformIO fresh, runs `builder/build.sh`, uploads the bundles as an artifact),
-then a **hil-test** job on a normal runner that `rsync`s **both** the checked-out
-harness code (so the Pi runs the same ref) and the bundles to the Pi, `ssh`es in
-to run `tester/test.sh --bench` per bundle, then publishes the JUnit report and
-`hil-results/` (summary, `bench-table.md`, SVG charts). The Pi is a plain **SSH
-target**, not a runner — nothing untrusted executes on it directly. Its own
-`hil_config.local.toml` (real serial ports for both boards) is never overwritten.
+`.github/workflows/hil.yml` runs entirely on **GitHub-hosted runners** — no
+self-hosted runner, no inbound ports on your network:
 
-Prerequisites:
+- **build** — `pip install platformio`, `builder/build.sh`, upload the bundles.
+- **hil-test** — brings up an **ephemeral Tailscale node** for the job
+  (`tailscale/github-action`), `rsync`s the checked-out harness code (so the
+  tester runs the same ref) **and** the bundles to the tester over the tailnet,
+  `ssh`es in to run `tester/test.sh --bench` per bundle, pulls `results/` back,
+  publishes the JUnit report.
 
-- Push this harness repo and the library to your Gitea. Enable Actions on the
-  repo; make sure the runners can fetch `actions/checkout` etc. (Gitea
-  `DEFAULT_ACTIONS_URL`).
-- The Pi has this repo at `~/esp32-ble-gamepad-hil`, `bootstrap-host.sh` run
-  once by an admin for the CI user and `tester/bootstrap.sh` run as that user
-  (re-run the latter — no sudo — after `tester/requirements.txt` changes, e.g.
-  the `dbus-fast` add for the GATT tests), `hil_config.local.toml` with **both**
-  board ports set, both ESP32s + BLE attached. The bootstrap health check must
-  show a powered BT
-  controller and ≥1 readable input node — the two things a fresh Pi image gets
-  wrong are BT left **rfkill soft-blocked** and the CI user missing from the
-  **`input`** group (`evdev.list_devices()` then returns `[]` and every test
-  times out).
-- Repo secrets: `HIL_PI_HOST`, `HIL_PI_USER`, `HIL_PI_SSH_KEY` (a passphrase-less
-  key authorised on the Pi).
+The tester is a plain **SSH target** on the tailnet, not a runner — nothing
+untrusted executes on it directly, and its own `hil_config.local.toml` (real
+serial ports) is never overwritten.
 
-Triggers: push to `main` / `hil-*`, manual dispatch (with `lib_repo` /
-`lib_ref` inputs), or `repository_dispatch` type `hil` from the library repo.
-A `concurrency: hil-pi` group serialises runs — there's one physical rig.
+### Setup
+
+1. **Tailscale on the tester**: `tester/bootstrap-host.sh` installs it; then
+   `sudo tailscale up` (tag it, e.g. `--advertise-tags=tag:hil-rig`). Note its
+   MagicDNS name.
+2. **Tailscale ACL**: allow `tag:ci` → the tester on `tcp:22`, e.g.
+   ```jsonc
+   "acls": [
+     { "action": "accept", "src": ["tag:ci"], "dst": ["tag:hil-rig:22"] }
+   ],
+   "tagOwners": { "tag:ci": ["autogroup:admin"], "tag:hil-rig": ["autogroup:admin"] }
+   ```
+3. **OAuth client** (Tailscale admin → Settings → OAuth clients): scope
+   *Auth Keys* (write), tag `tag:ci`. → `TS_OAUTH_CLIENT_ID` / `TS_OAUTH_SECRET`.
+4. **Repo secrets**: `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, `HIL_TESTER_HOST`
+   (the MagicDNS name), `HIL_TESTER_USER`, `HIL_TESTER_SSH_KEY` (a
+   passphrase-less key in the tester user's `~/.ssh/authorized_keys`).
+
+Triggers: push to `main` / `hil-*`, manual dispatch (with `lib_repo` / `lib_ref`
+inputs), or `repository_dispatch` type `hil` from the library repo. A
+`concurrency` group serialises runs — there's one physical rig.
 
 **Untrusted code**: the build job compiles whatever library ref it's handed and
-the test job flashes it to hardware on your LAN. Keep the triggers to
-same-repo pushes + manual dispatch; don't wire it to run automatically on PRs
-from forks.
+the test job flashes it to hardware. Keep the triggers to same-repo pushes +
+manual dispatch; don't run it automatically on PRs from forks.
+
+## macOS as a tester (unsupported — gap list)
+
+Flashing and the serial command channel work on macOS (`esptool` + `pyserial`
+are cross-platform; point `[board.<b>].port` at `/dev/cu.usbserial-*`). The two
+things the suite needs from the OS — initiating the BLE bond and reading HID
+events as ground truth — have no macOS implementation:
+
+1. **A CoreBluetooth pairing backend** to replace BlueZ `bluetoothctl`
+   (`host/hil/bluetooth.py`). *Blocker:* macOS hands a BLE-HID device's GATT
+   service to the system HID stack, so an app can't trigger pairing; it stays a
+   one-time manual step in System Settings, with the suite run `--no-pair`.
+2. **An IOHIDManager read backend** to replace `host/hil/evdev_utils.py`. Needs
+   `pyobjc-framework-IOKit` and the **Input Monitoring** TCC permission (granted
+   by hand or MDM) for the python running pytest.
+3. **macOS ground-truth mapping tables.** Every `test_*.py` asserts against
+   Linux `hid-input` codes; IOKit exposes raw HID usages instead, so the
+   expected values must be re-characterised and kept as a per-platform table.
+4. **Backend selection + a macOS bootstrap.** `conftest.py` fixtures and
+   `tester/requirements.txt` are evdev-hardwired; they'd dispatch on
+   `sys.platform`.
+5. **CI**: a headless Mac runner needs a logged-in GUI session for BLE plus
+   pre-provisioned TCC grants — more friction than the Linux path.

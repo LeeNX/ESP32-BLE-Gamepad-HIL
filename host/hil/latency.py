@@ -104,8 +104,10 @@ def input_latency(dev, cap, kind, cfg, n=200, settle=0.03):
 
 
 def burst_rate(dev, cap, count=500, gap_us=0, button=1):
-    """Fire `count` button toggles `gap_us` apart, count the evdev key
-    transitions that actually reach the host."""
+    """Fire `count` button toggles `gap_us` apart from the firmware side, count
+    the evdev key transitions that reach the host. At small gaps this measures
+    NimBLE TX-queue overflow (the ESP32 drops before air), not link capacity --
+    see clean_rate() for the meaningful number."""
     cap.drain()
     t0 = time.perf_counter()
     fw_count, fw_us = dev.burst(button, count, gap_us,
@@ -113,13 +115,64 @@ def burst_rate(dev, cap, count=500, gap_us=0, button=1):
     evs = cap.collect(settle=0.6, hard_timeout=max(8.0, count * 0.03))
     wall = time.perf_counter() - t0
     got = sum(1 for e in evs if e.type == ecodes.EV_KEY)
-    # firmware always sends one extra release at the end
-    expected = count + 1
+    expected = count + 1  # firmware sends one extra release at the end
     return {
         "requested": count, "gap_us": gap_us,
         "fw_send_hz": round(count / (fw_us / 1e6), 1) if fw_us else None,
         "host_transitions": got,
-        "dropped": max(0, expected - got),
         "delivered_frac": round(got / expected, 3) if expected else 0.0,
         "effective_hz": round(got / wall, 1) if wall else 0.0,
     }
+
+
+def clean_rate(dev, cap, cfg, steps=40):
+    """Fastest rate at which *every* distinct state change still reaches the
+    host. Walk the inter-report gap down from ~2x the connection interval;
+    at each gap send `steps` monotonically-increasing values (one report each)
+    and count how many distinct values the host actually saw.
+
+    Returns {curve: [...], clean_hz: float|None} where clean_hz is the highest
+    measured rate with >=95% delivery.
+    """
+    axes = cfg.get("axes") or []
+    if not axes:
+        # Needs a monotonic continuous signal to count distinct deliveries; a
+        # buttons-only profile has none (and Linux's button->keycode mapping
+        # past ~15 is too sparse for a gamepad collection to use as a proxy).
+        return {"curve": [], "clean_hz": None, "note": "no axis to measure"}
+
+    code = {"x": ecodes.ABS_X, "y": ecodes.ABS_Y, "z": ecodes.ABS_Z,
+            "rx": ecodes.ABS_RX, "ry": ecodes.ABS_RY, "rz": ecodes.ABS_RZ,
+            "s1": ecodes.ABS_THROTTLE}.get(axes[0])
+    lo, hi = cfg["axesMin"], cfg["axesMax"]
+    span = hi - lo
+    step = max(1, span // (steps + 4))
+    send = lambda i: dev.axis(axes[0], lo + (i + 1) * step)  # noqa: E731
+    rest = lambda: dev.axis(axes[0], lo)                     # noqa: E731
+    count_seen = lambda evs: len({e.value for e in evs       # noqa: E731
+                                  if e.type == ecodes.EV_ABS and e.code == code})
+
+    curve = []
+    best = None
+    for gap_ms in (80, 60, 50, 40, 30, 25, 20, 15, 12, 10, 8, 6, 4, 2, 0):
+        rest()
+        cap.collect(settle=0.25)
+        cap.drain()
+        ts = []
+        for i in range(steps):
+            send(i)
+            ts.append(time.perf_counter())
+            if gap_ms:
+                time.sleep(gap_ms / 1000)
+        evs = cap.collect(settle=0.5, hard_timeout=6.0)
+        seen = count_seen(evs)
+        span_s = ts[-1] - ts[0]
+        rate = round((steps - 1) / span_s, 1) if span_s > 0 else None
+        delivered = round(seen / steps, 3)
+        curve.append({"gap_ms": gap_ms, "rate_hz": rate,
+                      "delivered_frac": delivered, "seen": seen, "sent": steps})
+        if delivered >= 0.95 and rate and (best is None or rate > best):
+            best = rate
+        if delivered < 0.6:
+            break  # well past the knee
+    return {"curve": curve, "clean_hz": best}

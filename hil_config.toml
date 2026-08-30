@@ -4,28 +4,31 @@
 # HIL_PROFILE / HIL_BOARDS / HIL_PROFILES / HIL_BUNDLE.
 
 [rig]
-lib_dir = "/home/leet/src/ESP32-BLE-Gamepad"   # library checkout the builder compiles against
-device_name = "HILpad"                         # firmware advertises "<device_name> <board>"
-pio = "/home/leet/.local/bin/pio"
+lib_dir = "~/src/ESP32-BLE-Gamepad"   # library checkout the builder compiles against
+device_name = "HILpad"                # firmware advertises "<device_name> <board>"
+pio = "pio"                           # or an absolute path, e.g. ~/.venvs/pio/bin/pio
 
 # BUILDER role -- what builder/build.sh compiles by default. Profiles:
-# default | signed-axes | specials | minimal | maxbtn  (see firmware/include/hil_profile.h)
+# default | signed-axes | specials | minimal | maxbtn | reports
+# (see firmware/include/hil_profile.h)
 [builder]
-boards = "esp32dev esp32c3"                              # space separated
-profiles = "default signed-axes specials minimal maxbtn" # space separated
+boards = "esp32dev esp32c3"                                       # space separated
+profiles = "default signed-axes specials minimal maxbtn reports"  # space separated
 
-# TESTER role -- the Raspberry Pi 3B+ with both MCUs attached. builder/build.sh
-# --push rsyncs bundles here; scripts/hil.sh (in the library repo) and the CI
-# orchestrator job both drive it over SSH. Never builds -- esptool flash only.
+# TESTER role -- the Raspberry Pi + ESP32(s) + BLE adapter. builder/build.sh
+# --push rsyncs bundles here; the library repo's scripts/hil.sh and the CI job
+# drive it over SSH. Never builds -- esptool flash only. Set the real host/user
+# in hil_config.local.toml (or pass HIL_SSH_HOST / HIL_SSH_USER).
 [tester]
-ssh_host = "192.168.101.16"         # empty = no push
-ssh_user = "bot-gitea-esp32-hil"
+ssh_host = ""                       # e.g. "hil-pi.lan" or a Tailscale name; empty = no push
+ssh_user = ""                       # e.g. "hil"
 bundle_dir = "~/hil-bundles"
 
 [board.esp32dev]
 pio_env = "esp32dev"
-# CP2102 UART bridge (Silicon Labs 10c4:ea60) -- override per machine in .local
-port = "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0"
+# A CP2102 / CP210x / CH340 USB-UART bridge. Override per machine in .local
+# (ls -l /dev/serial/by-id/).
+port = "/dev/serial/by-id/CHANGE-ME"
 profile = "default"
 
 [board.esp32c3]
@@ -35,7 +38,6 @@ pio_env = "esp32c3"
 # interfaces: hil_runner's Serial is UART0 (ARDUINO_USB_CDC_ON_BOOT=0), not the
 # USB-C port, so wire a 3V3 USB-UART bridge to GPIO21/20 for `port` and keep the
 # native USB-Serial/JTAG for `flash_port`. See README "ESP32-C3 serial bridge".
-port = "/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_98:3D:AE:52:7A:C8-if00"
-# port = "/dev/serial/by-id/usb-<your CP2102/CH340 bridge>-if00-port0"
-# flash_port = "/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_98:3D:AE:52:7A:C8-if00"
+port = "/dev/serial/by-id/CHANGE-ME"
+# flash_port = "/dev/serial/by-id/CHANGE-ME"
 profile = "default"

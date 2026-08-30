@@ -3,8 +3,8 @@
 # everything that needs root; the CI/test user then runs tester/bootstrap.sh
 # (no sudo) for the venv + config. Idempotent -- safe to re-run.
 #
-#   sudo tester/bootstrap-host.sh --user bot-gitea-esp32-hil
-#   sudo HIL_USER=bot-gitea-esp32-hil tester/bootstrap-host.sh
+#   sudo tester/bootstrap-host.sh --user hil
+#   sudo HIL_USER=hil tester/bootstrap-host.sh
 #
 # What it does: apt deps, system locale, the bluetooth service + rfkill unblock,
 # adds the target user to dialout/input/plugdev, and installs the DUT udev rule.
@@ -67,12 +67,21 @@ usermod -aG dialout,input,plugdev "$TARGET_USER"
 
 echo "== udev rule for the DUT hidraw node"
 # VID:PID 1D34:8010 is the HIL firmware's HID identity (hil_profile.h). The
-# pytest suite is pure-evdev and does not open /dev/hidraw*, but the rule keeps
-# the node group-readable for manual HID inspection.
+# rule makes /dev/hidraw* group-rw so a `plugdev` user can drive Feature /
+# Output reports (test_feature_report.py / test_output_report.py) without root.
 rule='SUBSYSTEM=="hidraw", KERNELS=="0005:1D34:8010.*", MODE="0660", GROUP="plugdev"'
 echo "$rule" > /etc/udev/rules.d/99-esp32-gamepad.rules
 udevadm control --reload-rules
 udevadm trigger
+
+# Tailscale -- so a GitHub-hosted CI runner can reach this tester over the
+# tailnet (.github/workflows/hil.yml). Skip with NO_TAILSCALE=1.
+if [[ -z "${NO_TAILSCALE:-}" ]] && ! command -v tailscale >/dev/null 2>&1; then
+  echo "== tailscale"
+  curl -fsSL https://tailscale.com/install.sh | sh
+  echo "   run:  sudo tailscale up --ssh   (or with --authkey ...); then note"
+  echo "         its MagicDNS name for the HIL_TESTER_HOST repo secret"
+fi
 
 cat <<EOF
 
@@ -80,4 +89,7 @@ cat <<EOF
   1. $TARGET_USER logs out/in (or reboot) so the group adds take effect
   2. as $TARGET_USER, no sudo:  tester/bootstrap.sh
   3. attach the ESP32(s) on a powered hub + a BLE adapter
+  4. for CI: sudo tailscale up (tag it for the ACL), add the CI ssh key to
+     $TARGET_USER's ~/.ssh/authorized_keys, and set the repo secrets
+     (TS_OAUTH_* + HIL_TESTER_HOST/USER/SSH_KEY) -- see .github/workflows/hil.yml
 EOF

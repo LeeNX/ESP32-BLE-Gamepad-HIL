@@ -84,6 +84,37 @@ static int tokenize(const String &s, String out[HIL_MAX_TOKENS])
     return n;
 }
 
+// Parse up to `max` bytes of hex ("AABBCC") into out. Returns count, -1 on bad.
+static int hexToBytes(const String &s, uint8_t *out, int max)
+{
+    int len = s.length();
+    if (len % 2) return -1;
+    int n = len / 2;
+    if (n > max) return -1;
+    for (int i = 0; i < n; i++)
+    {
+        char hi = s[2 * i], lo = s[2 * i + 1];
+        int v = 0;
+        for (char c : {hi, lo})
+        {
+            v <<= 4;
+            if (c >= '0' && c <= '9') v |= c - '0';
+            else if (c >= 'A' && c <= 'F') v |= c - 'A' + 10;
+            else if (c >= 'a' && c <= 'f') v |= c - 'a' + 10;
+            else return -1;
+        }
+        out[i] = (uint8_t)v;
+    }
+    return n;
+}
+
+static void printBytesHex(const char *tag, bool recv, const uint8_t *d, int n)
+{
+    Serial.printf("%s recv=%d ", tag, recv ? 1 : 0);
+    for (int i = 0; i < n; i++) Serial.printf("%02X", d[i]);
+    Serial.println();
+}
+
 static void printAxesCsv(char *buf, size_t buflen)
 {
     buf[0] = '\0';
@@ -119,12 +150,13 @@ static void handle(const String &cmd)
         printAxesCsv(axes, sizeof(axes));
         Serial.printf("CONFIG buttons=%d hats=%d axes=%s special=%s "
                       "axesMin=%d axesMax=%d vid=%04X pid=%04X ver=%04X "
-                      "reportId=%d profile=%s\n",
+                      "reportId=%d feat=%d out=%d profile=%s\n",
                       HIL_BUTTON_COUNT, HIL_HAT_COUNT, axes,
                       HIL_SPECIALS ? "start,select,menu,home,back,volinc,voldec,volmute" : "none",
                       (int)bleGamepadConfig.getAxesMin(), (int)bleGamepadConfig.getAxesMax(),
                       HIL_VID, HIL_PID, HIL_GUID_VERSION,
-                      bleGamepadConfig.getHidReportId(), HIL_PROFILE_NAME);
+                      bleGamepadConfig.getHidReportId(),
+                      HIL_FEATURE_REPORT_LEN, HIL_OUTPUT_REPORT_LEN, HIL_PROFILE_NAME);
         return;
     }
 
@@ -153,6 +185,19 @@ static void handle(const String &cmd)
         Serial.printf("RSIZE report=%d descriptor=%d\n",
                       bleGamepad.getHidReportSize(),
                       bleGamepad.getHidReportDescriptorSize());
+        return;
+    }
+
+    if (c == "RMAP?")
+    {
+        // The HID report descriptor the library generated, as one hex string.
+        // Host compares it against RSIZE?, the kernel's copy
+        // (/sys/class/hidraw/.../report_descriptor) and a golden file.
+        int len = bleGamepad.getHidReportDescriptorSize();
+        const uint8_t *d = bleGamepad.getHidReportDescriptor();
+        Serial.printf("RMAP %d ", len);
+        for (int i = 0; i < len; i++) Serial.printf("%02X", d[i]);
+        Serial.println();
         return;
     }
 
@@ -265,6 +310,46 @@ static void handle(const String &cmd)
         bleGamepad.sendReport();
         reply("OK");
         return;
+    }
+
+    if (c == "FEATURE?")
+    {
+#if !HIL_FEATURE_REPORT_LEN
+        reply("ERR disabled");
+        return;
+#else
+        printBytesHex("FEATURE", bleGamepad.isFeatureReceived(),
+                      bleGamepad.getFeatureBuffer(), HIL_FEATURE_REPORT_LEN);
+        return;
+#endif
+    }
+
+    if (c == "FEATURE")   // FEATURE SET <hex>
+    {
+#if !HIL_FEATURE_REPORT_LEN
+        reply("ERR disabled");
+        return;
+#else
+        if (n < 3 || t[1] != "SET") { reply("ERR args"); return; }
+        uint8_t buf[HIL_FEATURE_REPORT_LEN];
+        int got = hexToBytes(t[2], buf, HIL_FEATURE_REPORT_LEN);
+        if (got < 0) { reply("ERR hex"); return; }
+        bleGamepad.setFeatureBuffer(buf, got);
+        reply("OK");
+        return;
+#endif
+    }
+
+    if (c == "OUTPUT?")
+    {
+#if !HIL_OUTPUT_REPORT_LEN
+        reply("ERR disabled");
+        return;
+#else
+        printBytesHex("OUTPUT", bleGamepad.isOutputReceived(),
+                      bleGamepad.getOutputBuffer(), HIL_OUTPUT_REPORT_LEN);
+        return;
+#endif
     }
 
     if (c == "BATTERY")
