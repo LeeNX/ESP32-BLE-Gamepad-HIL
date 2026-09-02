@@ -37,6 +37,11 @@ What a bump means:
   the tester runs only the boards it actually has wired (`esp32c3` ships as
   `enabled = false` until its UART bridge is fitted — see README "ESP32-C3 serial
   bridge").
+- The `hil-test` job now `git fetch` + `git reset --hard`es the tester's checkout
+  to the rig commit under test (was: `rsync` over it, which left the tester's
+  `.git` drifting behind a working tree full of "modifications"). Only the
+  gitignored `hil_config.local.toml` is preserved. `results/` is pulled back even
+  when the suite fails.
 
 ## [0.1.0] — 2026-09-02
 

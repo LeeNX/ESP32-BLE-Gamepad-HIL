@@ -17,8 +17,8 @@ Raspberry Pi) that can't build firmware in reasonable time:
  │ builder/build.sh:          │  (rsync/   │ tester/test.sh:                  │
  │  pio run  (lib under test) │   CI       │  tester/flash.py  (esptool only) │
  │  -> bundles/<b>-<p>-<sha>/ │  artifact) │  pytest  (pyserial+evdev+bluez   │
- │     *.bin + manifest.json  │──────────►│         +dbus-fast)               │
- └────────────────────────────┘            │   USB─► ESP32 ─BLE─► /dev/input/  │
+ │     *.bin + manifest.json  │───────────►│         +dbus-fast)              │
+ └────────────────────────────┘            │   USB─► ESP32 ─BLE─► /dev/input/ │
                                            │  -> results/ junit + bench + svg │
                                            └──────────────────────────────────┘
 ```
@@ -315,9 +315,11 @@ self-hosted runner, no inbound ports on your network:
 - **build** — `pip install platformio`, `builder/build.sh`, upload the bundles.
   The **full** `board × profile` matrix is built (`esp32dev` + `esp32c3`).
 - **hil-test** — brings up an **ephemeral Tailscale node** for the job
-  (`tailscale/github-action`), `rsync`s the checked-out harness code (so the
-  tester runs the same ref) **and** the bundles to the tester over the tailnet,
-  `ssh`es in to run `tester/test.sh --bench` per bundle, pulls `results/` back,
+  (`tailscale/github-action`), `rsync`s the bundles to the tester over the
+  tailnet, `ssh`es in to **`git reset --hard`** the tester's own checkout to the
+  rig commit under test (`git clean -ffdx` keeps only the gitignored
+  `hil_config.local.toml`, so the checkout never drifts), runs
+  `tester/test.sh --bench` per bundle, pulls `results/` back (even on failure),
   publishes the JUnit report.
 
 ### Which boards run
