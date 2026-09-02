@@ -33,6 +33,10 @@ profile = "default"
 
 [board.esp32c3]
 pio_env = "esp32c3"
+# Built in CI but not flashed/tested until its UART bridge is wired on a tester.
+# Set enabled = true (or drop this line) in hil_config.local.toml once ready;
+# tester/test.sh SKIPs a disabled/absent board instead of failing.
+enabled = false
 # `port` is the hil_runner command channel; `flash_port` (optional, defaults to
 # `port`) is where esptool/pio upload. On a C3 SuperMini they are different
 # interfaces: hil_runner's Serial is UART0 (ARDUINO_USB_CDC_ON_BOOT=0), not the

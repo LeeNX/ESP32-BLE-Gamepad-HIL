@@ -1,6 +1,7 @@
 firmware/.pio/
 results/
 bundles/
+dist/
 hil_config.local.toml
 __pycache__/
 *.pyc

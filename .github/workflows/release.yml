@@ -1,0 +1,113 @@
+# Tag push (vX.Y.Z) -> build the full firmware matrix against the library, bundle
+# it with the standalone suite, and publish a GitHub Release. See RELEASE.md.
+#
+# scripts/release.sh creates the tag locally; this runs after it's pushed.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: existing vX.Y.Z tag to (re)build the release for
+        required: true
+      lib_ref:
+        description: ESP32-BLE-Gamepad ref to build the firmware against
+        default: master
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write          # create the release, upload assets
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+  LIB_REPO: https://github.com/LeeNX/ESP32-BLE-Gamepad.git
+  LIB_REF: ${{ inputs.lib_ref || 'master' }}
+  BOARDS: esp32dev esp32c3
+  PROFILES: default signed-axes specials minimal maxbtn reports
+
+jobs:
+  release:
+    if: github.repository == 'LeeNX/ESP32-BLE-Gamepad-HIL'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+
+      - name: Verify VERSION matches the tag
+        id: v
+        run: |
+          want="${TAG#v}"
+          have="$(cat VERSION)"
+          echo "tag=$TAG  VERSION file=$have"
+          if [ "$want" != "$have" ]; then
+            echo "::error::VERSION ($have) != tag $TAG. Bump VERSION, commit, re-tag."
+            exit 1
+          fi
+          case "$want" in
+            *-*) echo "prerelease=true"  >> "$GITHUB_OUTPUT" ;;
+            *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v5
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini') }}
+
+      - name: Checkout the library
+        run: |
+          git clone --depth 1 --branch "$LIB_REF" "$LIB_REPO" "$HOME/lib" \
+            || git clone "$LIB_REPO" "$HOME/lib"
+          git -C "$HOME/lib" checkout "$LIB_REF"
+          {
+            echo "LIB_REPO=$LIB_REPO"
+            echo "LIB_SHA=$(git -C "$HOME/lib" rev-parse HEAD)"
+            echo "LIB_DESCRIBE=$(git -C "$HOME/lib" describe --tags --always)"
+          } >> "$GITHUB_ENV"
+
+      - name: Build the firmware matrix
+        run: |
+          cat > hil_config.local.toml <<EOF
+          [rig]
+          lib_dir = "$HOME/lib"
+          pio = "$(command -v pio)"
+          EOF
+          ./builder/build.sh --boards "$BOARDS" --profiles "$PROFILES"
+
+      - name: Assemble release artifacts
+        run: scripts/make-release-artifacts.sh "$TAG"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flag=""
+          [ "${{ steps.v.outputs.prerelease }}" = "true" ] && flag="--prerelease"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.tar.gz dist/SHA256SUMS --clobber
+          else
+            # shellcheck disable=SC2086
+            gh release create "$TAG" --title "$TAG" --generate-notes $flag \
+              dist/*.tar.gz dist/SHA256SUMS
+          fi
+
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: release-dist
+          path: dist/

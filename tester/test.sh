@@ -28,6 +28,16 @@ load_now() { cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || echo "?"; }
 say "tester board=$BOARD profile=$PROFILE port=$PORT flash_port=$FLASH_PORT  load $(load_now)"
 say "bundle $(basename "$BUNDLE")"
 
+# Skip (not fail) a board this tester doesn't have wired / has disabled -- lets
+# CI build the full matrix but run only what's attached. See host/hil/detect.py.
+if ! why=$(PYTHONPATH=host python3 -m hil.detect --check "$BOARD" 2>&1); then
+  mkdir -p results
+  line="SKIP  $BOARD/$PROFILE  ($why)"
+  say "$line"
+  printf '%s\n' "- $line" >> results/run-verdicts.md
+  exit 0
+fi
+
 FLASH=1
 BENCH=0
 PYTEST_EXTRA=()

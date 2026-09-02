@@ -43,11 +43,12 @@ push to the tester, run, pull results). One box can be both roles
 | `firmware/` | PlatformIO project — `hil_runner` serial-command firmware, `hil_profile.h` layout profiles (see below) |
 | `builder/build.sh` `builder/make_bundle.py` | compile → firmware bundle(s) → optional `--push` rsync to the tester. Library path comes from `$HIL_LIB_DIR` (exported from `rig.lib_dir`) |
 | `tester/bootstrap-host.sh` (root) `tester/bootstrap.sh` (user) | tester provisioning, split: privileged half (apt / bluetooth / groups / udev) vs unprivileged half (venv / config / health check) |
-| `tester/flash.py` `tester/test.sh` | flash a bundle with esptool, run the suite + benchmark, write `results/` |
-| `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite. Helpers: `serialdev`, `evdev_utils`, `bluetooth`, `gatt` (DIS/PnP/battery over BlueZ D-Bus), `hidraw` (Feature/Output reports + descriptor), `latency`+`bench`, `sysinfo`, `charts`, `summarize` |
-| `hil_config.toml` (+ gitignored `hil_config.local.toml`) | per-machine ports, ssh host, builder board/profile matrix |
+| `tester/flash.py` `tester/test.sh` | flash a bundle with esptool, run the suite + benchmark, write `results/`; SKIPs a board the tester doesn't have |
+| `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite. Helpers: `serialdev`, `evdev_utils`, `bluetooth`, `gatt` (DIS/PnP/battery over BlueZ D-Bus), `hidraw` (Feature/Output reports + descriptor), `latency`+`bench`, `sysinfo`, `detect` (present boards), `charts`, `summarize` |
+| `hil_config.toml` (+ gitignored `hil_config.local.toml`) | per-machine ports, ssh host, builder board/profile matrix, per-board `enabled` |
 | `run.sh` | one-box: build all bundles then flash+test each |
-| `.github/workflows/hil.yml` | CI: build job → SSH-to-tester test job |
+| `scripts/release.sh` `scripts/make-release-artifacts.sh` | cut a rig release (`VERSION` + `CHANGELOG.md` → tag → `release.yml`); see [RELEASE.md](RELEASE.md) |
+| `.github/workflows/hil.yml` `release.yml` | CI: build → SSH-to-tester test; tag → firmware/suite release |
 
 ### Compile profiles (`firmware/include/hil_profile.h`)
 
@@ -312,11 +313,28 @@ Two workflows:
 self-hosted runner, no inbound ports on your network:
 
 - **build** — `pip install platformio`, `builder/build.sh`, upload the bundles.
+  The **full** `board × profile` matrix is built (`esp32dev` + `esp32c3`).
 - **hil-test** — brings up an **ephemeral Tailscale node** for the job
   (`tailscale/github-action`), `rsync`s the checked-out harness code (so the
   tester runs the same ref) **and** the bundles to the tester over the tailnet,
   `ssh`es in to run `tester/test.sh --bench` per bundle, pulls `results/` back,
   publishes the JUnit report.
+
+### Which boards run
+
+The build matrix is fixed, but a tester only flashes the boards it actually has.
+`host/hil/detect.py` decides: a board runs when it's `enabled` (default true;
+`[board.<b>] enabled = false` opts out), its `port` / `flash_port` are set (not
+`CHANGE-ME`), and the device node exists. `tester/test.sh` **SKIPs** a bundle
+whose board isn't present — a `SKIP` line in `results/run-verdicts.md`, exit 0,
+not a failure — so a newly-wired board starts running with no CI change, and
+`esp32c3` (shipped `enabled = false` until its [UART bridge](#esp32-c3-serial-bridge)
+is fitted) doesn't red the build.
+
+```bash
+PYTHONPATH=host python3 -m hil.detect            # table of present / absent + why
+PYTHONPATH=host python3 -m hil.detect --json
+```
 
 The tester is a plain **SSH target** on the tailnet, not a runner — nothing
 untrusted executes on it directly, and its own `hil_config.local.toml` (real
@@ -349,6 +367,23 @@ inputs), or `repository_dispatch` type `hil` from the library repo. A
 **Untrusted code**: the build job compiles whatever library ref it's handed and
 the test job flashes it to hardware. Keep the triggers to same-repo pushes +
 manual dispatch; don't run it automatically on PRs from forks.
+
+## Releases
+
+The rig is versioned independently of the library — [SemVer](https://semver.org/)
+tags, a [CHANGELOG](CHANGELOG.md), and a GitHub Release per tag carrying:
+
+- **`…-firmware-vX.Y.Z.tar.gz`** — the whole `board × profile` bundle set
+  (prebuilt `.bin`s + manifests), `golden/*.hiddesc`, and `index.json` (rig +
+  library commit). Flash it and run the suite with no PlatformIO — see
+  [REPRODUCE.md](REPRODUCE.md).
+- **`…-suite-vX.Y.Z.tar.gz`** — a standalone copy of the pytest suite.
+
+Cut one with `scripts/release.sh X.Y.Z` (see [RELEASE.md](RELEASE.md)); the
+`v*` tag push drives `.github/workflows/release.yml`. The library's own release
+workflow rebuilds the same firmware set from the pinned rig ref and attaches it
+to the library release too, so a library version ships the firmware it was
+HIL-validated with.
 
 ## macOS as a tester (unsupported — gap list)
 
