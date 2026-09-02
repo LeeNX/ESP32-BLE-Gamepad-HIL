@@ -57,6 +57,11 @@ env:
 
 jobs:
   build:
+    # This repo always; a fork only once it has a tester wired and its secrets
+    # set (TS_OAUTH_*, HIL_TESTER_*) -- then set repo variable HIL_RIG_ENABLED=true.
+    # Keeps a fresh fork's Actions tab clean (skipped) instead of failing on the
+    # missing Tailscale secret.
+    if: github.repository == 'LeeNX/ESP32-BLE-Gamepad-HIL' || vars.HIL_RIG_ENABLED == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout harness
@@ -99,6 +104,7 @@ jobs:
 
   hil-test:
     needs: build
+    if: github.repository == 'LeeNX/ESP32-BLE-Gamepad-HIL' || vars.HIL_RIG_ENABLED == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout harness            # for the test-reporter source links

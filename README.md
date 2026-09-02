@@ -361,6 +361,10 @@ serial ports) is never overwritten.
 4. **Repo secrets**: `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, `HIL_TESTER_HOST`
    (the MagicDNS name), `HIL_TESTER_USER`, `HIL_TESTER_SSH_KEY` (a
    passphrase-less key in the tester user's `~/.ssh/authorized_keys`).
+5. **Forks only** — set repo **variable** `HIL_RIG_ENABLED=true`. `hil.yml` /
+   `release.yml` run unconditionally in `LeeNX/ESP32-BLE-Gamepad-HIL`; in a fork
+   they skip until this is set, so a fork with no tester wired shows a clean
+   skipped run rather than a red one on the missing Tailscale secret.
 
 Triggers: push to `main` / `hil-*`, manual dispatch (with `lib_repo` / `lib_ref`
 inputs), or `repository_dispatch` type `hil` from the library repo. A

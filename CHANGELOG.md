@@ -42,6 +42,10 @@ What a bump means:
   `.git` drifting behind a working tree full of "modifications"). Only the
   gitignored `hil_config.local.toml` is preserved. `results/` is pulled back even
   when the suite fails.
+- `hil.yml` / `release.yml` jobs are guarded: they always run in
+  `LeeNX/ESP32-BLE-Gamepad-HIL`, and in a fork only when repo variable
+  `HIL_RIG_ENABLED=true` is set — so a fork with no tester wired gets a clean
+  skipped run, not a failure on the missing Tailscale secret.
 
 ## [0.1.0] — 2026-09-02
 

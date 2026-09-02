@@ -34,7 +34,7 @@ env:
 
 jobs:
   release:
-    if: github.repository == 'LeeNX/ESP32-BLE-Gamepad-HIL'
+    if: github.repository == 'LeeNX/ESP32-BLE-Gamepad-HIL' || vars.HIL_RIG_ENABLED == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
