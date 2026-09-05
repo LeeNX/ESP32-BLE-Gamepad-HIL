@@ -184,23 +184,31 @@ BlueZ version, load average + CPU temp/freq sampled around the measurement):
 `tester/test.sh` then runs `python -m hil.charts results/` → `bench-table.md`
 plus three SVGs (latency vs report size, clean rate per profile, latency
 distribution). The pytest gates are deliberately loose — the recorded JSON is
-the deliverable.
+the deliverable. A committed snapshot lives in [`docs/bench/`](docs/bench/).
 
-### Findings (esp32dev, Raspberry Pi 3B+, kernel 6.18, BlueZ 5.82)
+### Findings (all 3 boards × 6 profiles, Raspberry Pi 3B+, kernel 6.18, BlueZ 5.82)
 
-- Single button press → host in **~18.6 ms** median (p99 ~67), **0 dropped**
-  across 200 paced presses per profile.
-- **Latency is flat vs HID report size** (3–28 B).
-- **Connection interval 48.75 ms** on every profile — the library doesn't
-  request a fast one. It bounds *latency*, not paced *rate*: NimBLE sends
-  several packets per connection event, so paced input delivers ~100% past
-  80 Hz (here it's the serial channel, not BLE, that runs out first).
+- Single button press → host in **~18.6 ms** median on **every board and
+  profile** — `esp32dev`, `esp32c3`, `esp32s3` are indistinguishable at p50.
+  **0 dropped** across 200 paced presses per profile.
+- **Latency is flat vs HID report size** (3–28 B) and vs chip. p99 (~20–68 ms)
+  is just connection-interval jitter — one 48.75 ms interval — and swings run
+  to run with where the sample lands; p50 is the signal.
+- **Connection interval 48.75 ms, MTU 255** on every board/profile — the
+  library doesn't request a fast one. It bounds *latency*, not paced *rate*:
+  NimBLE sends several packets per connection event, so paced input delivers
+  ~100% at **80–133 Hz** (here it's the serial / bridge channel, not BLE, that
+  runs out first).
 - **Unpaced `sendReport()` bursts overflow and drop silently** — at gap=0 only
   ~2% of a 500-report burst survives. Don't call `sendReport()` faster than you
   can transmit.
 - **Feature Report off-by-one**: the last byte of `setFeatureReportLength()`
   doesn't round-trip (host reads back length−1 data + a trailing zero) — pinned
   as a strict xfail (`test_feature_full_length_roundtrips`).
+- **Rig note**: the C3/S3 external USB-UART bridges drop a byte occasionally
+  under the burst sweep — ~1 `--bench` run in 5 needed a retry (`SerialDev`
+  retries `command()` once; CI retries a failed `--bench`). The functional
+  suite is solid on all three.
 
 ## Serial protocol (`firmware/src/hil_runner.cpp`)
 

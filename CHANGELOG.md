@@ -34,12 +34,24 @@ What a bump means:
   `esp32-s3-devkitc-1`) and `[board.esp32s3]` in `hil_config.toml`. Dual-USB-C S3
   boards (e.g. DevKitC-1) have the C3's UART-bridge fix built in — no external
   wiring — see README "ESP32-S3 dual-USB-C setup".
-- **All three boards (`esp32dev`, `esp32c3`, `esp32s3`) now verified green
-  end-to-end on the reference rig** (Raspberry Pi 3B+): flash → BLE pair → the
-  full 62-test suite over the real command channel (native USB bridge for
-  esp32dev; an external UART bridge on UART0 + native-USB `flash_port` for the
-  C3/S3). Each: 41 passed / 19 skipped (profile-gated) / 2 xfailed (known Linux
-  HID-mapping limits).
+- **All three boards × all six profiles verified green on the reference rig**
+  (Raspberry Pi 3B+), functional suite **and** `--bench`: flash → BLE pair →
+  62-test suite + latency/throughput sweep over the real command channel
+  (onboard CP2102 for esp32dev; external UART bridge on UART0 + native-USB
+  `flash_port` for the C3/S3).
+- `docs/bench/` — committed snapshot of the cross-board benchmark
+  (`bench-table.md` + 3 SVGs). Button e2e p50 is a flat ~18.6 ms on every
+  board/profile; conn interval 48.75 ms / MTU 255 everywhere; 0 dropped.
+
+### Fixed
+
+- `hidraw.find_node()` now matches the DUT by MAC (`HID_UNIQ`), not just the
+  shared VID/PID — on a multi-board tester the descriptor / feature / output
+  tests were reading a *different* bonded board's hidraw node.
+- `SerialDev.command()` retries once on a timeout — the cheap C3/S3 external
+  USB-UART bridges drop a byte occasionally under the `--bench` burst load
+  (~1 run in 5 previously needed a manual retry). CI also retries a failed
+  `--bench` run once.
 
 ### Changed
 

@@ -158,7 +158,11 @@ jobs:
           git clean --quiet -ffdx -e /hil_config.local.toml -e /.venv -e /.venvs
           rm -rf results && mkdir results
           trc=0
-          for b in ~/hil-bundles/*/; do ./tester/test.sh "$b" --bench || trc=$?; done
+          for b in ~/hil-bundles/*/; do
+            # one retry: the C3/S3 external UART bridges drop a byte under the
+            # --bench burst sweep now and then (README "Benchmarking / Rig note")
+            ./tester/test.sh "$b" --bench || ./tester/test.sh "$b" --bench || trc=$?
+          done
           echo; cat results/run-verdicts.md || true
           exit $trc
           REMOTE

@@ -186,8 +186,8 @@ def _env_line(records):
     )
     l1 = f", load {load[0]:.1f}" if load else ""
     return (
-        f"_{e.get('distro')} · kernel {e.get('kernel')} · {e.get('arch')} · "
-        f"BlueZ {e.get('bluez')} · Python {e.get('python')}{l1}_\n\n"
+        f"> {e.get('distro')} · kernel {e.get('kernel')} · {e.get('arch')} · "
+        f"BlueZ {e.get('bluez')} · Python {e.get('python')}{l1}\n\n"
     )
 
 
