@@ -49,11 +49,11 @@ permissions:
 env:
   LIB_REPO: ${{ inputs.lib_repo || github.event.client_payload.lib_repo || 'https://github.com/LeeNX/ESP32-BLE-Gamepad.git' }}
   LIB_REF:  ${{ inputs.lib_ref  || github.event.client_payload.lib_ref  || 'master' }}
-  # Build the full matrix; the tester runs only the boards it has wired+enabled
-  # (host/hil/detect.py -> tester/test.sh SKIPs the rest). esp32c3 ships
-  # enabled=false until its UART bridge is fitted (README "ESP32-C3 serial
-  # bridge"); esp32s3 SKIPs on its own until a real port is set (its
-  # hil_config.toml ports are still CHANGE-ME) -- see "ESP32-S3 dual-USB-C".
+  # Build the full matrix; the tester runs only the boards it has wired
+  # (host/hil/detect.py -> tester/test.sh SKIPs the rest). esp32c3 / esp32s3
+  # ship with CHANGE-ME ports so they build here but skip on a tester until
+  # real ports are set -- see README "ESP32-C3 serial bridge" / "ESP32-S3
+  # dual-USB-C setup". All three verified green on the reference rig.
   BOARDS: esp32dev esp32c3 esp32s3
   PROFILES: default signed-axes specials minimal maxbtn reports
 

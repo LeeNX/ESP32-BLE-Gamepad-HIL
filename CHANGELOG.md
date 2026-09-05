@@ -33,16 +33,22 @@ What a bump means:
 - `esp32s3` board: `[env:esp32s3*]` in `firmware/platformio.ini` (6 profiles,
   `esp32-s3-devkitc-1`) and `[board.esp32s3]` in `hil_config.toml`. Dual-USB-C S3
   boards (e.g. DevKitC-1) have the C3's UART-bridge fix built in — no external
-  wiring — see README "ESP32-S3 dual-USB-C setup". Verified: `pio run -e
-  esp32s3[-maxbtn]` builds and `make_bundle.py` produces a correct bundle.
+  wiring — see README "ESP32-S3 dual-USB-C setup".
+- **All three boards (`esp32dev`, `esp32c3`, `esp32s3`) now verified green
+  end-to-end on the reference rig** (Raspberry Pi 3B+): flash → BLE pair → the
+  full 62-test suite over the real command channel (native USB bridge for
+  esp32dev; an external UART bridge on UART0 + native-USB `flash_port` for the
+  C3/S3). Each: 41 passed / 19 skipped (profile-gated) / 2 xfailed (known Linux
+  HID-mapping limits).
 
 ### Changed
 
 - CI (`.github/workflows/hil.yml`) builds the full `esp32dev` + `esp32c3` +
   `esp32s3` matrix; the tester runs only the boards it actually has wired
-  (`esp32c3` ships `enabled = false` until its UART bridge is fitted; `esp32s3`
-  ships with `port`/`flash_port` still `CHANGE-ME` — see README "ESP32-C3 serial
-  bridge" / "ESP32-S3 dual-USB-C setup").
+  (`esp32c3` / `esp32s3` ship with `port`/`flash_port` still `CHANGE-ME`, so
+  they build here and skip on a tester until real ports are set — see README
+  "ESP32-C3 serial bridge" / "ESP32-S3 dual-USB-C setup"). No board defaults to
+  `enabled = false` any more.
 - The `hil-test` job now `git fetch` + `git reset --hard`es the tester's checkout
   to the rig commit under test (was: `rsync` over it, which left the tester's
   `.git` drifting behind a working tree full of "modifications"). Only the

@@ -359,11 +359,12 @@ The build matrix is fixed, but a tester only flashes the boards it actually has.
 `[board.<b>] enabled = false` opts out), its `port` / `flash_port` are set (not
 `CHANGE-ME`), and the device node exists. `tester/test.sh` **SKIPs** a bundle
 whose board isn't present — a `SKIP` line in `results/run-verdicts.md`, exit 0,
-not a failure — so a newly-wired board starts running with no CI change, and
-`esp32c3` (shipped `enabled = false` until its [UART bridge](#esp32-c3-serial-bridge)
-is fitted) and `esp32s3` (shipped with `port`/`flash_port` still `CHANGE-ME`
-until you fill in a real board's — see
-[ESP32-S3 dual-USB-C setup](#esp32-s3-dual-usb-c-setup)) don't red the build.
+not a failure. So `esp32c3` and `esp32s3` ship with their ports still
+`CHANGE-ME` (build in CI, skip on a tester until you fill in a real board's —
+see [ESP32-C3 serial bridge](#esp32-c3-serial-bridge) /
+[ESP32-S3 dual-USB-C setup](#esp32-s3-dual-usb-c-setup)), and a newly-wired
+board starts running with no CI change. All three are verified green on the
+reference rig (Raspberry Pi 3B+).
 
 ```bash
 PYTHONPATH=host python3 -m hil.detect            # table of present / absent + why
