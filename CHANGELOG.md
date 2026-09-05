@@ -18,6 +18,8 @@ What a bump means:
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-09-05
+
 ### Added
 
 - `VERSION`, this changelog, `scripts/release.sh`, `.github/workflows/release.yml`
@@ -80,4 +82,5 @@ GATT + descriptor + latency suite, the Tailscale-based CI, and green runs on the
 `rp3b-ble-hil` tester.
 
 [Unreleased]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.1.0
 [0.1.0]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.1.0
