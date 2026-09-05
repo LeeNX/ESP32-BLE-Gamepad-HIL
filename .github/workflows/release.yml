@@ -29,7 +29,7 @@ env:
   TAG: ${{ inputs.tag || github.ref_name }}
   LIB_REPO: https://github.com/LeeNX/ESP32-BLE-Gamepad.git
   LIB_REF: ${{ inputs.lib_ref || 'master' }}
-  BOARDS: esp32dev esp32c3
+  BOARDS: esp32dev esp32c3 esp32s3
   PROFILES: default signed-axes specials minimal maxbtn reports
 
 jobs:

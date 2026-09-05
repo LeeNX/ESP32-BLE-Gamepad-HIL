@@ -12,7 +12,7 @@ pio = "pio"                           # or an absolute path, e.g. ~/.venvs/pio/b
 # default | signed-axes | specials | minimal | maxbtn | reports
 # (see firmware/include/hil_profile.h)
 [builder]
-boards = "esp32dev esp32c3"                                       # space separated
+boards = "esp32dev esp32c3 esp32s3"                                # space separated
 profiles = "default signed-axes specials minimal maxbtn reports"  # space separated
 
 # TESTER role -- the Raspberry Pi + ESP32(s) + BLE adapter. builder/build.sh
@@ -42,6 +42,16 @@ enabled = false
 # interfaces: hil_runner's Serial is UART0 (ARDUINO_USB_CDC_ON_BOOT=0), not the
 # USB-C port, so wire a 3V3 USB-UART bridge to GPIO21/20 for `port` and keep the
 # native USB-Serial/JTAG for `flash_port`. See README "ESP32-C3 serial bridge".
+port = "/dev/serial/by-id/CHANGE-ME"
+# flash_port = "/dev/serial/by-id/CHANGE-ME"
+profile = "default"
+
+[board.esp32s3]
+pio_env = "esp32s3"
+# A dual-USB-C board (e.g. ESP32-S3-DevKitC-1): the onboard CP2102 bridge on
+# the "UART" port *is* `port` (hil_runner's Serial -- UART0, same
+# ARDUINO_USB_CDC_ON_BOOT=0 story as the C3) -- no external wiring needed. The
+# "USB" port (native USB-OTG) is `flash_port`. See README "ESP32-S3 dual-USB-C".
 port = "/dev/serial/by-id/CHANGE-ME"
 # flash_port = "/dev/serial/by-id/CHANGE-ME"
 profile = "default"

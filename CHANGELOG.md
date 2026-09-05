@@ -12,7 +12,7 @@ What a bump means:
 
 - **major** — a breaking change to the serial protocol or the bundle/manifest
   format (an older tester can't run a newer bundle, or vice versa).
-- **minor** — new profiles, new tests, new `test.sh` / `detect-boards.sh`
+- **minor** — new profiles, new tests, new `test.sh` / `detect.py`
   behaviour, new config keys (backwards compatible).
 - **patch** — fixes and doc changes that don't move any of the above.
 
@@ -24,19 +24,25 @@ What a bump means:
   and `RELEASE.md` — the rig now cuts versioned GitHub releases carrying a
   reproducible firmware-bundle set (`firmware-bundles/` + `golden/` + `index.json`)
   and a standalone copy of the test suite.
-- `tester/detect-boards.sh` — reports which configured boards are physically
+- `host/hil/detect.py` — reports which configured boards are physically
   present and `enabled`. `tester/test.sh` now **skips** (exit 0, `SKIP` verdict)
   a bundle whose board is absent or disabled instead of failing the run.
 - `hil_config.toml`: `[board.<b>] enabled` (default `true`) — set `false` to keep
   a board in the build matrix but out of the flash/test loop.
 - `host/hil/config.py --boards` lists the configured board names.
+- `esp32s3` board: `[env:esp32s3*]` in `firmware/platformio.ini` (6 profiles,
+  `esp32-s3-devkitc-1`) and `[board.esp32s3]` in `hil_config.toml`. Dual-USB-C S3
+  boards (e.g. DevKitC-1) have the C3's UART-bridge fix built in — no external
+  wiring — see README "ESP32-S3 dual-USB-C setup". Verified: `pio run -e
+  esp32s3[-maxbtn]` builds and `make_bundle.py` produces a correct bundle.
 
 ### Changed
 
-- CI (`.github/workflows/hil.yml`) builds the full `esp32dev` + `esp32c3` matrix;
-  the tester runs only the boards it actually has wired (`esp32c3` ships as
-  `enabled = false` until its UART bridge is fitted — see README "ESP32-C3 serial
-  bridge").
+- CI (`.github/workflows/hil.yml`) builds the full `esp32dev` + `esp32c3` +
+  `esp32s3` matrix; the tester runs only the boards it actually has wired
+  (`esp32c3` ships `enabled = false` until its UART bridge is fitted; `esp32s3`
+  ships with `port`/`flash_port` still `CHANGE-ME` — see README "ESP32-C3 serial
+  bridge" / "ESP32-S3 dual-USB-C setup").
 - The `hil-test` job now `git fetch` + `git reset --hard`es the tester's checkout
   to the rig commit under test (was: `rsync` over it, which left the tester's
   `.git` drifting behind a working tree full of "modifications"). Only the

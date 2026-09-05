@@ -51,8 +51,10 @@ env:
   LIB_REF:  ${{ inputs.lib_ref  || github.event.client_payload.lib_ref  || 'master' }}
   # Build the full matrix; the tester runs only the boards it has wired+enabled
   # (host/hil/detect.py -> tester/test.sh SKIPs the rest). esp32c3 ships
-  # enabled=false until its UART bridge is fitted (README "ESP32-C3 serial bridge").
-  BOARDS: esp32dev esp32c3
+  # enabled=false until its UART bridge is fitted (README "ESP32-C3 serial
+  # bridge"); esp32s3 SKIPs on its own until a real port is set (its
+  # hil_config.toml ports are still CHANGE-ME) -- see "ESP32-S3 dual-USB-C".
+  BOARDS: esp32dev esp32c3 esp32s3
   PROFILES: default signed-axes specials minimal maxbtn reports
 
 jobs:

@@ -234,9 +234,9 @@ banner and any debug lines are skipped by the host.
 
 `begin()` runs in `setup()` (like `TestAll.ino`): calling it lazily from
 `loop()` on the BEGIN command wedged the NimBLE server task on the classic
-ESP32. So the firmware always advertises once booted; the two boards carry
-distinct names (`HILpad esp32dev` / `HILpad esp32c3`) so the harness bonds the
-right one. The name is kept short — a longer one didn't fit the legacy BLE
+ESP32. So the firmware always advertises once booted; each board carries a
+distinct name (`HILpad esp32dev` / `esp32c3` / `esp32s3`) so the harness bonds
+the right one. The name is kept short — a longer one didn't fit the legacy BLE
 advertising packet and NimBLE silently truncated it.
 
 Hand-test: `python3 -m serial.tools.miniterm <port> 115200`, type `PING`,
@@ -286,6 +286,36 @@ The SuperMini has **no onboard USB-UART chip**, so an external adapter set to
 | `RX` (adapter ← C3) | `GPIO21` (U0TXD) | pin nearest the USB-C shell, other side |
 | `VCC` | **leave unconnected** | board is powered + flashed via USB-C |
 
+## ESP32-S3 dual-USB-C setup
+
+Same underlying story as the C3 — `esp32-s3-devkitc-1` sets `ARDUINO_USB_MODE=1`
+but not `ARDUINO_USB_CDC_ON_BOOT`, so `Serial` (hil_runner's command protocol)
+is **UART0**, not the native USB port — but boards like the **ESP32-S3-DevKitC-1**
+that expose **two USB-C connectors** already have the UART-bridge half of that
+story built in, no soldering required:
+
+| Port (silkscreen) | Interface | Use as |
+|---|---|---|
+| **"USB"** | native USB-OTG (the S3's built-in USB peripheral) | `flash_port` |
+| **"UART"** | onboard CP2102/CH340 bridge → UART0 | `port` |
+
+```toml
+[board.esp32s3]
+port       = "/dev/serial/by-id/usb-<CP2102-or-CH340-bridge>-if00-port0"  # "UART" port
+flash_port = "/dev/serial/by-id/usb-Espressif…-if00"                     # "USB" port
+```
+
+Plug **both** cables into the powered hub, `ls -l /dev/serial/by-id/` to tell
+them apart (the native port identifies as an Espressif device; the bridge as a
+Silicon Labs/CP210x or CH340), fill in both paths, and it behaves exactly like
+`esp32dev` — no `flash_port`/`port` juggling caveats beyond setting them once.
+Native-USB flashing is still capped at 115200 (same flakiness as the C3 —
+`tester/flash.py`'s `SLOW_CHIPS`).
+
+A single-USB-C S3 board (no separate UART bridge) is the C3 situation: it needs
+an external 3.3 V USB-UART adapter on UART0 — check your board's pinout for the
+`U0TXD`/`U0RXD` pins (not necessarily GPIO43/44; that's DevKitC-1-specific).
+
 ## Known mapping quirks the tests pin down
 
 - **Buttons**: kernel `hid-input` maps a gamepad-application Button usage to
@@ -313,7 +343,7 @@ Two workflows:
 self-hosted runner, no inbound ports on your network:
 
 - **build** — `pip install platformio`, `builder/build.sh`, upload the bundles.
-  The **full** `board × profile` matrix is built (`esp32dev` + `esp32c3`).
+  The **full** `board × profile` matrix is built (`esp32dev` + `esp32c3` + `esp32s3`).
 - **hil-test** — brings up an **ephemeral Tailscale node** for the job
   (`tailscale/github-action`), `rsync`s the bundles to the tester over the
   tailnet, `ssh`es in to **`git reset --hard`** the tester's own checkout to the
@@ -331,7 +361,9 @@ The build matrix is fixed, but a tester only flashes the boards it actually has.
 whose board isn't present — a `SKIP` line in `results/run-verdicts.md`, exit 0,
 not a failure — so a newly-wired board starts running with no CI change, and
 `esp32c3` (shipped `enabled = false` until its [UART bridge](#esp32-c3-serial-bridge)
-is fitted) doesn't red the build.
+is fitted) and `esp32s3` (shipped with `port`/`flash_port` still `CHANGE-ME`
+until you fill in a real board's — see
+[ESP32-S3 dual-USB-C setup](#esp32-s3-dual-usb-c-setup)) don't red the build.
 
 ```bash
 PYTHONPATH=host python3 -m hil.detect            # table of present / absent + why
