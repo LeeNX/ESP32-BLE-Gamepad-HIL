@@ -29,11 +29,11 @@ on:
   workflow_dispatch:
     inputs:
       lib_repo:
-        description: ESP32-BLE-Gamepad git URL
-        default: https://github.com/LeeNX/ESP32-BLE-Gamepad.git
+        description: ESP32-BLE-Gamepad git URL (blank = repo var HIL_LIB_REPO, else LeeNX)
+        default: ""
       lib_ref:
-        description: library ref to test
-        default: master
+        description: library ref to test (blank = repo var HIL_LIB_REF, else master)
+        default: ""
   repository_dispatch:
     types: [hil]
 
@@ -47,8 +47,11 @@ permissions:
   checks: write           # dorny/test-reporter creates the check run
 
 env:
-  LIB_REPO: ${{ inputs.lib_repo || github.event.client_payload.lib_repo || 'https://github.com/LeeNX/ESP32-BLE-Gamepad.git' }}
-  LIB_REF:  ${{ inputs.lib_ref  || github.event.client_payload.lib_ref  || 'master' }}
+  # precedence: explicit dispatch input > repository_dispatch payload > repo
+  # variable (HIL_LIB_REPO / HIL_LIB_REF -- a standing default while the HIL
+  # changes live on a fork branch not yet merged upstream) > the built-in.
+  LIB_REPO: ${{ inputs.lib_repo || github.event.client_payload.lib_repo || vars.HIL_LIB_REPO || 'https://github.com/LeeNX/ESP32-BLE-Gamepad.git' }}
+  LIB_REF:  ${{ inputs.lib_ref  || github.event.client_payload.lib_ref  || vars.HIL_LIB_REF  || 'master' }}
   # Build the full matrix; the tester runs only the boards it has wired
   # (host/hil/detect.py -> tester/test.sh SKIPs the rest). esp32c3 / esp32s3
   # ship with CHANGE-ME ports so they build here but skip on a tester until

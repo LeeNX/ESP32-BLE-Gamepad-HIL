@@ -15,8 +15,8 @@ on:
         description: existing vX.Y.Z tag to (re)build the release for
         required: true
       lib_ref:
-        description: ESP32-BLE-Gamepad ref to build the firmware against
-        default: master
+        description: library ref to build against (blank = repo var HIL_LIB_REF, else master)
+        default: ""
 
 concurrency:
   group: release
@@ -27,8 +27,11 @@ permissions:
 
 env:
   TAG: ${{ inputs.tag || github.ref_name }}
-  LIB_REPO: https://github.com/LeeNX/ESP32-BLE-Gamepad.git
-  LIB_REF: ${{ inputs.lib_ref || 'master' }}
+  # repo variables HIL_LIB_REPO / HIL_LIB_REF are the standing default while the
+  # library-side HIL changes (the report-descriptor getters hil_runner needs)
+  # live on a fork branch not yet on master. Drop the var once merged.
+  LIB_REPO: ${{ vars.HIL_LIB_REPO || 'https://github.com/LeeNX/ESP32-BLE-Gamepad.git' }}
+  LIB_REF: ${{ inputs.lib_ref || vars.HIL_LIB_REF || 'master' }}
   BOARDS: esp32dev esp32c3 esp32s3
   PROFILES: default signed-axes specials minimal maxbtn reports
 

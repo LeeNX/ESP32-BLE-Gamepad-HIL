@@ -28,9 +28,14 @@ GitHub Release, and two attached tarballs:
    `[Unreleased]` section.
 3. Pushing the `v*` tag triggers [`.github/workflows/release.yml`](.github/workflows/release.yml):
    it checks `VERSION` matches the tag, builds the firmware matrix against the
-   library `master` (override with the `lib_ref` workflow input on a manual
-   re-run), runs `scripts/make-release-artifacts.sh`, and publishes the release
-   with `--generate-notes`. A `-rcN` / `-beta` suffix marks it a prerelease.
+   library (repo variable `HIL_LIB_REF`, else `master` — override with the
+   `lib_ref` input on a manual re-run), runs `scripts/make-release-artifacts.sh`,
+   and publishes the release with `--generate-notes`. A `-rcN` / `-beta` suffix
+   marks it a prerelease.
+
+   > `hil_runner` needs the library's HID report-descriptor getters, which are
+   > on a fork branch until merged to `master`. Set repo variable `HIL_LIB_REF`
+   > to that branch before the first release, and clear it once merged.
 
 ## Pre-release / dry run
 

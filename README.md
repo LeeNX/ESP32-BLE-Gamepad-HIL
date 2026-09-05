@@ -407,6 +407,14 @@ serial ports) is never overwritten.
    they skip until this is set, so a fork with no tester wired shows a clean
    skipped run rather than a red one on the missing Tailscale secret.
 
+**Which library ref gets built** — `hil.yml` and `release.yml` resolve it in this
+order: an explicit `lib_repo` / `lib_ref` dispatch input → the
+`repository_dispatch` payload (the library repo passes the ref under test) →
+repo **variables** `HIL_LIB_REPO` / `HIL_LIB_REF` → the built-in
+`LeeNX/ESP32-BLE-Gamepad` @ `master`. Set `HIL_LIB_REF` to a fork branch while
+`hil_runner`'s library dependencies (the HID report-descriptor getters) aren't
+on `master` yet; delete it once they land.
+
 Triggers: push to `main` / `hil-*`, manual dispatch (with `lib_repo` / `lib_ref`
 inputs), or `repository_dispatch` type `hil` from the library repo. A
 `concurrency` group serialises runs — there's one physical rig.
