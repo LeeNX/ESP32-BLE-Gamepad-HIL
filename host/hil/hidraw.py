@@ -37,17 +37,23 @@ def _hidiocgfeature(length):
 
 
 # --- node discovery ---------------------------------------------------
-def find_node(vid=HIL_VID, pid=HIL_PID):
-    """/dev/hidrawN for the DUT, or None. Matches on HID_ID in the sysfs uevent
-    (HID_ID=0005:00001D34:00008010)."""
-    want = f"{vid:08X}:{pid:08X}".upper()
+def find_node(vid=HIL_VID, pid=HIL_PID, mac=None):
+    """/dev/hidrawN for the DUT, or None. Matches HID_ID (VID/PID) in the sysfs
+    uevent (HID_ID=0005:00001D34:00008010); when `mac` is given, also HID_UNIQ,
+    so the right node is picked when several DUTs (all sharing this VID/PID) are
+    bonded to the same adapter -- which is normal on a multi-board tester."""
+    want_id = f"{vid:08X}:{pid:08X}".upper()
+    want_uniq = f"HID_UNIQ={mac}".upper() if mac else None
     for p in sorted(glob.glob("/sys/class/hidraw/hidraw*")):
         try:
             ue = pathlib.Path(p, "device/uevent").read_text().upper()
         except OSError:
             continue
-        if want in ue.replace("HID_ID=0005:", ""):
-            return "/dev/" + os.path.basename(p)
+        if want_id not in ue.replace("HID_ID=0005:", ""):
+            continue
+        if want_uniq and want_uniq not in ue:
+            continue
+        return "/dev/" + os.path.basename(p)
     return None
 
 
