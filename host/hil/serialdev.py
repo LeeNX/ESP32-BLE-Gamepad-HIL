@@ -106,9 +106,25 @@ class SerialDev:
                 buf += b
         raise SerialError("timeout waiting for a reply line")
 
-    def command(self, cmd, timeout=6.0, prefixes=REPLY_PREFIXES):
+    def command(self, cmd, timeout=6.0, prefixes=REPLY_PREFIXES, retries=1):
         """Send one command line, return the first reply line matching a known
-        prefix. Stray lines (boot banner, debug) are skipped."""
+        prefix. Stray lines (boot banner, debug) are skipped.
+
+        Retries once by default: the cheap USB-UART bridges on the C3/S3 (an
+        external PL2303 / CH340) drop a byte here and there under the `--bench`
+        burst load, so a lone missed reply shouldn't fail the run."""
+        last = None
+        for attempt in range(retries + 1):
+            try:
+                return self._command_once(cmd, timeout, prefixes)
+            except SerialError as e:
+                last = e
+                if attempt < retries:
+                    self.drain()
+                    time.sleep(0.2)
+        raise last
+
+    def _command_once(self, cmd, timeout, prefixes):
         try:
             self.ser.write((cmd + "\n").encode("ascii"))
             self.ser.flush()

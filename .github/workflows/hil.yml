@@ -13,10 +13,13 @@
 #   HIL_TESTER_USER      ssh user on the tester
 #   HIL_TESTER_SSH_KEY   private key authorised on the tester (no passphrase)
 #
-# The tester has this repo at ~/ESP32-BLE-Gamepad-HIL with hil_config.local.toml
-# filled in (board ports), its ~/.venvs/hil from tester/requirements.txt, the
-# udev rule, the ESP32(s) + a BLE adapter, and Tailscale up (tester/bootstrap-host.sh
-# installs it). It only ever flashes prebuilt bundles -- no PlatformIO.
+# The tester has this repo cloned at ~/ESP32-BLE-Gamepad-HIL with
+# hil_config.local.toml filled in (board ports), its ~/.venvs/hil from
+# tester/requirements.txt, the udev rule, the ESP32(s) + a BLE adapter, and
+# Tailscale up (tester/bootstrap-host.sh installs it). The hil-test job
+# git-resets that checkout to the rig commit under test (preserving only the
+# gitignored local config), so it never drifts. It only ever flashes prebuilt
+# bundles -- no PlatformIO.
 
 name: HIL
 
@@ -46,11 +49,21 @@ permissions:
 env:
   LIB_REPO: ${{ inputs.lib_repo || github.event.client_payload.lib_repo || 'https://github.com/LeeNX/ESP32-BLE-Gamepad.git' }}
   LIB_REF:  ${{ inputs.lib_ref  || github.event.client_payload.lib_ref  || 'master' }}
-  BOARDS: esp32dev
+  # Build the full matrix; the tester runs only the boards it has wired
+  # (host/hil/detect.py -> tester/test.sh SKIPs the rest). esp32c3 / esp32s3
+  # ship with CHANGE-ME ports so they build here but skip on a tester until
+  # real ports are set -- see README "ESP32-C3 serial bridge" / "ESP32-S3
+  # dual-USB-C setup". All three verified green on the reference rig.
+  BOARDS: esp32dev esp32c3 esp32s3
   PROFILES: default signed-axes specials minimal maxbtn reports
 
 jobs:
   build:
+    # This repo always; a fork only once it has a tester wired and its secrets
+    # set (TS_OAUTH_*, HIL_TESTER_*) -- then set repo variable HIL_RIG_ENABLED=true.
+    # Keeps a fresh fork's Actions tab clean (skipped) instead of failing on the
+    # missing Tailscale secret.
+    if: github.repository == 'LeeNX/ESP32-BLE-Gamepad-HIL' || vars.HIL_RIG_ENABLED == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout harness
@@ -93,9 +106,10 @@ jobs:
 
   hil-test:
     needs: build
+    if: github.repository == 'LeeNX/ESP32-BLE-Gamepad-HIL' || vars.HIL_RIG_ENABLED == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout harness            # the ref under test drives the tester too
+      - name: Checkout harness            # for the test-reporter source links
         uses: actions/checkout@v5
 
       - uses: actions/download-artifact@v7
@@ -125,22 +139,36 @@ jobs:
           EOF
 
       - name: Flash + test on the tester
+        env:
+          RIG_SHA: ${{ github.sha }}
         run: |
-          SSH="ssh"
-          # push this exact harness checkout (keep the tester's real serial-port config)
-          rsync -a -e "$SSH" --delete \
-            --exclude '.git' --exclude '.pio' --exclude 'bundles' --exclude 'results' \
-            --exclude 'hil_config.local.toml' --exclude '__pycache__' --exclude '*.pyc' \
-            ./ hil-tester:ESP32-BLE-Gamepad-HIL/
-          rsync -a -e "$SSH" --delete bundles/ hil-tester:hil-bundles/
-          ssh hil-tester 'set -e
-            cd ~/ESP32-BLE-Gamepad-HIL
-            rm -rf results && mkdir results
-            rc=0
-            for b in ~/hil-bundles/*/; do ./tester/test.sh "$b" --bench || rc=$?; done
-            echo; cat results/run-verdicts.md || true
-            exit $rc'
-          rsync -a -e "$SSH" hil-tester:ESP32-BLE-Gamepad-HIL/results/ results/
+          # bundles are build artifacts (not in git) -- push them over
+          rsync -a --delete bundles/ hil-tester:hil-bundles/
+          # the tester runs the exact rig commit under test: fetch + hard-reset
+          # its own checkout to it (keeps only the gitignored local port config),
+          # so the checkout stays coherent instead of drifting under an rsync.
+          # RIG_SHA is prepended as a plain assignment line, so the remote body
+          # can stay a literal (quoted) heredoc.
+          rc=0
+          { echo "RIG_SHA=$RIG_SHA"; cat <<'REMOTE'; } | ssh hil-tester bash -se || rc=$?
+          cd ~/ESP32-BLE-Gamepad-HIL
+          git fetch --quiet --prune origin
+          git reset --quiet --hard "$RIG_SHA" \
+            || { echo "::error::tester: rig commit $RIG_SHA not reachable from origin"; exit 1; }
+          git clean --quiet -ffdx -e /hil_config.local.toml -e /.venv -e /.venvs
+          rm -rf results && mkdir results
+          trc=0
+          for b in ~/hil-bundles/*/; do
+            # one retry: the C3/S3 external UART bridges drop a byte under the
+            # --bench burst sweep now and then (README "Benchmarking / Rig note")
+            ./tester/test.sh "$b" --bench || ./tester/test.sh "$b" --bench || trc=$?
+          done
+          echo; cat results/run-verdicts.md || true
+          exit $trc
+          REMOTE
+          # always pull results back (even on a test failure) for the report + artifact
+          rsync -a hil-tester:ESP32-BLE-Gamepad-HIL/results/ results/ || true
+          exit $rc
 
       - uses: actions/upload-artifact@v6
         if: always()

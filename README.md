@@ -17,8 +17,8 @@ Raspberry Pi) that can't build firmware in reasonable time:
  │ builder/build.sh:          │  (rsync/   │ tester/test.sh:                  │
  │  pio run  (lib under test) │   CI       │  tester/flash.py  (esptool only) │
  │  -> bundles/<b>-<p>-<sha>/ │  artifact) │  pytest  (pyserial+evdev+bluez   │
- │     *.bin + manifest.json  │──────────►│         +dbus-fast)               │
- └────────────────────────────┘            │   USB─► ESP32 ─BLE─► /dev/input/  │
+ │     *.bin + manifest.json  │───────────►│         +dbus-fast)              │
+ └────────────────────────────┘            │   USB─► ESP32 ─BLE─► /dev/input/ │
                                            │  -> results/ junit + bench + svg │
                                            └──────────────────────────────────┘
 ```
@@ -43,11 +43,12 @@ push to the tester, run, pull results). One box can be both roles
 | `firmware/` | PlatformIO project — `hil_runner` serial-command firmware, `hil_profile.h` layout profiles (see below) |
 | `builder/build.sh` `builder/make_bundle.py` | compile → firmware bundle(s) → optional `--push` rsync to the tester. Library path comes from `$HIL_LIB_DIR` (exported from `rig.lib_dir`) |
 | `tester/bootstrap-host.sh` (root) `tester/bootstrap.sh` (user) | tester provisioning, split: privileged half (apt / bluetooth / groups / udev) vs unprivileged half (venv / config / health check) |
-| `tester/flash.py` `tester/test.sh` | flash a bundle with esptool, run the suite + benchmark, write `results/` |
-| `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite. Helpers: `serialdev`, `evdev_utils`, `bluetooth`, `gatt` (DIS/PnP/battery over BlueZ D-Bus), `hidraw` (Feature/Output reports + descriptor), `latency`+`bench`, `sysinfo`, `charts`, `summarize` |
-| `hil_config.toml` (+ gitignored `hil_config.local.toml`) | per-machine ports, ssh host, builder board/profile matrix |
+| `tester/flash.py` `tester/test.sh` | flash a bundle with esptool, run the suite + benchmark, write `results/`; SKIPs a board the tester doesn't have |
+| `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite. Helpers: `serialdev`, `evdev_utils`, `bluetooth`, `gatt` (DIS/PnP/battery over BlueZ D-Bus), `hidraw` (Feature/Output reports + descriptor), `latency`+`bench`, `sysinfo`, `detect` (present boards), `charts`, `summarize` |
+| `hil_config.toml` (+ gitignored `hil_config.local.toml`) | per-machine ports, ssh host, builder board/profile matrix, per-board `enabled` |
 | `run.sh` | one-box: build all bundles then flash+test each |
-| `.github/workflows/hil.yml` | CI: build job → SSH-to-tester test job |
+| `scripts/release.sh` `scripts/make-release-artifacts.sh` | cut a rig release (`VERSION` + `CHANGELOG.md` → tag → `release.yml`); see [RELEASE.md](RELEASE.md) |
+| `.github/workflows/hil.yml` `release.yml` | CI: build → SSH-to-tester test; tag → firmware/suite release |
 
 ### Compile profiles (`firmware/include/hil_profile.h`)
 
@@ -183,23 +184,31 @@ BlueZ version, load average + CPU temp/freq sampled around the measurement):
 `tester/test.sh` then runs `python -m hil.charts results/` → `bench-table.md`
 plus three SVGs (latency vs report size, clean rate per profile, latency
 distribution). The pytest gates are deliberately loose — the recorded JSON is
-the deliverable.
+the deliverable. A committed snapshot lives in [`docs/bench/`](docs/bench/).
 
-### Findings (esp32dev, Raspberry Pi 3B+, kernel 6.18, BlueZ 5.82)
+### Findings (all 3 boards × 6 profiles, Raspberry Pi 3B+, kernel 6.18, BlueZ 5.82)
 
-- Single button press → host in **~18.6 ms** median (p99 ~67), **0 dropped**
-  across 200 paced presses per profile.
-- **Latency is flat vs HID report size** (3–28 B).
-- **Connection interval 48.75 ms** on every profile — the library doesn't
-  request a fast one. It bounds *latency*, not paced *rate*: NimBLE sends
-  several packets per connection event, so paced input delivers ~100% past
-  80 Hz (here it's the serial channel, not BLE, that runs out first).
+- Single button press → host in **~18.6 ms** median on **every board and
+  profile** — `esp32dev`, `esp32c3`, `esp32s3` are indistinguishable at p50.
+  **0 dropped** across 200 paced presses per profile.
+- **Latency is flat vs HID report size** (3–28 B) and vs chip. p99 (~20–68 ms)
+  is just connection-interval jitter — one 48.75 ms interval — and swings run
+  to run with where the sample lands; p50 is the signal.
+- **Connection interval 48.75 ms, MTU 255** on every board/profile — the
+  library doesn't request a fast one. It bounds *latency*, not paced *rate*:
+  NimBLE sends several packets per connection event, so paced input delivers
+  ~100% at **80–133 Hz** (here it's the serial / bridge channel, not BLE, that
+  runs out first).
 - **Unpaced `sendReport()` bursts overflow and drop silently** — at gap=0 only
   ~2% of a 500-report burst survives. Don't call `sendReport()` faster than you
   can transmit.
 - **Feature Report off-by-one**: the last byte of `setFeatureReportLength()`
   doesn't round-trip (host reads back length−1 data + a trailing zero) — pinned
   as a strict xfail (`test_feature_full_length_roundtrips`).
+- **Rig note**: the C3/S3 external USB-UART bridges drop a byte occasionally
+  under the burst sweep — ~1 `--bench` run in 5 needed a retry (`SerialDev`
+  retries `command()` once; CI retries a failed `--bench`). The functional
+  suite is solid on all three.
 
 ## Serial protocol (`firmware/src/hil_runner.cpp`)
 
@@ -233,9 +242,9 @@ banner and any debug lines are skipped by the host.
 
 `begin()` runs in `setup()` (like `TestAll.ino`): calling it lazily from
 `loop()` on the BEGIN command wedged the NimBLE server task on the classic
-ESP32. So the firmware always advertises once booted; the two boards carry
-distinct names (`HILpad esp32dev` / `HILpad esp32c3`) so the harness bonds the
-right one. The name is kept short — a longer one didn't fit the legacy BLE
+ESP32. So the firmware always advertises once booted; each board carries a
+distinct name (`HILpad esp32dev` / `esp32c3` / `esp32s3`) so the harness bonds
+the right one. The name is kept short — a longer one didn't fit the legacy BLE
 advertising packet and NimBLE silently truncated it.
 
 Hand-test: `python3 -m serial.tools.miniterm <port> 115200`, type `PING`,
@@ -285,6 +294,36 @@ The SuperMini has **no onboard USB-UART chip**, so an external adapter set to
 | `RX` (adapter ← C3) | `GPIO21` (U0TXD) | pin nearest the USB-C shell, other side |
 | `VCC` | **leave unconnected** | board is powered + flashed via USB-C |
 
+## ESP32-S3 dual-USB-C setup
+
+Same underlying story as the C3 — `esp32-s3-devkitc-1` sets `ARDUINO_USB_MODE=1`
+but not `ARDUINO_USB_CDC_ON_BOOT`, so `Serial` (hil_runner's command protocol)
+is **UART0**, not the native USB port — but boards like the **ESP32-S3-DevKitC-1**
+that expose **two USB-C connectors** already have the UART-bridge half of that
+story built in, no soldering required:
+
+| Port (silkscreen) | Interface | Use as |
+|---|---|---|
+| **"USB"** | native USB-OTG (the S3's built-in USB peripheral) | `flash_port` |
+| **"UART"** | onboard CP2102/CH340 bridge → UART0 | `port` |
+
+```toml
+[board.esp32s3]
+port       = "/dev/serial/by-id/usb-<CP2102-or-CH340-bridge>-if00-port0"  # "UART" port
+flash_port = "/dev/serial/by-id/usb-Espressif…-if00"                     # "USB" port
+```
+
+Plug **both** cables into the powered hub, `ls -l /dev/serial/by-id/` to tell
+them apart (the native port identifies as an Espressif device; the bridge as a
+Silicon Labs/CP210x or CH340), fill in both paths, and it behaves exactly like
+`esp32dev` — no `flash_port`/`port` juggling caveats beyond setting them once.
+Native-USB flashing is still capped at 115200 (same flakiness as the C3 —
+`tester/flash.py`'s `SLOW_CHIPS`).
+
+A single-USB-C S3 board (no separate UART bridge) is the C3 situation: it needs
+an external 3.3 V USB-UART adapter on UART0 — check your board's pinout for the
+`U0TXD`/`U0RXD` pins (not necessarily GPIO43/44; that's DevKitC-1-specific).
+
 ## Known mapping quirks the tests pin down
 
 - **Buttons**: kernel `hid-input` maps a gamepad-application Button usage to
@@ -312,11 +351,33 @@ Two workflows:
 self-hosted runner, no inbound ports on your network:
 
 - **build** — `pip install platformio`, `builder/build.sh`, upload the bundles.
+  The **full** `board × profile` matrix is built (`esp32dev` + `esp32c3` + `esp32s3`).
 - **hil-test** — brings up an **ephemeral Tailscale node** for the job
-  (`tailscale/github-action`), `rsync`s the checked-out harness code (so the
-  tester runs the same ref) **and** the bundles to the tester over the tailnet,
-  `ssh`es in to run `tester/test.sh --bench` per bundle, pulls `results/` back,
+  (`tailscale/github-action`), `rsync`s the bundles to the tester over the
+  tailnet, `ssh`es in to **`git reset --hard`** the tester's own checkout to the
+  rig commit under test (`git clean -ffdx` keeps only the gitignored
+  `hil_config.local.toml`, so the checkout never drifts), runs
+  `tester/test.sh --bench` per bundle, pulls `results/` back (even on failure),
   publishes the JUnit report.
+
+### Which boards run
+
+The build matrix is fixed, but a tester only flashes the boards it actually has.
+`host/hil/detect.py` decides: a board runs when it's `enabled` (default true;
+`[board.<b>] enabled = false` opts out), its `port` / `flash_port` are set (not
+`CHANGE-ME`), and the device node exists. `tester/test.sh` **SKIPs** a bundle
+whose board isn't present — a `SKIP` line in `results/run-verdicts.md`, exit 0,
+not a failure. So `esp32c3` and `esp32s3` ship with their ports still
+`CHANGE-ME` (build in CI, skip on a tester until you fill in a real board's —
+see [ESP32-C3 serial bridge](#esp32-c3-serial-bridge) /
+[ESP32-S3 dual-USB-C setup](#esp32-s3-dual-usb-c-setup)), and a newly-wired
+board starts running with no CI change. All three are verified green on the
+reference rig (Raspberry Pi 3B+).
+
+```bash
+PYTHONPATH=host python3 -m hil.detect            # table of present / absent + why
+PYTHONPATH=host python3 -m hil.detect --json
+```
 
 The tester is a plain **SSH target** on the tailnet, not a runner — nothing
 untrusted executes on it directly, and its own `hil_config.local.toml` (real
@@ -341,6 +402,10 @@ serial ports) is never overwritten.
 4. **Repo secrets**: `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, `HIL_TESTER_HOST`
    (the MagicDNS name), `HIL_TESTER_USER`, `HIL_TESTER_SSH_KEY` (a
    passphrase-less key in the tester user's `~/.ssh/authorized_keys`).
+5. **Forks only** — set repo **variable** `HIL_RIG_ENABLED=true`. `hil.yml` /
+   `release.yml` run unconditionally in `LeeNX/ESP32-BLE-Gamepad-HIL`; in a fork
+   they skip until this is set, so a fork with no tester wired shows a clean
+   skipped run rather than a red one on the missing Tailscale secret.
 
 Triggers: push to `main` / `hil-*`, manual dispatch (with `lib_repo` / `lib_ref`
 inputs), or `repository_dispatch` type `hil` from the library repo. A
@@ -349,6 +414,23 @@ inputs), or `repository_dispatch` type `hil` from the library repo. A
 **Untrusted code**: the build job compiles whatever library ref it's handed and
 the test job flashes it to hardware. Keep the triggers to same-repo pushes +
 manual dispatch; don't run it automatically on PRs from forks.
+
+## Releases
+
+The rig is versioned independently of the library — [SemVer](https://semver.org/)
+tags, a [CHANGELOG](CHANGELOG.md), and a GitHub Release per tag carrying:
+
+- **`…-firmware-vX.Y.Z.tar.gz`** — the whole `board × profile` bundle set
+  (prebuilt `.bin`s + manifests), `golden/*.hiddesc`, and `index.json` (rig +
+  library commit). Flash it and run the suite with no PlatformIO — see
+  [REPRODUCE.md](REPRODUCE.md).
+- **`…-suite-vX.Y.Z.tar.gz`** — a standalone copy of the pytest suite.
+
+Cut one with `scripts/release.sh X.Y.Z` (see [RELEASE.md](RELEASE.md)); the
+`v*` tag push drives `.github/workflows/release.yml`. The library's own release
+workflow rebuilds the same firmware set from the pinned rig ref and attaches it
+to the library release too, so a library version ships the firmware it was
+HIL-validated with.
 
 ## macOS as a tester (unsupported — gap list)
 

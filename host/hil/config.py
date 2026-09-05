@@ -44,5 +44,8 @@ def get(dotted, default=""):
 
 
 if __name__ == "__main__":
-    val = get(sys.argv[1])
-    print("" if isinstance(val, (dict, list)) else val)
+    if len(sys.argv) > 1 and sys.argv[1] == "--boards":
+        print(" ".join(load().get("board", {})))
+    else:
+        val = get(sys.argv[1])
+        print("" if isinstance(val, (dict, list)) else val)

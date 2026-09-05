@@ -82,6 +82,10 @@ port = "/dev/serial/by-id/CHANGE-ME"   # ls -l /dev/serial/by-id/
 [board.esp32c3]
 port = "/dev/serial/by-id/CHANGE-ME"        # UART0 bridge (see README "ESP32-C3 serial bridge")
 # flash_port = "/dev/serial/by-id/CHANGE-ME" # native USB-C, if different from port
+
+[board.esp32s3]
+port = "/dev/serial/by-id/CHANGE-ME"        # onboard "UART" port (see README "ESP32-S3 dual-USB-C")
+# flash_port = "/dev/serial/by-id/CHANGE-ME" # the "USB" port, if different from port
 EOF
   echo "   wrote a stub -- set the real port(s)"
 fi

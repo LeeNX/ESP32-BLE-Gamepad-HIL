@@ -17,7 +17,7 @@ def out(connected_dut, bt_mac):
     cfg = connected_dut.config()
     if not cfg.get("out"):
         pytest.skip("profile has no Output Report (use --profile reports)")
-    node = hidraw.find_node()
+    node = hidraw.find_node(mac=bt_mac)
     if node is None:
         pytest.skip("no /dev/hidraw node for the DUT")
     try:
