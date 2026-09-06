@@ -18,6 +18,24 @@ What a bump means:
 
 ## [Unreleased]
 
+### Fixed
+
+- `hil.yml` / `release.yml` resolve the library repo/ref from repo **variables**
+  `HIL_LIB_REPO` / `HIL_LIB_REF` (else the built-in `LeeNX/ESP32-BLE-Gamepad` @
+  `master`); explicit dispatch inputs still win. `hil_runner` needs the library's
+  HID report-descriptor getters, which live on a fork branch not yet on `master`
+  — **`v0.1.0`'s `release.yml` build failed against `master` and published no
+  artifacts.** Set `HIL_LIB_REF` to the fork branch; drop it once merged.
+- `CHANGELOG.md`: dropped a duplicate `## [0.1.0]` section and link ref (a
+  pre-populated placeholder that collided with `scripts/release.sh`).
+
+## [0.1.0] — 2026-09-05
+
+First tagged rig. Baseline (predating this release): the builder/tester split,
+`bootstrap-host.sh` + `bootstrap.sh`, the six compile profiles (`default`,
+`signed-axes`, `specials`, `minimal`, `maxbtn`, `reports`), the BLE-HID + GATT +
+descriptor + latency suite, and the Tailscale-based CI. Plus:
+
 ### Added
 
 - `VERSION`, this changelog, `scripts/release.sh`, `.github/workflows/release.yml`
@@ -70,14 +88,6 @@ What a bump means:
   `LeeNX/ESP32-BLE-Gamepad-HIL`, and in a fork only when repo variable
   `HIL_RIG_ENABLED=true` is set — so a fork with no tester wired gets a clean
   skipped run, not a failure on the missing Tailscale secret.
-
-## [0.1.0] — 2026-09-02
-
-First tagged rig. Everything up to and including: the builder/tester split,
-`bootstrap-host.sh` + `bootstrap.sh`, six compile profiles (`default`,
-`signed-axes`, `specials`, `minimal`, `maxbtn`, `reports`), the BLE-HID +
-GATT + descriptor + latency suite, the Tailscale-based CI, and green runs on the
-`rp3b-ble-hil` tester.
 
 [Unreleased]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.1.0
