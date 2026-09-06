@@ -406,14 +406,47 @@ serial ports) is never overwritten.
    `release.yml` run unconditionally in `LeeNX/ESP32-BLE-Gamepad-HIL`; in a fork
    they skip until this is set, so a fork with no tester wired shows a clean
    skipped run rather than a red one on the missing Tailscale secret.
+6. **Dispatch token** — this lives on the repo that *triggers* your rig, not the
+   rig repo. See [The dispatch token](#the-dispatch-token) below.
+
+#### The dispatch token
+
+`hil.yml` / `release.yml` here are driven by a `repository_dispatch` (or a manual
+dispatch) from a **library** repo — a fork of `ESP32-BLE-Gamepad` running its
+`.github/workflows/hil.yml`. That repo authenticates with a **`HIL_DISPATCH_TOKEN`**
+secret it holds: a PAT for **your** rig repo with **Contents: write** (POST the
+dispatch) + **Actions: read** (poll the run).
+
+Create it — fine-grained PAT, by someone with write on the rig repo:
+
+1. github.com → your avatar → **Settings** → **Developer settings** → **Personal
+   access tokens** → **Fine-grained tokens** → **Generate new token**
+2. **Resource owner**: your rig repo's owner (if an org, approve the token in its
+   settings afterwards)
+3. **Repository access** → *Only select repositories* → your
+   `ESP32-BLE-Gamepad-HIL` fork
+4. **Permissions → Repository permissions**: **Contents** → *Read and write*;
+   **Actions** → *Read-only* (*Metadata: Read-only* is added automatically)
+5. Set an **expiration** you'll rotate before — an expired token fails the
+   library's dispatch step with `HIL_DISPATCH_TOKEN … is not set`
+6. **Generate token**, copy it
+
+Add it as an **Actions secret** named `HIL_DISPATCH_TOKEN` on the library repo
+(its Settings → Secrets and variables → Actions → Secrets). Classic-PAT
+alternative: **Generate new token (classic)** with the `repo` scope — broader
+than needed; prefer fine-grained.
+
+The library's `hil.yml` hardcodes the rig it dispatches to
+(`RIG_REPO: LeeNX/ESP32-BLE-Gamepad-HIL`) — point that at your fork. `release.yml`'s
+firmware-attach job already reads `vars.HIL_RIG_REPO` / `HIL_RIG_REF`.
 
 **Which library ref gets built** — `hil.yml` and `release.yml` resolve it in this
 order: an explicit `lib_repo` / `lib_ref` dispatch input → the
 `repository_dispatch` payload (the library repo passes the ref under test) →
 repo **variables** `HIL_LIB_REPO` / `HIL_LIB_REF` → the built-in
-`LeeNX/ESP32-BLE-Gamepad` @ `master`. Set `HIL_LIB_REF` to a fork branch while
-`hil_runner`'s library dependencies (the HID report-descriptor getters) aren't
-on `master` yet; delete it once they land.
+`LeeNX/ESP32-BLE-Gamepad` @ `master`. The variables are an escape hatch for
+pinning a fork/branch — e.g. while a library change `hil_runner` needs is still
+unmerged.
 
 Triggers: push to `main` / `hil-*`, manual dispatch (with `lib_repo` / `lib_ref`
 inputs), or `repository_dispatch` type `hil` from the library repo. A
