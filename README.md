@@ -186,6 +186,20 @@ plus three SVGs (latency vs report size, clean rate per profile, latency
 distribution). The pytest gates are deliberately loose — the recorded JSON is
 the deliverable. A committed snapshot lives in [`docs/bench/`](docs/bench/).
 
+`--bench-quick` (with `--bench`) runs a shorter sweep — n=40, 3 gap values,
+~2 min vs ~6 — for a fast check or a parallel run.
+
+### Multi-gamepad contention
+
+`tester/bench-parallel.sh` (→ `python -m hil.bench_parallel`) measures whether
+the numbers move when **several gamepads share one host adapter**. It sweeps
+each wired board **solo**, then sweeps **all of them at once** in parallel
+threads released together on a barrier, and prints a solo→N-up table
+(`results/parallel/<stamp>/`). One `hil_runner` bundle per board covers both —
+the MCU-side `BURST` generates its own traffic, so nothing is re-flashed
+between passes. `--keep-peers-connected` holds the connection count fixed
+(peers connected but idle) so only traffic contention varies.
+
 ### Findings (all 3 boards × 6 profiles, Raspberry Pi 3B+, kernel 6.18, BlueZ 5.82)
 
 - Single button press → host in **~18.6 ms** median on **every board and
