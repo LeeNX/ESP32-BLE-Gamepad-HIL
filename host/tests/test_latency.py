@@ -1,9 +1,13 @@
 """Latency / polling-rate benchmark (opt-in: pass --bench).
 
-Runs one full sweep for the flashed profile, writes
-results/bench-<board>-<profile>-<stamp>.json (charts.py turns the accumulated
-files into tables + SVGs), and asserts a few deliberately loose gates so a
-genuine regression trips CI without normal host-scheduling jitter doing so.
+Runs one sweep for the flashed profile (full, or short with --bench-quick),
+writes results/bench-<board>-<profile>-<stamp>.json (charts.py turns the
+accumulated files into tables + SVGs), and asserts a few deliberately loose
+gates so a genuine regression trips CI without normal host-scheduling jitter
+doing so.
+
+The multi-gamepad contention experiment (solo vs N-up on one BLE adapter) lives
+in host/hil/bench_parallel.py, outside pytest.
 """
 
 import pathlib
@@ -26,6 +30,7 @@ def sweep(bench_enabled, connected_dut, gamepad, rigcfg, pytestconfig):
         board=rigcfg["name"],
         profile=rigcfg["profile"],
         lib_describe=_lib_describe(pytestconfig),
+        quick=pytestconfig.getoption("bench_quick"),
     )
     path = bench.write_result(result, REPO / "results")
     print(f"\n[bench] wrote {path}")

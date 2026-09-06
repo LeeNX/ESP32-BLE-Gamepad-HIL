@@ -13,9 +13,27 @@ import pathlib
 from . import latency, sysinfo
 
 
-def run_sweep(serial, cap, cfg, *, board, profile, lib_describe="", quick=False):
+def run_sweep(
+    serial,
+    cap,
+    cfg,
+    *,
+    board,
+    profile,
+    lib_describe="",
+    quick=False,
+    peers_active=1,
+    peer_boards=(),
+):
     """serial = the SerialDev (hil_runner command channel); cap = the Capture
-    wrapping the DUT's evdev node."""
+    wrapping the DUT's evdev node.
+
+    quick        -- shorter sweep (n=40, 3 gap values); for parallel/contention
+                    runs where the point is the comparison, not absolute rigour.
+    peers_active -- how many gamepads were connected + being driven at once when
+                    this sweep ran (1 = solo). peer_boards names the others.
+                    Recorded so bench_parallel can diff solo vs N-up.
+    """
     n = 40 if quick else 200
     gaps = [0, 3000, 10000] if quick else [0, 1000, 2000, 5000, 10000, 20000]
 
@@ -48,6 +66,9 @@ def run_sweep(serial, cap, cfg, *, board, profile, lib_describe="", quick=False)
         "board": board,
         "profile": profile,
         "lib_describe": lib_describe,
+        "quick": quick,
+        "peers_active": peers_active,
+        "peer_boards": list(peer_boards),
         "measured_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
         "env": sysinfo.static_env(),
         "load": {
