@@ -27,6 +27,7 @@ rm -rf "$REPO/bundles"
 # one physical rig -- wait for any other run (CI or local) before touching it.
 # shellcheck source=tester/rig-lock.sh
 source "$REPO/tester/rig-lock.sh"
+export HIL_RUN_WHAT="${HIL_RUN_WHAT:-run.sh ${BUILD_ARGS[*]:-}}"
 rig_lock_acquire || exit $?
 
 rc=0

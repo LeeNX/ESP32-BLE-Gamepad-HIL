@@ -15,4 +15,5 @@ VENV=${HIL_VENV:-$HOME/.venvs/hil}
 
 # one physical rig -- serialise against CI / other local runs (rig-lock.sh).
 # No-op if we're already under a lock (HIL_RIG_LOCK_HELD).
+export HIL_RUN_WHAT="${HIL_RUN_WHAT:-bench-parallel $*}"
 exec tester/rig-lock.sh -- env PYTHONPATH=host "$VENV/bin/python" -m hil.bench_parallel "$@"
