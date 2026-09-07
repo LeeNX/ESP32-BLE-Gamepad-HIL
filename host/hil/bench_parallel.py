@@ -160,13 +160,19 @@ def _save_state(s):
 
 # --- link juggling -------------------------------------------------------
 def set_connected(board, btctl, want, *, timeout=25):
-    """Bring one board's BLE link up or down and wait for it to settle."""
+    """Bring one board's BLE link up or down and wait for it to settle. The
+    bonds are trusted, so BlueZ auto-reconnects a bare `disconnect` within
+    a second -- `block`/`unblock` is what actually pins a peer offline."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         up = bluetooth.is_connected(board.mac)
         if up == want:
             return
-        btctl.send(f"{'connect' if want else 'disconnect'} {board.mac}")
+        if want:
+            btctl.unblock(board.mac)
+            btctl.send(f"connect {board.mac}")
+        else:
+            btctl.block(board.mac)
         time.sleep(3)
     raise RuntimeError(f"{board.name}: link would not go {'up' if want else 'down'}")
 
@@ -314,6 +320,13 @@ def main(argv):
 
         nup = contention_pass(boards, quick=quick)
     finally:
+        # never leave a peer blocked (baseline_pass's isolate step) -- it would
+        # stay offline for the next run / the normal HIL suite.
+        for b in boards:
+            try:
+                btctl.unblock(b.mac)
+            except Exception:  # noqa: BLE001
+                pass
         btctl.close()
         for b in boards:
             if b.dut:

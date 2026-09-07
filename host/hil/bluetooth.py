@@ -187,6 +187,15 @@ class BtCtl:
             ["Connection successful", "ServicesResolved: yes", "Failed to connect"], timeout
         )
 
+    def block(self, mac):
+        """Disconnect and pin the link down: a *trusted* bond otherwise
+        auto-reconnects the moment `disconnect` lands, so plain disconnect can't
+        hold a peer offline (see bench_parallel's solo pass)."""
+        self.send(f"block {mac}")
+
+    def unblock(self, mac):
+        self.send(f"unblock {mac}")
+
     def remove(self, mac):
         self.send(f"disconnect {mac}")
         time.sleep(1.5)
