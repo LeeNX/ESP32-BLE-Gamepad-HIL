@@ -40,8 +40,8 @@ on:
       profiles:
         description: 'space-separated subset (blank = all: default signed-axes specials minimal maxbtn reports)'
         default: ""
-      pytest_args:
-        description: 'extra pytest args for a focused run, e.g. "-k feature_report" (blank = whole suite)'
+      test_filter:
+        description: 'pytest -k expression for a focused run, e.g. "feature_report" or "battery or descriptor" (blank = whole suite)'
         default: ""
   repository_dispatch:
     types: [hil]
@@ -68,7 +68,7 @@ env:
   # tester until real ports are set. All three verified green on the reference rig.
   BOARDS: ${{ inputs.boards || 'esp32dev esp32c3 esp32s3' }}
   PROFILES: ${{ inputs.profiles || 'default signed-axes specials minimal maxbtn reports' }}
-  PYTEST_ARGS: ${{ inputs.pytest_args }}
+  TEST_FILTER: ${{ inputs.test_filter }}
 
 jobs:
   build:
@@ -161,10 +161,10 @@ jobs:
           # the tester runs the exact rig commit under test: fetch + hard-reset
           # its own checkout to it (keeps only the gitignored local port config),
           # so the checkout stays coherent instead of drifting under an rsync.
-          # RIG_SHA / RIG_RUN_URL / HIL_PYTEST_EXTRA are prepended as assignment
-          # lines, so the remote body can stay a literal (quoted) heredoc.
+          # RIG_SHA / RIG_RUN_URL / HIL_TEST_FILTER are prepended as assignment
+          # lines (printf %q-quoted), so the remote body can stay a literal heredoc.
           rc=0
-          { echo "RIG_SHA=$RIG_SHA RIG_RUN_URL=$RIG_RUN_URL"; echo "HIL_PYTEST_EXTRA=\"$PYTEST_ARGS\""; cat <<'REMOTE'; } | ssh hil-tester bash -se || rc=$?
+          { printf 'RIG_SHA=%q RIG_RUN_URL=%q HIL_TEST_FILTER=%q\n' "$RIG_SHA" "$RIG_RUN_URL" "$TEST_FILTER"; cat <<'REMOTE'; } | ssh hil-tester bash -se || rc=$?
           cd ~/ESP32-BLE-Gamepad-HIL
           # one physical rig -- take the lock *before* touching the checkout, so a
           # concurrent local run isn't reset/cleaned out from under itself. Raw
@@ -183,8 +183,8 @@ jobs:
           git clean --quiet -ffdx -e /hil_config.local.toml -e /.venv -e /.venvs
           rm -rf results && mkdir results
           export HIL_RIG_LOCK_HELD=$$ HIL_RUN_PID=$$ HIL_RUN_WHO=CI HIL_RUN_URL="$RIG_RUN_URL"
-          export HIL_PYTEST_EXTRA
-          export HIL_RUN_WHAT="flash+test --bench${HIL_PYTEST_EXTRA:+ $HIL_PYTEST_EXTRA}"
+          export HIL_TEST_FILTER
+          export HIL_RUN_WHAT="flash+test --bench${HIL_TEST_FILTER:+ -k '$HIL_TEST_FILTER'}"
           tester/rig-lock.sh --status-write busy || true
           trc=0
           tester/test-all.sh --bench || trc=$?
