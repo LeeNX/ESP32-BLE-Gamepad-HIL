@@ -9,22 +9,28 @@
 #   scripts/release.sh 0.2.0 --dry-run
 #   RELEASE_VERSION=0.2.0 scripts/release.sh  # version via env
 #
+# --remote may be repeated (or RELEASE_REMOTE set to a space/comma-separated
+# list) to push the branch + tag to more than one remote, e.g. GitHub and a
+# Gitea mirror:  scripts/release.sh 0.2.0 --push --remote origin --remote gitea
+#
 # Requires a clean working tree so the release commit is only the bump.
 set -euo pipefail
 
-usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; }
 
 push=false
 dry_run=false
 version="${RELEASE_VERSION:-}"
-remote="${RELEASE_REMOTE:-}"
+# RELEASE_REMOTE may hold several remotes, space- or comma-separated.
+remotes=()
+[[ -n "${RELEASE_REMOTE:-}" ]] && read -r -a remotes <<< "${RELEASE_REMOTE//,/ }"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --push) push=true; shift ;;
     --dry-run) dry_run=true; shift ;;
-    --remote) remote="${2:?--remote needs a value}"; shift 2 ;;
-    --remote=*) remote="${1#*=}"; shift ;;
+    --remote) remotes+=("${2:?--remote needs a value}"); shift 2 ;;
+    --remote=*) remotes+=("${1#*=}"); shift ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "unknown option: $1" >&2; usage >&2; exit 1 ;;
     *) version="$1"; shift ;;
@@ -40,14 +46,20 @@ cd "$(git rev-parse --show-toplevel)"
 tag="v$version"
 git rev-parse "$tag" >/dev/null 2>&1 && { echo "error: tag $tag already exists" >&2; exit 1; }
 
-if [[ -z "$remote" ]]; then
+if [[ ${#remotes[@]} -eq 0 ]]; then
   remote="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null | cut -d/ -f1 || true)"
   [[ -n "$remote" ]] || { git remote | grep -qx origin && remote=origin; }
   [[ -n "$remote" ]] || { [[ "$(git remote | wc -l | tr -d ' ')" == 1 ]] && remote="$(git remote)"; }
+  [[ -n "$remote" ]] && remotes=("$remote")
 fi
-if [[ -z "$remote" ]] || ! git remote | grep -qx "$remote"; then
+if [[ ${#remotes[@]} -eq 0 ]]; then
   echo "error: no usable remote; pass --remote NAME. Have:" >&2; git remote -v >&2; exit 1
 fi
+for remote in "${remotes[@]}"; do
+  git remote | grep -qx "$remote" || {
+    echo "error: unknown remote '$remote'. Have:" >&2; git remote -v >&2; exit 1
+  }
+done
 
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "error: working tree not clean:" >&2; git status --short >&2; exit 1
@@ -63,7 +75,7 @@ fi
 
 current="$(cat VERSION)"
 today="$(date -u +%Y-%m-%d)"
-echo "Current: $current   New: $version   Tag: $tag   Remote: $remote"
+echo "Current: $current   New: $version   Tag: $tag   Remote(s): ${remotes[*]}"
 
 if $dry_run; then
   echo "(dry run) would: write VERSION, roll CHANGELOG [Unreleased] -> [$version] - $today, commit, tag $tag"
@@ -93,8 +105,13 @@ branch="$(git rev-parse --abbrev-ref HEAD)"
 echo "Committed + tagged $tag on $branch."
 
 if $push; then
-  git push "$remote" "$branch" && git push "$remote" "$tag"
-  echo "Pushed $branch and $tag to $remote -- release.yml will build + publish."
+  for remote in "${remotes[@]}"; do
+    git push "$remote" "$branch" && git push "$remote" "$tag"
+    echo "Pushed $branch and $tag to $remote."
+  done
+  echo "release.yml will build + publish."
 else
-  echo "Next: git push $remote $branch && git push $remote $tag"
+  for remote in "${remotes[@]}"; do
+    echo "Next: git push $remote $branch && git push $remote $tag"
+  done
 fi
