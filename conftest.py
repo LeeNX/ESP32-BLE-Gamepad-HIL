@@ -58,6 +58,12 @@ def pytest_addoption(parser):
         "(test_latency.py) and let bench.py record results",
     )
     parser.addoption(
+        "--bench-quick",
+        action="store_true",
+        help="with --bench: run the short sweep (n=40, 3 gap values, ~2 min "
+        "vs ~6) -- for a quick check when you don't need full rigour",
+    )
+    parser.addoption(
         "--update-golden",
         action="store_true",
         help="rewrite firmware/golden/<profile>.hiddesc from the "

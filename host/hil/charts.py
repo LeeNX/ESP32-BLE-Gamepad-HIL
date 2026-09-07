@@ -191,23 +191,42 @@ def _env_line(records):
     )
 
 
+def _links_cell(r):
+    """How many BLE connections the adapter was carrying during this sweep --
+    `n` on its own, or `n*` if more than one gamepad was being driven at once
+    (a contention run). `1` is the normal solo case."""
+    n = r.get("adapter_links")
+    if n is None:
+        n = r.get("peers_active") or 1
+    return f"{n}*" if (r.get("peers_active") or 1) > 1 else str(n)
+
+
 def table_md(records):
     rows = [
-        "| Board | Profile | Report B | Descr B | Conn ms | MTU | "
+        "| Board | Profile | Report B | Descr B | Conn ms | MTU | links | "
         "btn e2e p50/p99 ms | axis p50 ms | clean Hz | dropped |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
+    any_shared = False
     for r in sorted(records, key=lambda r: (r["board"], r.get("report_bytes") or 0)):
         b = r["latency_ms"].get("button", {}).get("e2e", {})
         ax = r["latency_ms"].get("axis", {}).get("e2e", {})
         dropped = sum(d.get("dropped", 0) for d in r["latency_ms"].values())
+        links = _links_cell(r)
+        any_shared = any_shared or links != "1"
         rows.append(
             f"| {r['board']} | {r['profile']} | {r.get('report_bytes')} | "
             f"{r.get('descriptor_bytes')} | {r.get('conn_interval_ms')} | "
-            f"{r.get('mtu')} | {b.get('p50')}/{b.get('p99')} | {ax.get('p50', '-')} | "
+            f"{r.get('mtu')} | {links} | {b.get('p50')}/{b.get('p99')} | {ax.get('p50', '-')} | "
             f"{r.get('clean_rate_hz') or '-'} | {dropped} |"
         )
-    return _env_line(records) + "\n".join(rows) + "\n"
+    note = (
+        "\n\n_links = BLE connections live on the adapter during the sweep "
+        "(`n*` = other gamepads were being driven too — a contention run)._"
+        if any_shared
+        else ""
+    )
+    return _env_line(records) + "\n".join(rows) + note + "\n"
 
 
 # --- driver -----------------------------------------------------------

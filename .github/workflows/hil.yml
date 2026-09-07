@@ -34,6 +34,15 @@ on:
       lib_ref:
         description: library ref to test (blank = repo var HIL_LIB_REF, else master)
         default: ""
+      boards:
+        description: 'space-separated subset to build+test (blank = all: esp32dev esp32c3 esp32s3)'
+        default: ""
+      profiles:
+        description: 'space-separated subset (blank = all: default signed-axes specials minimal maxbtn reports)'
+        default: ""
+      test_filter:
+        description: 'pytest -k expression for a focused run, e.g. "feature_report" or "battery or descriptor" (blank = whole suite)'
+        default: ""
   repository_dispatch:
     types: [hil]
 
@@ -52,13 +61,14 @@ env:
   # changes live on a fork branch not yet merged upstream) > the built-in.
   LIB_REPO: ${{ inputs.lib_repo || github.event.client_payload.lib_repo || vars.HIL_LIB_REPO || 'https://github.com/LeeNX/ESP32-BLE-Gamepad.git' }}
   LIB_REF:  ${{ inputs.lib_ref  || github.event.client_payload.lib_ref  || vars.HIL_LIB_REF  || 'master' }}
-  # Build the full matrix; the tester runs only the boards it has wired
-  # (host/hil/detect.py -> tester/test.sh SKIPs the rest). esp32c3 / esp32s3
-  # ship with CHANGE-ME ports so they build here but skip on a tester until
-  # real ports are set -- see README "ESP32-C3 serial bridge" / "ESP32-S3
-  # dual-USB-C setup". All three verified green on the reference rig.
-  BOARDS: esp32dev esp32c3 esp32s3
-  PROFILES: default signed-axes specials minimal maxbtn reports
+  # Build the full matrix by default; a workflow_dispatch can narrow it (and the
+  # pytest selection below) for a focused re-test. The tester runs only the
+  # boards it has wired (host/hil/detect.py -> tester/test.sh SKIPs the rest) --
+  # esp32c3 / esp32s3 ship with CHANGE-ME ports so they build here but skip on a
+  # tester until real ports are set. All three verified green on the reference rig.
+  BOARDS: ${{ inputs.boards || 'esp32dev esp32c3 esp32s3' }}
+  PROFILES: ${{ inputs.profiles || 'default signed-axes specials minimal maxbtn reports' }}
+  TEST_FILTER: ${{ inputs.test_filter }}
 
 jobs:
   build:
@@ -144,28 +154,41 @@ jobs:
       - name: Flash + test on the tester
         env:
           RIG_SHA: ${{ github.sha }}
+          RIG_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           # bundles are build artifacts (not in git) -- push them over
           rsync -a --delete bundles/ hil-tester:hil-bundles/
           # the tester runs the exact rig commit under test: fetch + hard-reset
           # its own checkout to it (keeps only the gitignored local port config),
           # so the checkout stays coherent instead of drifting under an rsync.
-          # RIG_SHA is prepended as a plain assignment line, so the remote body
-          # can stay a literal (quoted) heredoc.
+          # RIG_SHA / RIG_RUN_URL / HIL_TEST_FILTER are prepended as assignment
+          # lines (printf %q-quoted), so the remote body can stay a literal heredoc.
           rc=0
-          { echo "RIG_SHA=$RIG_SHA"; cat <<'REMOTE'; } | ssh hil-tester bash -se || rc=$?
+          { printf 'RIG_SHA=%q RIG_RUN_URL=%q HIL_TEST_FILTER=%q\n' "$RIG_SHA" "$RIG_RUN_URL" "$TEST_FILTER"; cat <<'REMOTE'; } | ssh hil-tester bash -se || rc=$?
           cd ~/ESP32-BLE-Gamepad-HIL
+          # one physical rig -- take the lock *before* touching the checkout, so a
+          # concurrent local run isn't reset/cleaned out from under itself. Raw
+          # flock here (not tester/rig-lock.sh): the git reset below may rewrite
+          # that script. Waits ~45 min, then fails loudly with the holder.
+          CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/esp32-hil"; mkdir -p "$CACHE"
+          exec 9>"$CACHE/rig.lock"
+          flock -w 2700 9 || {
+            echo "::error::HIL rig is busy -- another run holds it:"
+            cat "$CACHE/rig-status.json" 2>/dev/null || true
+            exit 75
+          }
           git fetch --quiet --prune origin
           git reset --quiet --hard "$RIG_SHA" \
             || { echo "::error::tester: rig commit $RIG_SHA not reachable from origin"; exit 1; }
           git clean --quiet -ffdx -e /hil_config.local.toml -e /.venv -e /.venvs
           rm -rf results && mkdir results
+          export HIL_RIG_LOCK_HELD=$$ HIL_RUN_PID=$$ HIL_RUN_WHO=CI HIL_RUN_URL="$RIG_RUN_URL"
+          export HIL_TEST_FILTER
+          export HIL_RUN_WHAT="flash+test --bench${HIL_TEST_FILTER:+ -k '$HIL_TEST_FILTER'}"
+          tester/rig-lock.sh --status-write busy || true
           trc=0
-          for b in ~/hil-bundles/*/; do
-            # one retry: the C3/S3 external UART bridges drop a byte under the
-            # --bench burst sweep now and then (README "Benchmarking / Rig note")
-            ./tester/test.sh "$b" --bench || ./tester/test.sh "$b" --bench || trc=$?
-          done
+          tester/test-all.sh --bench || trc=$?
+          tester/rig-lock.sh --status-write idle "$trc" || true
           echo; cat results/run-verdicts.md || true
           exit $trc
           REMOTE

@@ -44,6 +44,8 @@ push to the tester, run, pull results). One box can be both roles
 | `builder/build.sh` `builder/make_bundle.py` | compile → firmware bundle(s) → optional `--push` rsync to the tester. Library path comes from `$HIL_LIB_DIR` (exported from `rig.lib_dir`) |
 | `tester/bootstrap-host.sh` (root) `tester/bootstrap.sh` (user) | tester provisioning, split: privileged half (apt / bluetooth / groups / udev) vs unprivileged half (venv / config / health check) |
 | `tester/flash.py` `tester/test.sh` | flash a bundle with esptool, run the suite + benchmark, write `results/`; SKIPs a board the tester doesn't have |
+| `tester/test-all.sh` | loop `tester/test.sh` over every bundle in `~/hil-bundles`, one retry each (what CI runs) |
+| `tester/rig-lock.sh` `tester/rig-status.sh` `host/hil/riglock.py` | one-rig `flock` + run-status file — serialise CI and local runs; `rig-status.sh` shows who/what is running (see [CI](#rig-lock--status)) |
 | `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite. Helpers: `serialdev`, `evdev_utils`, `bluetooth`, `gatt` (DIS/PnP/battery over BlueZ D-Bus), `hidraw` (Feature/Output reports + descriptor), `latency`+`bench`, `sysinfo`, `detect` (present boards), `charts`, `summarize` |
 | `hil_config.toml` (+ gitignored `hil_config.local.toml`) | per-machine ports, ssh host, builder board/profile matrix, per-board `enabled` |
 | `run.sh` | one-box: build all bundles then flash+test each |
@@ -185,6 +187,14 @@ BlueZ version, load average + CPU temp/freq sampled around the measurement):
 plus three SVGs (latency vs report size, clean rate per profile, latency
 distribution). The pytest gates are deliberately loose — the recorded JSON is
 the deliverable. A committed snapshot lives in [`docs/bench/`](docs/bench/).
+
+`--bench-quick` (with `--bench`) runs a shorter sweep — n=40, 3 gap values,
+~2 min vs ~6 — for a fast check.
+
+The `bench-table.md` **links** column is how many BLE connections the adapter
+was carrying during that sweep (normally `1`); `bench.py` records it as
+`adapter_links` so a number taken while another bond lingered isn't mistaken
+for a clean solo measurement.
 
 ### Findings (all 3 boards × 6 profiles, Raspberry Pi 3B+, kernel 6.18, BlueZ 5.82)
 
@@ -357,8 +367,47 @@ self-hosted runner, no inbound ports on your network:
   tailnet, `ssh`es in to **`git reset --hard`** the tester's own checkout to the
   rig commit under test (`git clean -ffdx` keeps only the gitignored
   `hil_config.local.toml`, so the checkout never drifts), runs
-  `tester/test.sh --bench` per bundle, pulls `results/` back (even on failure),
-  publishes the JUnit report.
+  `tester/test-all.sh --bench` (flash + test every bundle, one retry each), pulls
+  `results/` back (even on failure), publishes the JUnit report.
+
+### Focused re-runs
+
+`workflow_dispatch` (Actions tab → **HIL** → Run workflow) takes, besides
+`lib_repo` / `lib_ref`:
+
+| input | effect |
+|---|---|
+| `boards` | space-separated subset to build + test (blank = all three) |
+| `profiles` | space-separated profile subset (blank = all six) |
+| `test_filter` | a pytest `-k` expression, e.g. `feature_report` or `battery or descriptor` (blank = whole suite) |
+
+Narrowing `boards` / `profiles` narrows the build matrix, and only the built
+bundles are pushed, so the flash + test set shrinks with it. So
+`boards=esp32s3`, `profiles=reports`, `test_filter=feature_report` flashes one
+bundle and runs a handful of tests (~10 min) instead of the full ~80-min sweep —
+the fast path for chasing a single red test. Locally the same:
+`HIL_TEST_FILTER='battery or descriptor' tester/test-all.sh --bench`, or just
+`tester/test.sh <bundle> -k battery`.
+
+### Rig lock / status
+
+One physical rig, so every run — CI **and** local (`run.sh`, `tester/test.sh`,
+`tester/test-all.sh`) — takes an `flock` on
+`~/.cache/esp32-hil/rig.lock` first. A second run **waits up to ~45 min**, then
+fails with the current holder's identity (who / what / commit / CI run URL). CI
+also keeps its `concurrency: hil-rig` group (a cheap CI-vs-CI guard); the lock is
+what stops CI and a local run from stomping each other (the `git reset --hard` on
+the tester checkout is the real hazard).
+
+```sh
+ssh <tester> ESP32-BLE-Gamepad-HIL/tester/rig-status.sh   # who/what is running now
+tester/test.sh <bundle> --no-wait                          # fail immediately if busy
+tester/test.sh <bundle> --wait 300                         # give up after 5 min
+```
+
+flock releases automatically when the holder dies — there's no stale lockfile. If
+a holder wedged and `rig-status.sh` shows its pid `DEAD`, clear it with
+`rm ~/.cache/esp32-hil/rig.lock` (or `flock -u`).
 
 ### Which boards run
 
