@@ -10,6 +10,15 @@ Start small: one board, one digital button.
     PYTHONPATH=host python3 -m hil.parallel                       # esp32dev, solo
     PYTHONPATH=host python3 -m hil.parallel --boards "esp32dev esp32c3"
     PYTHONPATH=host python3 -m hil.parallel --boards "esp32dev esp32c3" --parallel
+
+Spike result (rp3b-ble-hil, 3 boards on one BLE adapter, 2026-09-08): a digital
+button press+release is clean on every board with all three driven + captured at
+once, 5+ back-to-back runs, no flakes. 3 boards: 9.2 s sequential -> 3.6 s
+parallel. Concurrent evdev capture and independent serial channels are fine; the
+bench_parallel trouble was the block/unblock isolation, not concurrency itself.
+
+Uses evdev (`/dev/input/event*`) via find_gamepad() -- not the legacy joystick
+`/dev/input/js*` nodes (nothing in the suite touches those).
 """
 
 import argparse
