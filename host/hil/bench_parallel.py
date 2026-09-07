@@ -205,6 +205,23 @@ def sweep_one(board, *, quick, peers_active, peer_boards):
     )
 
 
+def _try_sweep(board, **kw):
+    """sweep_one, but a link that drops mid-sweep under load (evdev ENODEV,
+    serial timeout) is recorded as a failed result instead of blowing up the
+    whole run -- "esp32c3 dropped at 3-up" is itself a finding."""
+    try:
+        return sweep_one(board, **kw)
+    except Exception as e:  # noqa: BLE001
+        print(f"  ! {board.name}: sweep failed under load -- {e!r}")
+        return {
+            "board": board.name,
+            "profile": board.profile,
+            "peers_active": kw.get("peers_active"),
+            "peer_boards": list(kw.get("peer_boards") or []),
+            "error": repr(e),
+        }
+
+
 def baseline_pass(boards, btctl, *, quick, isolate):
     """Each board swept alone. isolate=True drops the other links first so it
     is a true solo (connection count 1); otherwise the peers stay connected but
@@ -219,7 +236,7 @@ def baseline_pass(boards, btctl, *, quick, isolate):
         b.dut.wait_connected()
         acquire_capture(b)
         print(f"  [solo] {b.name} ...")
-        out[b.name] = sweep_one(b, quick=quick, peers_active=1, peer_boards=[])
+        out[b.name] = _try_sweep(b, quick=quick, peers_active=1, peer_boards=[])
     if isolate:
         for o in boards:
             set_connected(o, btctl, True)
@@ -238,29 +255,38 @@ def contention_pass(boards, *, quick):
 
     def work(b):
         peer_boards = [n for n in names if n != b.name]
-        barrier.wait()
-        return b.name, sweep_one(b, quick=quick, peers_active=len(boards), peer_boards=peer_boards)
+        try:
+            barrier.wait()
+        except threading.BrokenBarrierError:
+            pass  # a peer died before the rendezvous -- still sweep this one
+        return b.name, _try_sweep(b, quick=quick, peers_active=len(boards), peer_boards=peer_boards)
 
     print(f"  [{len(boards)}-up] {' '.join(names)} in parallel ...")
     out = {}
     with cf.ThreadPoolExecutor(max_workers=len(boards)) as ex:
-        for name, result in ex.map(work, boards):
+        for fut in cf.as_completed([ex.submit(work, b) for b in boards]):
+            name, result = fut.result()  # work() never raises
             out[name] = result
     return out
 
 
 # --- reporting ---------------------------------------------------------
 def _btn(result):
-    return result["latency_ms"]["button"]["e2e"]
+    return ((result or {}).get("latency_ms") or {}).get("button", {}).get("e2e", {})
 
 
 def _worst_burst(result):
-    return min((x["delivered_frac"] for x in result["burst"]), default=None)
+    b = (result or {}).get("burst")
+    return min((x["delivered_frac"] for x in b), default=None) if b else None
 
 
 def _links(result):
     """BLE links the adapter was carrying during this sweep (from hil.bench)."""
     return result.get("adapter_links") if result else None
+
+
+def _cell(s_val, u_val):
+    return f"{s_val if s_val is not None else '-'} → {u_val if u_val is not None else '-'}"
 
 
 def comparison_md(solo, nup, n):
@@ -271,14 +297,17 @@ def comparison_md(solo, nup, n):
     ]
     for name in sorted(nup):
         s, u = solo.get(name), nup[name]
-        sb, ub = _btn(s) if s else {}, _btn(u)
+        if u.get("error"):
+            rows.append(f"| {name} | **link dropped at {n}-up** — {u['error']} |||||")
+            continue
+        sb, ub = _btn(s), _btn(u)
         rows.append(
             f"| {name} "
-            f"| {_links(s) if s else '-'} → {_links(u) or n} "
-            f"| {sb.get('p50', '-')} → {ub.get('p50', '-')} "
-            f"| {sb.get('p90', '-')} → {ub.get('p90', '-')} "
-            f"| {(s or {}).get('clean_rate_hz', '-')} → {u.get('clean_rate_hz', '-')} "
-            f"| {_worst_burst(s) if s else '-'} → {_worst_burst(u)} |"
+            f"| {_cell(_links(s), _links(u) or n)} "
+            f"| {_cell(sb.get('p50'), ub.get('p50'))} "
+            f"| {_cell(sb.get('p90'), ub.get('p90'))} "
+            f"| {_cell((s or {}).get('clean_rate_hz'), u.get('clean_rate_hz'))} "
+            f"| {_cell(_worst_burst(s), _worst_burst(u))} |"
         )
     peers = ", ".join(sorted(nup))
     head = (
@@ -367,7 +396,12 @@ def main(argv):
 
     print("\n" + md)
     print(f"raw records + comparison: {outdir}")
-    return 0
+
+    errs = [n for n, r in {**solo, **nup}.items() if isinstance(r, dict) and r.get("error")]
+    ok = [r for r in nup.values() if not r.get("error")]
+    if errs:
+        print(f"\n! sweeps that lost their link under load: {', '.join(sorted(set(errs)))}")
+    return 0 if ok else 1  # non-zero only if the contention pass produced nothing usable
 
 
 if __name__ == "__main__":
