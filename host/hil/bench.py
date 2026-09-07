@@ -10,7 +10,7 @@ import datetime as dt
 import json
 import pathlib
 
-from . import latency, sysinfo
+from . import bluetooth, latency, sysinfo
 
 
 def run_sweep(
@@ -53,6 +53,11 @@ def run_sweep(
     if cfg.get("hats"):
         kinds.append("hat")
 
+    try:
+        links = bluetooth.connected_devices()
+    except Exception:  # noqa: BLE001
+        links = None
+
     load_start = sysinfo.dynamic()
     ping = latency.ping_rtt(serial, n=30)
     load_pre_latency = sysinfo.dynamic()
@@ -67,8 +72,10 @@ def run_sweep(
         "profile": profile,
         "lib_describe": lib_describe,
         "quick": quick,
-        "peers_active": peers_active,
+        "peers_active": peers_active,  # gamepads this run was driving (1 = solo)
         "peer_boards": list(peer_boards),
+        "adapter_links": len(links) if links is not None else None,  # BLE links up on hciX
+        "adapter_link_macs": links,  # ... whose (bench_parallel N-up: all of them)
         "measured_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
         "env": sysinfo.static_env(),
         "load": {

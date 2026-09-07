@@ -56,6 +56,18 @@ def known_devices():
     return devs
 
 
+def connected_devices():
+    """MACs with a live link on the adapter right now (BlueZ >= 5.65's
+    `devices Connected`) -- lets a bench sweep record how many gamepads were
+    actually on the air, not just how many it was driving. Best-effort: an
+    older bluetoothctl that rejects the filter just yields an empty list."""
+    try:
+        out = _run(["bluetoothctl", "devices", "Connected"]).stdout
+    except Exception:
+        return []
+    return re.findall(r"Device ([0-9A-F:]{17})", out)
+
+
 class BtCtl:
     """A persistent bluetoothctl session: holds a NoInputNoOutput agent, keeps
     discovery running, and auto-confirms pairing prompts."""

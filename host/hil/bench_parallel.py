@@ -258,22 +258,37 @@ def _worst_burst(result):
     return min((x["delivered_frac"] for x in result["burst"]), default=None)
 
 
+def _links(result):
+    """BLE links the adapter was carrying during this sweep (from hil.bench)."""
+    return result.get("adapter_links") if result else None
+
+
 def comparison_md(solo, nup, n):
     rows = [
-        "| board | p50 solo → N | p90 solo → N | clean Hz solo → N | worst burst frac solo → N |",
-        "|---|---|---|---|---|",
+        "| board | links solo → N | p50 solo → N | p90 solo → N "
+        "| clean Hz solo → N | worst burst frac solo → N |",
+        "|---|---|---|---|---|---|",
     ]
     for name in sorted(nup):
         s, u = solo.get(name), nup[name]
         sb, ub = _btn(s) if s else {}, _btn(u)
         rows.append(
             f"| {name} "
+            f"| {_links(s) if s else '-'} → {_links(u) or n} "
             f"| {sb.get('p50', '-')} → {ub.get('p50', '-')} "
             f"| {sb.get('p90', '-')} → {ub.get('p90', '-')} "
             f"| {(s or {}).get('clean_rate_hz', '-')} → {u.get('clean_rate_hz', '-')} "
             f"| {_worst_burst(s) if s else '-'} → {_worst_burst(u)} |"
         )
-    head = f"# BLE contention: solo vs {n}-up\n\nShort sweep. p50/p90 = button e2e latency (ms), lower is better.\n\n"
+    peers = ", ".join(sorted(nup))
+    head = (
+        f"# BLE contention: solo vs {n}-up\n\n"
+        f"{n} gamepads ({peers}) bonded to one adapter. **N** = all {n} swept at "
+        f"the same time (worker threads released on a barrier so the airtime "
+        f"overlaps); **solo** = that board measured by itself. Short sweep. "
+        f"p50/p90 = button e2e latency (ms), lower is better. "
+        f"links = BLE connections live on the adapter during the sweep.\n\n"
+    )
     return head + "\n".join(rows) + "\n"
 
 

@@ -20,6 +20,18 @@ What a bump means:
 
 ### Added
 
+- **Multi-gamepad contention experiment** (`tester/bench-parallel.sh` →
+  `hil.bench_parallel`): sweep every wired board solo, then all of them at once
+  on one BLE adapter, and diff — solo-vs-N-up button latency / clean rate /
+  burst delivery. Outside pytest (owns N SerialDevs + N evdev captures itself);
+  writes `results/parallel/<stamp>/`.
+- `--bench-quick` — a short sweep (n=40, 3 gap values, ~2 min vs ~6) for quick
+  checks and the parallel run.
+- Every bench result records how many BLE gamepads shared the adapter during
+  the sweep: `peers_active` (how many it was driving) and `adapter_links` /
+  `adapter_link_macs` (what BlueZ actually had connected). `bench-table.md` gains
+  a **links** column (`n*` = a contention run), and `bench_parallel`'s
+  `comparison.md` shows `links solo → N` and names the peers.
 - **Rig lock** (`tester/rig-lock.sh` + `host/hil/riglock.py`): one physical rig,
   so `run.sh` / `tester/test.sh` / `tester/bench-parallel.sh` and CI now take an
   `flock` on `~/.cache/esp32-hil/rig.lock` before touching it — a second run
@@ -44,6 +56,9 @@ What a bump means:
   sweep once and keeps the better run; `test_clean_rate`'s slowest-point gate
   relaxed 0.95 → 0.90. Stops host-scheduling jitter at ~6 Hz from failing the
   bench.
+- `hil.bench_parallel` solo pass: `bluetoothctl block`/`unblock` to actually
+  drop a peer link (a trusted bond auto-reconnected a bare `disconnect`, so the
+  isolate step always timed out).
 
 ## [0.1.1] — 2026-09-06
 
