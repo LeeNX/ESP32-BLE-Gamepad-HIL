@@ -376,6 +376,25 @@ self-hosted runner, no inbound ports on your network:
   `tester/test-all.sh --bench` (flash + test every bundle, one retry each), pulls
   `results/` back (even on failure), publishes the JUnit report.
 
+### Focused re-runs
+
+`workflow_dispatch` (Actions tab → **HIL** → Run workflow) takes, besides
+`lib_repo` / `lib_ref`:
+
+| input | effect |
+|---|---|
+| `boards` | space-separated subset to build + test (blank = all three) |
+| `profiles` | space-separated profile subset (blank = all six) |
+| `test_filter` | a pytest `-k` expression, e.g. `feature_report` or `battery or descriptor` (blank = whole suite) |
+
+Narrowing `boards` / `profiles` narrows the build matrix, and only the built
+bundles are pushed, so the flash + test set shrinks with it. So
+`boards=esp32s3`, `profiles=reports`, `test_filter=feature_report` flashes one
+bundle and runs a handful of tests (~10 min) instead of the full ~80-min sweep —
+the fast path for chasing a single red test. Locally the same:
+`HIL_TEST_FILTER='battery or descriptor' tester/test-all.sh --bench`, or just
+`tester/test.sh <bundle> -k battery`.
+
 ### Rig lock / status
 
 One physical rig, so every run — CI **and** local (`run.sh`, `tester/test.sh`,

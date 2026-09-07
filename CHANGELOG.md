@@ -29,6 +29,10 @@ What a bump means:
   out of `hil.yml` so it's committed and runnable locally
   (`tester/rig-lock.sh -- tester/test-all.sh --bench`).
 - `tester/test.sh` accepts `--wait <secs>` / `--no-wait` for the rig lock.
+- **Focused HIL runs**: `hil.yml` `workflow_dispatch` gains `boards` / `profiles`
+  / `test_filter` (a pytest `-k` expression) inputs — narrow the matrix and test
+  selection to chase one red test in ~10 min instead of the full ~80. Locally:
+  `HIL_TEST_FILTER=... tester/test-all.sh`.
 
 ### Fixed
 
