@@ -18,6 +18,8 @@ What a bump means:
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-09-07
+
 ### Added
 
 - **Rig lock** (`tester/rig-lock.sh` + `host/hil/riglock.py`): one physical rig,
@@ -124,6 +126,7 @@ descriptor + latency suite, and the Tailscale-based CI. Plus:
   `HIL_RIG_ENABLED=true` is set — so a fork with no tester wired gets a clean
   skipped run, not a failure on the missing Tailscale secret.
 
-[Unreleased]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.1.2
 [0.1.1]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.1.1
 [0.1.0]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.1.0
