@@ -10,12 +10,30 @@ import datetime as dt
 import json
 import pathlib
 
-from . import latency, sysinfo
+from . import bluetooth, latency, sysinfo
 
 
-def run_sweep(serial, cap, cfg, *, board, profile, lib_describe="", quick=False):
+def run_sweep(
+    serial,
+    cap,
+    cfg,
+    *,
+    board,
+    profile,
+    lib_describe="",
+    quick=False,
+    peers_active=1,
+    peer_boards=(),
+):
     """serial = the SerialDev (hil_runner command channel); cap = the Capture
-    wrapping the DUT's evdev node."""
+    wrapping the DUT's evdev node.
+
+    quick        -- shorter sweep (n=40, 3 gap values) for a fast check, when
+                    the point is a comparison rather than absolute rigour.
+    peers_active -- how many gamepads were connected + being driven at once when
+                    this sweep ran (1 = solo); peer_boards names the others.
+                    Recorded so a multi-gamepad run can diff solo vs N-up.
+    """
     n = 40 if quick else 200
     gaps = [0, 3000, 10000] if quick else [0, 1000, 2000, 5000, 10000, 20000]
 
@@ -35,6 +53,11 @@ def run_sweep(serial, cap, cfg, *, board, profile, lib_describe="", quick=False)
     if cfg.get("hats"):
         kinds.append("hat")
 
+    try:
+        links = bluetooth.connected_devices()
+    except Exception:  # noqa: BLE001
+        links = None
+
     load_start = sysinfo.dynamic()
     ping = latency.ping_rtt(serial, n=30)
     load_pre_latency = sysinfo.dynamic()
@@ -48,6 +71,11 @@ def run_sweep(serial, cap, cfg, *, board, profile, lib_describe="", quick=False)
         "board": board,
         "profile": profile,
         "lib_describe": lib_describe,
+        "quick": quick,
+        "peers_active": peers_active,  # gamepads this run was driving (1 = solo)
+        "peer_boards": list(peer_boards),
+        "adapter_links": len(links) if links is not None else None,  # BLE links up on hciX
+        "adapter_link_macs": links,  # ... whose
         "measured_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
         "env": sysinfo.static_env(),
         "load": {
