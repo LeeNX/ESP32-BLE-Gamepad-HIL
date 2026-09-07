@@ -9,6 +9,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO=$(pwd)
 VENV=${HIL_VENV:-$HOME/.venvs/hil}
+# shellcheck source=tester/rig-lock.sh
+source "$REPO/tester/rig-lock.sh"
 
 BUNDLE=${1:?usage: tester/test.sh <bundle_dir> [pytest args]}
 shift || true
@@ -40,13 +42,24 @@ fi
 
 FLASH=1
 BENCH=0
+LOCK_ARGS=()
 PYTEST_EXTRA=()
-for a in "$@"; do
-  [[ "$a" == "--" ]] && continue        # tolerate a `-- <pytest args>` separator
-  [[ "$a" == "--no-flash" ]] && FLASH=0
-  [[ "$a" == "--bench" ]] && BENCH=1
-  PYTEST_EXTRA+=("$a")
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --) shift; continue ;;              # tolerate a `-- <pytest args>` separator
+    --wait) LOCK_ARGS=(--wait "$2"); shift 2; continue ;;
+    --no-wait) LOCK_ARGS=(--no-wait) ;;
+    --no-flash) FLASH=0 ;;
+    --bench) BENCH=1 ;;
+  esac
+  PYTEST_EXTRA+=("$1")
+  shift
 done
+
+# one physical rig -- wait for any other run (CI or local) to finish first.
+# No-op when already under a batch lock (tester/test-all.sh, CI). See rig-lock.sh.
+rig_lock_acquire "${LOCK_ARGS[@]}" || exit $?
+
 if [[ $FLASH == 1 ]]; then
   say "flash (esptool)"
   "$VENV/bin/python" tester/flash.py "$BUNDLE" --port "$FLASH_PORT"
@@ -55,7 +68,12 @@ fi
 mkdir -p results
 STAMP=$(date +%Y%m%d-%H%M%S)
 tag="${BOARD}-${PROFILE}-${STAMP}"
-xml="results/junit-${tag}.xml"
+# junit is keyed by board/profile only (no stamp): a retry of the same bundle
+# must *overwrite* the failed attempt so the CI report step (dorny/test-reporter,
+# globs junit-*.xml, fail-on-error) sees one current result per profile, not a
+# stale failure from attempt 1. log/summary stay stamped -- history, and they
+# don't feed the reporter.
+xml="results/junit-${BOARD}-${PROFILE}.xml"
 log="results/log-${tag}.txt"
 rc=0
 

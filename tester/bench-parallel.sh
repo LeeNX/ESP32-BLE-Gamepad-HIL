@@ -13,4 +13,6 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 VENV=${HIL_VENV:-$HOME/.venvs/hil}
 
-exec env PYTHONPATH=host "$VENV/bin/python" -m hil.bench_parallel "$@"
+# one physical rig -- serialise against CI / other local runs (rig-lock.sh).
+# No-op if we're already under a lock (HIL_RIG_LOCK_HELD).
+exec tester/rig-lock.sh -- env PYTHONPATH=host "$VENV/bin/python" -m hil.bench_parallel "$@"

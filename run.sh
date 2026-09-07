@@ -24,6 +24,11 @@ echo "=== build ==="
 rm -rf "$REPO/bundles"
 "$REPO/builder/build.sh" "${BUILD_ARGS[@]}"
 
+# one physical rig -- wait for any other run (CI or local) before touching it.
+# shellcheck source=tester/rig-lock.sh
+source "$REPO/tester/rig-lock.sh"
+rig_lock_acquire || exit $?
+
 rc=0
 for bundle in "$REPO"/bundles/*/; do
   [[ -f "$bundle/manifest.json" ]] || continue

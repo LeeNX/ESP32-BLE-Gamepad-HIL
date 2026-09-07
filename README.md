@@ -44,6 +44,8 @@ push to the tester, run, pull results). One box can be both roles
 | `builder/build.sh` `builder/make_bundle.py` | compile → firmware bundle(s) → optional `--push` rsync to the tester. Library path comes from `$HIL_LIB_DIR` (exported from `rig.lib_dir`) |
 | `tester/bootstrap-host.sh` (root) `tester/bootstrap.sh` (user) | tester provisioning, split: privileged half (apt / bluetooth / groups / udev) vs unprivileged half (venv / config / health check) |
 | `tester/flash.py` `tester/test.sh` | flash a bundle with esptool, run the suite + benchmark, write `results/`; SKIPs a board the tester doesn't have |
+| `tester/test-all.sh` | loop `tester/test.sh` over every bundle in `~/hil-bundles`, one retry each (what CI runs) |
+| `tester/rig-lock.sh` `tester/rig-status.sh` `host/hil/riglock.py` | one-rig `flock` + run-status file — serialise CI and local runs; `rig-status.sh` shows who/what is running (see [CI](#rig-lock--status)) |
 | `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite. Helpers: `serialdev`, `evdev_utils`, `bluetooth`, `gatt` (DIS/PnP/battery over BlueZ D-Bus), `hidraw` (Feature/Output reports + descriptor), `latency`+`bench`, `sysinfo`, `detect` (present boards), `charts`, `summarize` |
 | `hil_config.toml` (+ gitignored `hil_config.local.toml`) | per-machine ports, ssh host, builder board/profile matrix, per-board `enabled` |
 | `run.sh` | one-box: build all bundles then flash+test each |
@@ -371,8 +373,28 @@ self-hosted runner, no inbound ports on your network:
   tailnet, `ssh`es in to **`git reset --hard`** the tester's own checkout to the
   rig commit under test (`git clean -ffdx` keeps only the gitignored
   `hil_config.local.toml`, so the checkout never drifts), runs
-  `tester/test.sh --bench` per bundle, pulls `results/` back (even on failure),
-  publishes the JUnit report.
+  `tester/test-all.sh --bench` (flash + test every bundle, one retry each), pulls
+  `results/` back (even on failure), publishes the JUnit report.
+
+### Rig lock / status
+
+One physical rig, so every run — CI **and** local (`run.sh`, `tester/test.sh`,
+`tester/bench-parallel.sh`) — takes an `flock` on
+`~/.cache/esp32-hil/rig.lock` first. A second run **waits up to ~45 min**, then
+fails with the current holder's identity (who / what / commit / CI run URL). CI
+also keeps its `concurrency: hil-rig` group (a cheap CI-vs-CI guard); the lock is
+what stops CI and a local run from stomping each other (the `git reset --hard` on
+the tester checkout is the real hazard).
+
+```sh
+ssh <tester> ESP32-BLE-Gamepad-HIL/tester/rig-status.sh   # who/what is running now
+tester/test.sh <bundle> --no-wait                          # fail immediately if busy
+tester/test.sh <bundle> --wait 300                         # give up after 5 min
+```
+
+flock releases automatically when the holder dies — there's no stale lockfile. If
+a holder wedged and `rig-status.sh` shows its pid `DEAD`, clear it with
+`rm ~/.cache/esp32-hil/rig.lock` (or `flock -u`).
 
 ### Which boards run
 

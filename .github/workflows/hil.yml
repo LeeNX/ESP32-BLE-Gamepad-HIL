@@ -144,28 +144,40 @@ jobs:
       - name: Flash + test on the tester
         env:
           RIG_SHA: ${{ github.sha }}
+          RIG_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           # bundles are build artifacts (not in git) -- push them over
           rsync -a --delete bundles/ hil-tester:hil-bundles/
           # the tester runs the exact rig commit under test: fetch + hard-reset
           # its own checkout to it (keeps only the gitignored local port config),
           # so the checkout stays coherent instead of drifting under an rsync.
-          # RIG_SHA is prepended as a plain assignment line, so the remote body
-          # can stay a literal (quoted) heredoc.
+          # RIG_SHA / RIG_RUN_URL are prepended as plain assignment lines, so the
+          # remote body can stay a literal (quoted) heredoc.
           rc=0
-          { echo "RIG_SHA=$RIG_SHA"; cat <<'REMOTE'; } | ssh hil-tester bash -se || rc=$?
+          { echo "RIG_SHA=$RIG_SHA RIG_RUN_URL=$RIG_RUN_URL"; cat <<'REMOTE'; } | ssh hil-tester bash -se || rc=$?
           cd ~/ESP32-BLE-Gamepad-HIL
+          # one physical rig -- take the lock *before* touching the checkout, so a
+          # concurrent local run isn't reset/cleaned out from under itself. Raw
+          # flock here (not tester/rig-lock.sh): the git reset below may rewrite
+          # that script. Waits ~45 min, then fails loudly with the holder.
+          CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/esp32-hil"; mkdir -p "$CACHE"
+          exec 9>"$CACHE/rig.lock"
+          flock -w 2700 9 || {
+            echo "::error::HIL rig is busy -- another run holds it:"
+            cat "$CACHE/rig-status.json" 2>/dev/null || true
+            exit 75
+          }
           git fetch --quiet --prune origin
           git reset --quiet --hard "$RIG_SHA" \
             || { echo "::error::tester: rig commit $RIG_SHA not reachable from origin"; exit 1; }
           git clean --quiet -ffdx -e /hil_config.local.toml -e /.venv -e /.venvs
           rm -rf results && mkdir results
+          export HIL_RIG_LOCK_HELD=$$ HIL_RUN_PID=$$ HIL_RUN_WHO=CI
+          export HIL_RUN_WHAT="flash+test --bench (all bundles)" HIL_RUN_URL="$RIG_RUN_URL"
+          tester/rig-lock.sh --status-write busy || true
           trc=0
-          for b in ~/hil-bundles/*/; do
-            # one retry: the C3/S3 external UART bridges drop a byte under the
-            # --bench burst sweep now and then (README "Benchmarking / Rig note")
-            ./tester/test.sh "$b" --bench || ./tester/test.sh "$b" --bench || trc=$?
-          done
+          tester/test-all.sh --bench || trc=$?
+          tester/rig-lock.sh --status-write idle "$trc" || true
           echo; cat results/run-verdicts.md || true
           exit $trc
           REMOTE
