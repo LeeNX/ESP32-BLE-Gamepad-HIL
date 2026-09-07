@@ -48,7 +48,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --) shift; continue ;;              # tolerate a `-- <pytest args>` separator
     --wait) LOCK_ARGS=(--wait "$2"); shift 2; continue ;;
-    --no-wait) LOCK_ARGS=(--no-wait) ;;
+    --no-wait) LOCK_ARGS=(--no-wait); shift; continue ;;
     --no-flash) FLASH=0 ;;
     --bench) BENCH=1 ;;
   esac
@@ -58,6 +58,8 @@ done
 
 # one physical rig -- wait for any other run (CI or local) to finish first.
 # No-op when already under a batch lock (tester/test-all.sh, CI). See rig-lock.sh.
+what="test.sh $BOARD/$PROFILE"; [[ $BENCH == 1 ]] && what="$what --bench"
+export HIL_RUN_WHAT="${HIL_RUN_WHAT:-$what}"
 rig_lock_acquire "${LOCK_ARGS[@]}" || exit $?
 
 if [[ $FLASH == 1 ]]; then

@@ -5,10 +5,13 @@
 #   tester/test-all.sh --bench
 #   HIL_BUNDLE_DIR=/tmp/bundles tester/test-all.sh -k buttons
 #
-# Meant to run under the rig lock -- CI acquires it before calling this; locally:
-#   tester/rig-lock.sh -- tester/test-all.sh --bench
+# Takes the rig lock once for the whole batch (no-op if the caller -- CI, or
+# `tester/rig-lock.sh -- tester/test-all.sh` -- already holds it).
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
+# shellcheck source=tester/rig-lock.sh
+source tester/rig-lock.sh
+rig_lock_acquire || exit $?
 
 BUNDLE_DIR=${HIL_BUNDLE_DIR:-$HOME/hil-bundles}
 trc=0
