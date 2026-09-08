@@ -35,11 +35,7 @@ What a bump means:
   lock — created, used, closed — so lanes never run two agents at once (a second
   agent made `bluetoothd` return `org.bluez.Error.InProgress`). `ensure_paired()`
   also drops a live link before `pair` and retries the pair+bond block 3x.
-
-### Removed
-
-- `host/hil/parallel.py` — the spike that proved concurrent drive + capture is
-  safe; its checks are the real `test_*.py` suite, run per-lane by `--by-board`.
+- `hil.bluetooth.BtCtl` is now a context manager (`with BtCtl() as c: ...`).
 
 ## [0.1.2] — 2026-09-07
 
