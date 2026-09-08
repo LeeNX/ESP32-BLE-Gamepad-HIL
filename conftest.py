@@ -239,14 +239,7 @@ def _merge_state(name, entry):
 
 
 @pytest.fixture(scope="session")
-def btctl():
-    c = bluetooth.BtCtl()
-    yield c
-    c.close()
-
-
-@pytest.fixture(scope="session")
-def bt_mac(request, rigcfg, connected_dut, pytestconfig):
+def bt_mac(rigcfg, connected_dut, pytestconfig):
     name = rigcfg["device_name"]
     state = _load_state()
     prev = state.get(name, {})
@@ -262,10 +255,10 @@ def bt_mac(request, rigcfg, connected_dut, pytestconfig):
         return prev["mac"]  # no BtCtl at all -- lets --by-board lanes stay independent
 
     # One board pairs at a time: `remove`/`pair` and BlueZ discovery are
-    # adapter-global, so concurrent --by-board lanes would trample each other.
-    # The BtCtl session (agent + `scan on`) is created inside the lock too.
-    with _flock("pair.lock"):
-        btctl = request.getfixturevalue("btctl")
+    # adapter-global, and a second bluetoothctl agent confuses bluetoothd
+    # (org.bluez.Error.InProgress). So the BtCtl session lives *entirely* inside
+    # the lock -- only one agent exists at any moment across parallel lanes.
+    with _flock("pair.lock"), bluetooth.BtCtl() as btctl:
         mac = bluetooth.ensure_paired(btctl, name, known_mac=prev.get("mac"), want_fresh=want_fresh)
         connected_dut.wait_connected()
     _merge_state(name, {"mac": mac, "profile": rigcfg["profile"]})
@@ -293,14 +286,15 @@ def _evdev_alive(dev):
         return False
 
 
-def _recover_link(rigcfg, btctl, connected_dut, cap, mac):
+def _recover_link(rigcfg, connected_dut, cap, mac):
     """A transient BLE drop takes the evdev node with it (ENODEV). BlueZ
     auto-reconnects a trusted bond; nudge it and re-acquire the node."""
     name = rigcfg["device_name"]
     print(f"\n[recover] evdev node gone -- reconnecting {mac}")
     for _ in range(20):
         if not bluetooth.is_connected(mac):
-            with _flock("pair.lock"):  # don't nudge the adapter mid-pair on another lane
+            # short-lived BtCtl under the lock -- one agent at a time (see bt_mac)
+            with _flock("pair.lock"), bluetooth.BtCtl() as btctl:
                 btctl.connect(mac)
         try:
             connected_dut.wait_connected(timeout=3)
@@ -363,7 +357,6 @@ def _reset(request):
         if not _evdev_alive(cap.dev):
             _recover_link(
                 request.getfixturevalue("rigcfg"),
-                request.getfixturevalue("btctl"),
                 dut,
                 cap,
                 request.getfixturevalue("bt_mac"),
