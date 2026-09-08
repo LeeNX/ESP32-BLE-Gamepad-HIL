@@ -544,3 +544,28 @@ events as ground truth — have no macOS implementation:
    `sys.platform`.
 5. **CI**: a headless Mac runner needs a logged-in GUI session for BLE plus
    pre-provisioned TCC grants — more friction than the Linux path.
+
+### TODO — investigate a serial-only subset on macOS / Windows
+
+The blockers above are all about *BLE bond initiation* and *HID ground truth*.
+A chunk of the suite's value doesn't need either: the serial command channel
+(`esptool` + `pyserial`, already cross-platform) can verify the board is alive,
+running the **expected firmware/profile** (`CONFIG?` / `firmware_id()`, same
+check `conftest.py::dut` already does), and answering the protocol
+(`PING`, `PRESS`, `AXIS`, `HAT`, `PEERINFO?`, `RSIZE?`, descriptor size).
+
+Worth scoping:
+
+- A pytest marker (e.g. `serial_only`) on the assertions that read *only*
+  from the DUT over serial — no evdev/hidraw/GATT — so `pytest -m serial_only`
+  runs anywhere `pyserial` does, including Windows (`COM*`) and macOS
+  (`/dev/cu.usbserial-*`).
+- Pairing stays a **manual** step the user does once in the OS BLE settings;
+  the run uses `--no-pair`. A script could poll `CONN?` / `PEERINFO?` and just
+  tell the user "now pair the board, waiting…" then continue — no
+  CoreBluetooth/Windows.Devices.Bluetooth backend needed.
+- What this actually catches: firmware regressions in descriptor generation,
+  report sizing, the serial protocol itself, and connection parameters — a
+  useful smoke test on a dev laptop between full Linux HIL runs.
+- What it can't catch: anything that needs the host HID stack's view (button →
+  keycode mapping, evdev quirks, the kernel's GATT descriptor copy).

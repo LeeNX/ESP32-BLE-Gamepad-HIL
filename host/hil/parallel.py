@@ -10,9 +10,10 @@ timing-insensitive functional checks parallelise.
     PYTHONPATH=host python3 -m hil.parallel --boards "esp32dev esp32c3 esp32s3" \
         --parallel --loop 20                                       # soak / monitor
 
-Spike result (rp3b-ble-hil, 3 boards on one BLE adapter, 2026-09-08): a digital
-button press+release is clean on every board with all three driven + captured at
-once, no flakes. 3 boards: 9.2 s sequential -> 3.6 s parallel. Concurrent evdev
+Spike result (rp3b-ble-hil, 3 boards `specials` on one BLE adapter, 2026-09-08):
+25-iteration soak, all three boards driven + captured in parallel every iter --
+buttons + axis + hat + descriptor, ~3900 button cycles total, **zero failures**,
+15.8-16.8 s/iter (one board alone is ~16 s, so 3x for free). Concurrent evdev
 capture and independent serial channels are fine; the bench_parallel trouble was
 the block/unblock isolation, not concurrency itself.
 
