@@ -156,8 +156,11 @@ jobs:
           RIG_SHA: ${{ github.sha }}
           RIG_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          # bundles are build artifacts (not in git) -- push them over
-          rsync -a --delete bundles/ hil-tester:hil-bundles/
+          # bundles are build artifacts (not in git) -- push them to a *staging*
+          # dir; test-all.sh swaps it into ~/hil-bundles under the rig lock. A
+          # plain `rsync --delete` straight to ~/hil-bundles races a concurrent
+          # local scripts/hil.sh doing the same before either holds the lock.
+          rsync -a --delete bundles/ hil-tester:hil-bundles.ci/
           # the tester runs the exact rig commit under test: fetch + hard-reset
           # its own checkout to it (keeps only the gitignored local port config),
           # so the checkout stays coherent instead of drifting under an rsync.
@@ -182,8 +185,11 @@ jobs:
             || { echo "::error::tester: rig commit $RIG_SHA not reachable from origin"; exit 1; }
           git clean --quiet -ffdx -e /hil_config.local.toml -e /.venv -e /.venvs
           rm -rf results && mkdir results
+          # swap staged bundles in under the lock (test-all.sh also would, but do
+          # it here too so it works when RIG_SHA predates that code)
+          [ -d "$HOME/hil-bundles.ci" ] && { rm -rf "$HOME/hil-bundles"; mv "$HOME/hil-bundles.ci" "$HOME/hil-bundles"; }
           export HIL_RIG_LOCK_HELD=$$ HIL_RUN_PID=$$ HIL_RUN_WHO=CI HIL_RUN_URL="$RIG_RUN_URL"
-          export HIL_TEST_FILTER
+          export HIL_TEST_FILTER HIL_BUNDLE_STAGE="$HOME/hil-bundles.ci"
           export HIL_RUN_WHAT="flash+test --bench${HIL_TEST_FILTER:+ -k '$HIL_TEST_FILTER'}"
           tester/rig-lock.sh --status-write busy || true
           trc=0
