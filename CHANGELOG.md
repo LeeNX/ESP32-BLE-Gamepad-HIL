@@ -18,6 +18,26 @@ What a bump means:
 
 ## [Unreleased]
 
+### Added
+
+- **`tester/test-all.sh --by-board`** — run the boards as parallel lanes (one
+  `pytest` per board, profiles sequential within a lane). ~3x on the 3-board
+  reference rig: the functional matrix drops from ~55 min to ~20 min. Refuses
+  `--bench` (the latency sweep stays sequential + solo — with peers connected
+  `clean_rate` drops ~25%). Not wired into `hil.yml` yet — prove it on your rig
+  first. Validated by a 25-iteration 3-board soak (~3900 button cycles, zero
+  dropped events).
+
+### Changed
+
+- `conftest.py` guards its `state.json` read-modify-write with an `fcntl.flock`
+  so parallel per-board runs don't clobber each other's bond records.
+
+### Removed
+
+- `host/hil/parallel.py` — the spike that proved concurrent drive + capture is
+  safe; its checks are the real `test_*.py` suite, run per-lane by `--by-board`.
+
 ## [0.1.2] — 2026-09-07
 
 ### Added

@@ -5,12 +5,14 @@ Fixture chain (all session-scoped):
 An autouse per-test fixture resets the pad and drains pending events.
 """
 
+import fcntl
 import json
 import os
 import pathlib
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 
 import pytest
 
@@ -216,9 +218,23 @@ def _load_state():
         return {}
 
 
-def _save_state(s):
+@contextmanager
+def _state_locked():
+    """Serialise state.json read-modify-write across parallel per-board runs
+    (tester/test-all.sh --by-board). POSIX flock -- Linux tester, macOS one-box."""
     STATE.parent.mkdir(parents=True, exist_ok=True)
-    STATE.write_text(json.dumps(s, indent=2))
+    lock = STATE.with_name(STATE.name + ".lock")
+    with open(lock, "w") as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        yield
+
+
+def _merge_state(name, entry):
+    """Set one device's record without clobbering a concurrent writer's."""
+    with _state_locked():
+        s = _load_state()
+        s[name] = entry
+        STATE.write_text(json.dumps(s, indent=2))
 
 
 @pytest.fixture(scope="session")
@@ -246,8 +262,7 @@ def bt_mac(rigcfg, connected_dut, btctl, pytestconfig):
 
     mac = bluetooth.ensure_paired(btctl, name, known_mac=prev.get("mac"), want_fresh=want_fresh)
     connected_dut.wait_connected()
-    state[name] = {"mac": mac, "profile": rigcfg["profile"]}
-    _save_state(state)
+    _merge_state(name, {"mac": mac, "profile": rigcfg["profile"]})
     print(f"[bt] {name} -> {mac}")
     return mac
 
