@@ -544,3 +544,70 @@ events as ground truth — have no macOS implementation:
    `sys.platform`.
 5. **CI**: a headless Mac runner needs a logged-in GUI session for BLE plus
    pre-provisioned TCC grants — more friction than the Linux path.
+
+## Cross-platform tester (macOS / Windows) — TODO, investigate
+
+The gap list above has one item that actually matters — **the ground-truth read
+layer**. Flashing, the serial protocol, and the firmware-id check are already
+cross-platform. Two things worth scoping:
+
+### 1. A serial-only subset that runs anywhere `pyserial` does
+
+The serial command channel needs no BLE and no host HID stack. It can already
+verify:
+
+- the board is alive and running the **expected firmware/profile**
+  (`CONFIG?` — the same `firmware_id()` check `conftest.py::dut` does),
+- the serial protocol round-trips (`PING`, `PRESS`, `AXIS`, `HAT`),
+- connection parameters and report sizing (`PEERINFO?`, `RSIZE?`),
+- the descriptor the **library** generated matches its own reported size and the
+  checked-in golden (`getHidReportDescriptor()` vs
+  `firmware/golden/<profile>.hiddesc` — the DUT-side half of the descriptor
+  test, minus the "what the kernel received over GATT" half).
+
+Mark those assertions `@pytest.mark.serial_only`; `pytest -m serial_only` then
+runs on Windows (`COM*`) and macOS (`/dev/cu.usbserial-*`), with pairing done by
+hand once in the OS BLE settings and the run in `--no-pair`. A helper can poll
+`CONN?` and prompt "pair the board now, waiting…" — no CoreBluetooth /
+`Windows.Devices.Bluetooth` code needed.
+
+Catches: firmware regressions in descriptor generation, report sizing, the
+serial protocol, connection params — a laptop smoke test between full Linux HIL
+runs. Can't catch: anything that needs the host's HID interpretation.
+
+### 2. What replaces evdev on each platform
+
+To run the **behavioural** assertions (press → one distinct event, axis → one
+ABS code, …) off-Linux you need a host read path. **Prefer the host OS's native
+input system** — the same one SDL's per-platform backends use. The point of
+these tests is "what does a real app on this OS see?", and only the native stack
+answers that: it applies the OS's own HID parsing, its usage→control mapping,
+and any platform quirks we'd want a test to pin (the way the Linux suite pins
+evdev's ~79-button ceiling, `ABS_HAT0`-only, and the reversed-hat quirk).
+
+| Platform | Native input system (target) | SDL backend it mirrors | Python route |
+|---|---|---|---|
+| Linux (current) | evdev — `/dev/input/event*`, OS-decoded events | `linux/SDL_evdev` | `python-evdev` (`host/hil/evdev_utils.py`) |
+| macOS | IOKit HID — `IOHIDManager`, HID elements decoded by usage-page/usage | `darwin/SDL_iokitjoystick` | `pyobjc-framework-IOKit`; **Input Monitoring** TCC grant for the pytest process |
+| Windows | Raw Input + `hid.dll` preparsed data (`HidP_GetCaps` / `HidP_GetUsages`); `Windows.Gaming.Input` for the higher-level gamepad view | `SDL_rawinputjoystick`, `SDL_windows_gaming_input` | `pywinusb` or `ctypes` → `hid.dll`; WGI via `winrt` |
+
+Each native backend needs its own per-platform expected-value table (gap-list
+item 3), because each OS exposes the device its own way — that's the cost of
+testing the real thing, and it's the same table SDL maintains as its mapping DB.
+
+**hidapi as the last resort.** `hidapi` (what SDL wraps as `SDL_hidapi`) reads
+**raw HID input reports** straight off the device on all three OSes
+(hidraw / IOHIDManager / `hid.dll` underneath), bypassing the OS's input
+interpretation. Parse those against the descriptor golden
+(`firmware/golden/<profile>.hiddesc`) and you get button/axis/hat state with no
+per-platform table — but you're then testing **the descriptor + firmware**, not
+what the OS makes of them. Reach for it only to:
+
+- bootstrap a platform before its native backend is written, or
+- cover a corner case the native API can't observe (a field the OS collapses or
+  hides), as an explicitly-marked complement to the native assertions.
+
+CI on macOS/Windows stays hard (item 5): both want a logged-in GUI session for
+BLE; macOS needs the Input Monitoring grant pre-provisioned. A self-hosted
+runner, or a "run this locally before a release" checklist item, is more
+realistic than hosted CI.
