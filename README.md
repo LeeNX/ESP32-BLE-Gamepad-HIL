@@ -57,12 +57,17 @@ push to the tester, run, pull results). One box can be both roles
 | Profile | Layout | Purpose |
 |---|---|---|
 | `default` | 64 btn, 4 hat, 8 axis (0..32767) | mirrors `TestAll.ino` — known good |
-| `signed-axes` | as default, axis min −32767 | signed-axis convention |
-| `specials` | 16 btn, 1 hat, 8 axis, 8 special buttons | consumer/desktop special usages |
-| `minimal` | 1 btn, 1 axis | smallest possible input report |
+| `specials` | 16 btn, 1 hat, 8 axis (**−32767..32767**), 8 special buttons | consumer/desktop special usages **+ signed-axis convention** |
+| `minimal` | 1 btn, 1 axis, **+ Output + Feature reports** | smallest possible input report **+ `setEnableOutputReport` / `setEnableFeatureReport`** |
 | `maxbtn` | 128 btn, no hats/axes | the library's button ceiling |
-| `reports` | 16 btn, 2 axis, Output + Feature reports | `setEnableOutputReport` / `setEnableFeatureReport` |
 | `local` | 4 btn, 1 hat, 2 axis | **ad-hoc, not built by CI** — for local developer smoke tests ([`desktop/`](desktop/)). Advertises as `HILdev <board>`, not `HILpad <board>`, so a dev board doesn't clash with the rig |
+
+Four CI profiles, each carrying more than one concern so a full matrix run stays
+at 4 × (boards) flashes: `specials` folds in the old `signed-axes` profile (its 8
+axes are signed), `minimal` folds in the old `reports` profile (Output + Feature
+reports are separate HID report types — they add descriptor bytes but not
+input-report bytes, so `minimal` stays the latency-curve low-end anchor). `local`
+is a fifth, developer-only profile — never built by CI or a release.
 
 Each profile is a distinct HID report descriptor; the host caches the descriptor
 at bond time, so switching profiles on a board makes the old bond stale and the
@@ -158,14 +163,14 @@ descriptor golden files).
 | Area | Notes |
 |---|---|
 | Buttons | every configured button → one distinct evdev key, one-to-one, in the gamepad key range. `maxbtn` pins the finding that **Linux surfaces only ~79 of 128** buttons for a gamepad-application collection (`BTN_GAMEPAD + n` runs out at `0x17e`) |
-| Axes | each axis → exactly one ABS code, monotonic, exact min/centre/max endpoints; `s1`→`ABS_THROTTLE`; `s2` gets no distinct code (strict xfail); negative rail via `signed-axes` |
+| Axes | each axis → exactly one ABS code, monotonic, exact min/centre/max endpoints; `s1`→`ABS_THROTTLE`; `s2` gets no distinct code (strict xfail); negative rail via `specials` (signed axes) |
 | Hats | 8 directions + centre; Linux creates only `ABS_HAT0` and this library emits hat fields reversed so the working hat is the highest index — both pinned as strict xfails |
 | Special buttons | start/select/menu/home/back/vol± → one event each, across every input node the DUT exposes |
 | HID descriptor | the descriptor the library generated (`getHidReportDescriptor()`) == its reported size == the copy the **kernel received over GATT** == a checked-in golden per profile |
 | Device Information | model / serial / fw / hw / sw revision + manufacturer, read over GATT, match the firmware config |
 | PnP ID | `0x2A50` vendor / product / version match `setVid` / `setPid` / `setGuidVersion` |
 | Battery | `setBatteryLevel()` via raw `0x2A19`, BlueZ `Battery1` D-Bus, and `upower` where installed; nothing in `/sys/class/power_supply` (BLE Battery Service, not a HID battery usage). `setPowerStateAll()` bitfield via `0x2A1A` |
-| Feature / Output reports | `reports` profile — Feature Report both directions (`setFeatureBuffer` ↔ `HIDIOCGFEATURE`, `HIDIOCSFEATURE` ↔ `getFeatureBuffer`); Output Report host→device via `write(/dev/hidraw*)` → `getOutputBuffer` |
+| Feature / Output reports | `minimal` profile — Feature Report both directions (`setFeatureBuffer` ↔ `HIDIOCGFEATURE`, `HIDIOCSFEATURE` ↔ `getFeatureBuffer`); Output Report host→device via `write(/dev/hidraw*)` → `getOutputBuffer` |
 | Latency / throughput | `--bench`, see below |
 
 ## Benchmarking (`--bench`)
@@ -396,13 +401,13 @@ loose, so gating every push on it wasn't worth the rig time. Regenerate
 | input | effect |
 |---|---|
 | `boards` | space-separated subset to build + test (blank = all three) |
-| `profiles` | space-separated profile subset (blank = all six) |
+| `profiles` | space-separated profile subset (blank = all four) |
 | `test_filter` | a pytest `-k` expression, e.g. `feature_report` or `battery or descriptor` (blank = whole suite) |
 | `bench` | run the sequential `--bench` sweep instead of the parallel functional matrix (~40 min) |
 
 Narrowing `boards` / `profiles` narrows the build matrix, and only the built
 bundles are pushed, so the flash + test set shrinks with it. So
-`boards=esp32s3`, `profiles=reports`, `test_filter=feature_report` flashes one
+`boards=esp32s3`, `profiles=minimal`, `test_filter=feature_report` flashes one
 bundle and runs a handful of tests (~10 min) — the fast path for chasing a single
 red test. Locally the same:
 `HIL_TEST_FILTER='battery or descriptor' tester/test-all.sh`, or just

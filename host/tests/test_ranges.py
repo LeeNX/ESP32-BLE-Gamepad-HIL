@@ -2,14 +2,14 @@
 
   * axis endpoints -- commanding exactly axesMin / centre / axesMax lands at
     the evdev absinfo min / centre / max (within the kernel's fuzz/flat), for
-    both the unsigned `default` and the signed `signed-axes` profiles;
+    both the unsigned `default` and the signed `specials` profiles;
   * the `minimal` profile really is minimal (one button, one axis, no hats);
   * the `maxbtn` profile exercises the library's 128-button ceiling -- the
     per-button cleanliness is covered by test_buttons.py running against it,
     here we just assert the count surfaced.
 
 Run the profile-specific tests by flashing that profile:
-    scripts/hil.sh --profiles "default signed-axes minimal maxbtn"
+    scripts/hil.sh --profiles "default specials minimal maxbtn"
 """
 
 import pytest

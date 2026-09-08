@@ -1,4 +1,4 @@
-"""HID Output Report (host -> device only), on the `reports` profile.
+"""HID Output Report (host -> device only), on the `minimal` profile.
 
 Host writes a report to /dev/hidraw* (first byte = Report ID), firmware
 `OUTPUT?` reports isOutputReceived() + getOutputBuffer(). Skips if the hidraw
@@ -16,7 +16,7 @@ from hil import hidraw
 def out(connected_dut, bt_mac):
     cfg = connected_dut.config()
     if not cfg.get("out"):
-        pytest.skip("profile has no Output Report (use --profile reports)")
+        pytest.skip("profile has no Output Report (use --profile minimal)")
     node = hidraw.find_node(mac=bt_mac)
     if node is None:
         pytest.skip("no /dev/hidraw node for the DUT")

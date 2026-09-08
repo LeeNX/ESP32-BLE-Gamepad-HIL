@@ -104,11 +104,9 @@ def rigcfg(pytestconfig):
 # --- firmware --------------------------------------------------------------
 PROFILE_ENV_SUFFIX = {
     "default": "",
-    "signed-axes": "-signed",
     "specials": "-specials",
     "minimal": "-minimal",
     "maxbtn": "-maxbtn",
-    "reports": "-reports",
     "local": "-local",  # ad-hoc dev profile -- not in CI; see firmware/include/hil_profile.h
 }
 

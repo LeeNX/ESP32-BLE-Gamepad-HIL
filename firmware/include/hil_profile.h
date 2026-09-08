@@ -21,17 +21,26 @@
  * sizes (minimal ~1 byte .. maxbtn 16 bytes of buttons) so the latency
  * benchmark (host/hil/bench.py) can plot latency / throughput vs report size.
  *
+ * Four CI profiles, each carrying more than one concern so the flash/pair count
+ * per matrix run stays low:
+ *   default  -- unsigned baseline, mirrors TestAll.ino
+ *   specials -- special buttons AND signed axes (min -32767): the negative-rail
+ *               coverage rides on the profile that already has all 8 axes
+ *   minimal  -- smallest input report AND the Output + Feature report plumbing
+ *               (O/F are separate report types -- they don't grow the 1-byte
+ *               input report, so this stays the bench low-end anchor)
+ *   maxbtn   -- the library's 128-button ceiling / bench high-end anchor
+ * `local` is a fifth, ad-hoc developer profile -- never built by CI or a release.
+ *
  * Select with a build flag: -D HIL_PROFILE=HIL_PROFILE_SPECIALS
  * (platformio.ini wires one env per profile x board).
  */
 
 #define HIL_PROFILE_DEFAULT 1
-#define HIL_PROFILE_SIGNED_AXES 2
-#define HIL_PROFILE_SPECIALS 3
-#define HIL_PROFILE_MINIMAL 4
-#define HIL_PROFILE_MAXBTN 5
-#define HIL_PROFILE_REPORTS 6
-#define HIL_PROFILE_LOCAL 7
+#define HIL_PROFILE_SPECIALS 2
+#define HIL_PROFILE_MINIMAL 3
+#define HIL_PROFILE_MAXBTN 4
+#define HIL_PROFILE_LOCAL 5
 
 #ifndef HIL_PROFILE
 #define HIL_PROFILE HIL_PROFILE_DEFAULT
@@ -85,23 +94,22 @@
 #define HIL_AXES_MIN 0x0000
 #define HIL_AXES_MAX 0x7FFF
 #define HIL_SPECIALS 0
-#elif HIL_PROFILE == HIL_PROFILE_SIGNED_AXES
-#define HIL_PROFILE_NAME "signed-axes"
-#define HIL_BUTTON_COUNT 64
-#define HIL_HAT_COUNT 4
-#define HIL_AXES_MIN ((int16_t)0x8001) // -32767
-#define HIL_AXES_MAX 0x7FFF
-#define HIL_SPECIALS 0
 #elif HIL_PROFILE == HIL_PROFILE_SPECIALS
+// Special buttons + signed axes in one flash: 8 special usages (consumer /
+// desktop) and all 8 axes running -32767..32767, so test_ranges'
+// negative-rail check rides on the profile that already carries the axes.
 #define HIL_PROFILE_NAME "specials"
 #define HIL_BUTTON_COUNT 16
 #define HIL_HAT_COUNT 1
-#define HIL_AXES_MIN 0x0000
+#define HIL_AXES_MIN ((int16_t)0x8001) // -32767
 #define HIL_AXES_MAX 0x7FFF
 #define HIL_SPECIALS 1
 #elif HIL_PROFILE == HIL_PROFILE_MINIMAL
 // Smallest input report the library can emit: one button, one axis, nothing
-// else. Anchors the low end of the latency-vs-report-size curve.
+// else. Anchors the low end of the latency-vs-report-size curve. Also carries
+// the Output + Feature reports -- those are separate HID report types, so they
+// add descriptor bytes (~30) but not input-report bytes, and the host can
+// exercise them (test_feature_report.py / test_output_report.py) via hidraw.
 #define HIL_PROFILE_NAME "minimal"
 #define HIL_BUTTON_COUNT 1
 #define HIL_HAT_COUNT 0
@@ -116,6 +124,8 @@
 #define HIL_AX_RZ 0
 #define HIL_AX_S1 0
 #define HIL_AX_S2 0
+#define HIL_OUTPUT_REPORT_LEN 16
+#define HIL_FEATURE_REPORT_LEN 16
 #elif HIL_PROFILE == HIL_PROFILE_MAXBTN
 // The library's hard ceiling: 128 buttons (_buttons[16]). No hats/axes so the
 // generated descriptor stays well inside tempHidReportDescriptor[150].
@@ -133,26 +143,6 @@
 #define HIL_AX_RZ 0
 #define HIL_AX_S1 0
 #define HIL_AX_S2 0
-#elif HIL_PROFILE == HIL_PROFILE_REPORTS
-// Output Report (host->device) + Feature Report (bidirectional) enabled, so
-// the host can exercise them via hidraw. Small button/axis set keeps the
-// descriptor well under 150 (the Output/Feature items add ~30 bytes).
-#define HIL_PROFILE_NAME "reports"
-#define HIL_BUTTON_COUNT 16
-#define HIL_HAT_COUNT 0
-#define HIL_AXES_MIN 0x0000
-#define HIL_AXES_MAX 0x7FFF
-#define HIL_SPECIALS 0
-#define HIL_AX_X 1
-#define HIL_AX_Y 1
-#define HIL_AX_Z 0
-#define HIL_AX_RX 0
-#define HIL_AX_RY 0
-#define HIL_AX_RZ 0
-#define HIL_AX_S1 0
-#define HIL_AX_S2 0
-#define HIL_OUTPUT_REPORT_LEN 16
-#define HIL_FEATURE_REPORT_LEN 16
 #elif HIL_PROFILE == HIL_PROFILE_LOCAL
 // Ad-hoc profile for local developer smoke-testing -- deliberately NOT in the
 // CI build matrix (hil_config.toml [builder] profiles) or any release. A small
