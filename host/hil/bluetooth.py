@@ -219,6 +219,12 @@ class BtCtl:
         except Exception:
             self.p.kill()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
 
 def ensure_paired(btctl, name_contains, known_mac=None, want_fresh=False):
     """Return a bonded+connected MAC for the DUT, pairing if needed.
@@ -263,12 +269,30 @@ def ensure_paired(btctl, name_contains, known_mac=None, want_fresh=False):
                 "(is the board powered and advertising? check `bluetoothctl scan on`)"
             )
 
-    btctl.pair(mac)
-    for _ in range(12):
-        if is_bonded(mac):
+    # A connection already in flight makes `pair` fail with
+    # org.bluez.Error.InProgress -- settle the link down first.
+    if is_connected(mac):
+        btctl.send(f"disconnect {mac}")
+        for _ in range(10):
+            if not is_connected(mac):
+                break
+            time.sleep(1)
+        time.sleep(2)
+
+    bonded = False
+    for attempt in range(3):
+        btctl.pair(mac)
+        for _ in range(12):
+            if is_bonded(mac):
+                bonded = True
+                break
+            time.sleep(1)
+        if bonded:
             break
-        time.sleep(1)
-    else:
+        if attempt < 2:
+            btctl.send(f"disconnect {mac}")
+            time.sleep(4)  # let an InProgress connect time out before retrying
+    if not bonded:
         raise RuntimeError(
             f"pairing {mac} did not complete (bluetoothd needs the agent this "
             f"session holds; check `journalctl -u bluetooth`). Last output:\n{btctl._tail(40)}"

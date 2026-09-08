@@ -5,12 +5,14 @@ Fixture chain (all session-scoped):
 An autouse per-test fixture resets the pad and drains pending events.
 """
 
+import fcntl
 import json
 import os
 import pathlib
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 
 import pytest
 
@@ -216,20 +218,28 @@ def _load_state():
         return {}
 
 
-def _save_state(s):
+@contextmanager
+def _flock(name):
+    """Cross-process mutex (POSIX flock -- Linux tester, macOS one-box). Used to
+    serialise the two things parallel per-board runs (tester/test-all.sh
+    --by-board) must not do at once on the shared adapter: writing state.json,
+    and pairing (BlueZ discovery + `remove`/`pair` are adapter-global)."""
     STATE.parent.mkdir(parents=True, exist_ok=True)
-    STATE.write_text(json.dumps(s, indent=2))
+    with open(STATE.with_name(name), "w") as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        yield
+
+
+def _merge_state(name, entry):
+    """Set one device's record without clobbering a concurrent writer's."""
+    with _flock("state.lock"):
+        s = _load_state()
+        s[name] = entry
+        STATE.write_text(json.dumps(s, indent=2))
 
 
 @pytest.fixture(scope="session")
-def btctl():
-    c = bluetooth.BtCtl()
-    yield c
-    c.close()
-
-
-@pytest.fixture(scope="session")
-def bt_mac(rigcfg, connected_dut, btctl, pytestconfig):
+def bt_mac(rigcfg, connected_dut, pytestconfig):
     name = rigcfg["device_name"]
     state = _load_state()
     prev = state.get(name, {})
@@ -242,12 +252,16 @@ def bt_mac(rigcfg, connected_dut, btctl, pytestconfig):
     )
 
     if pytestconfig.getoption("no_pair") and prev.get("mac") and not want_fresh:
-        return prev["mac"]
+        return prev["mac"]  # no BtCtl at all -- lets --by-board lanes stay independent
 
-    mac = bluetooth.ensure_paired(btctl, name, known_mac=prev.get("mac"), want_fresh=want_fresh)
-    connected_dut.wait_connected()
-    state[name] = {"mac": mac, "profile": rigcfg["profile"]}
-    _save_state(state)
+    # One board pairs at a time: `remove`/`pair` and BlueZ discovery are
+    # adapter-global, and a second bluetoothctl agent confuses bluetoothd
+    # (org.bluez.Error.InProgress). So the BtCtl session lives *entirely* inside
+    # the lock -- only one agent exists at any moment across parallel lanes.
+    with _flock("pair.lock"), bluetooth.BtCtl() as btctl:
+        mac = bluetooth.ensure_paired(btctl, name, known_mac=prev.get("mac"), want_fresh=want_fresh)
+        connected_dut.wait_connected()
+    _merge_state(name, {"mac": mac, "profile": rigcfg["profile"]})
     print(f"[bt] {name} -> {mac}")
     return mac
 
@@ -272,14 +286,16 @@ def _evdev_alive(dev):
         return False
 
 
-def _recover_link(rigcfg, btctl, connected_dut, cap, mac):
+def _recover_link(rigcfg, connected_dut, cap, mac):
     """A transient BLE drop takes the evdev node with it (ENODEV). BlueZ
     auto-reconnects a trusted bond; nudge it and re-acquire the node."""
     name = rigcfg["device_name"]
     print(f"\n[recover] evdev node gone -- reconnecting {mac}")
     for _ in range(20):
         if not bluetooth.is_connected(mac):
-            btctl.connect(mac)
+            # short-lived BtCtl under the lock -- one agent at a time (see bt_mac)
+            with _flock("pair.lock"), bluetooth.BtCtl() as btctl:
+                btctl.connect(mac)
         try:
             connected_dut.wait_connected(timeout=3)
         except Exception:  # noqa: BLE001
@@ -341,7 +357,6 @@ def _reset(request):
         if not _evdev_alive(cap.dev):
             _recover_link(
                 request.getfixturevalue("rigcfg"),
-                request.getfixturevalue("btctl"),
                 dut,
                 cap,
                 request.getfixturevalue("bt_mac"),
