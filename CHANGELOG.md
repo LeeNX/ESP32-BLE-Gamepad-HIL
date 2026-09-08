@@ -21,17 +21,20 @@ What a bump means:
 ### Added
 
 - **`tester/test-all.sh --by-board`** — run the boards as parallel lanes (one
-  `pytest` per board, profiles sequential within a lane). ~3x on the 3-board
-  reference rig: the functional matrix drops from ~55 min to ~20 min. Refuses
-  `--bench` (the latency sweep stays sequential + solo — with peers connected
-  `clean_rate` drops ~25%). Not wired into `hil.yml` yet — prove it on your rig
-  first. Validated by a 25-iteration 3-board soak (~3900 button cycles, zero
-  dropped events).
+  `pytest` per board, profiles sequential within a lane). On the 3-board rig the
+  full 18-bundle functional matrix went ~35 min → **~12 min** (measured, all
+  pass). Refuses `--bench` (the latency sweep stays sequential + solo — with
+  peers connected `clean_rate` drops ~25%). Not wired into `hil.yml` yet — prove
+  it on your rig first.
 
 ### Changed
 
-- `conftest.py` guards its `state.json` read-modify-write with an `fcntl.flock`
-  so parallel per-board runs don't clobber each other's bond records.
+- `conftest.py` serialises the two adapter-global operations across parallel
+  per-board runs with an `fcntl.flock`: `state.json` writes, and pairing. The
+  `BtCtl` session (one `bluetoothctl` agent) now lives entirely inside the pair
+  lock — created, used, closed — so lanes never run two agents at once (a second
+  agent made `bluetoothd` return `org.bluez.Error.InProgress`). `ensure_paired()`
+  also drops a live link before `pair` and retries the pair+bond block 3x.
 
 ### Removed
 

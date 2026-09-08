@@ -393,21 +393,21 @@ the fast path for chasing a single red test. Locally the same:
 
 `tester/test-all.sh --by-board` runs one **lane per board** concurrently — each
 lane flashes + tests its own profiles sequentially, but the boards overlap. On
-the 3-board reference rig that's **~3x**: the functional matrix drops from
-~55 min to ~20 min (measured floor: a board's button+axis+hat+descriptor
-spot-check is ~16 s solo and stays ~16 s with all three running at once).
+the 3-board reference rig the full 18-bundle functional matrix runs in
+**~12 min** (measured, `-k "buttons or descriptor"`) versus ~35 min sequential —
+about 3x, bounded by the slowest board's lane.
 
 Only the timing-insensitive checks parallelise. `--by-board` **refuses
-`--bench`** — the latency / throughput sweep has to stay sequential and as close
-to solo as possible (with peers connected, `clean_rate` drops ~25%; the
-`bench-table.md` **links** column flags it). Run bench as its own sequential
-pass.
+`--bench`**: the latency / throughput sweep stays sequential and as close to solo
+as possible (with peers connected `clean_rate` drops ~25% — the `bench-table.md`
+**links** column flags it). Run bench as its own pass.
 
-Why it's safe: the boards have independent serial channels (separate USB) and
-independent evdev nodes, and one BLE adapter carries three concurrent *functional*
-HID streams with zero dropped events — a 25-iteration 3-board soak (~3900 button
-cycles) was clean. `conftest.py` takes a `flock` around its `state.json`
-read-modify-write so the lanes don't clobber each other's bond records.
+Why it's safe: the boards have independent serial channels and evdev nodes, and
+one BLE adapter carries three concurrent *functional* HID streams with zero
+dropped events (a 25-iteration 3-board soak, ~3900 button cycles, was clean).
+`conftest.py` serialises the two adapter-global operations with an `flock`:
+`state.json` writes, and pairing — the `BtCtl` session (one `bluetoothctl` agent)
+lives entirely inside the pair lock, so lanes never run two agents at once.
 
 Not wired into `hil.yml` yet — prove it on your own rig first
 (`tester/rig-lock.sh -- tester/test-all.sh --by-board`).
@@ -568,42 +568,74 @@ events as ground truth — have no macOS implementation:
 5. **CI**: a headless Mac runner needs a logged-in GUI session for BLE plus
    pre-provisioned TCC grants — more friction than the Linux path.
 
-### TODO — investigate a serial-only subset on macOS / Windows
+## Cross-platform tester (macOS / Windows) — TODO, investigate
 
-The blockers above are all about *BLE bond initiation* and *HID ground truth*.
-A chunk of the suite's value doesn't need either: the serial command channel
-(`esptool` + `pyserial`, already cross-platform) can verify the board is alive,
-running the **expected firmware/profile** (`CONFIG?` / `firmware_id()`, same
-check `conftest.py::dut` already does), and answering the protocol
-(`PING`, `PRESS`, `AXIS`, `HAT`, `PEERINFO?`, `RSIZE?`, descriptor size).
+The gap list above has one item that actually matters — **the ground-truth read
+layer**. Flashing, the serial protocol, and the firmware-id check are already
+cross-platform. Two things worth scoping:
 
-Worth scoping:
+### 1. A serial-only subset that runs anywhere `pyserial` does
 
-- A pytest marker (e.g. `serial_only`) on the assertions that read *only*
-  from the DUT over serial — no evdev/hidraw/GATT — so `pytest -m serial_only`
-  runs anywhere `pyserial` does, including Windows (`COM*`) and macOS
-  (`/dev/cu.usbserial-*`).
-- Pairing stays a **manual** step the user does once in the OS BLE settings;
-  the run uses `--no-pair`. A script could poll `CONN?` / `PEERINFO?` and just
-  tell the user "now pair the board, waiting…" then continue — no
-  CoreBluetooth/Windows.Devices.Bluetooth backend needed.
-- What this actually catches: firmware regressions in descriptor generation,
-  report sizing, the serial protocol itself, and connection parameters — a
-  useful smoke test on a dev laptop between full Linux HIL runs.
-- What it can't catch: anything that needs the host HID stack's view (button →
-  keycode mapping, evdev quirks, the kernel's GATT descriptor copy).
+The serial command channel needs no BLE and no host HID stack. It can already
+verify:
 
-### Notes — parallelism and portability
+- the board is alive and running the **expected firmware/profile**
+  (`CONFIG?` — the same `firmware_id()` check `conftest.py::dut` does),
+- the serial protocol round-trips (`PING`, `PRESS`, `AXIS`, `HAT`),
+- connection parameters and report sizing (`PEERINFO?`, `RSIZE?`),
+- the descriptor the **library** generated matches its own reported size and the
+  checked-in golden (`getHidReportDescriptor()` vs
+  `firmware/golden/<profile>.hiddesc` — the DUT-side half of the descriptor
+  test, minus the "what the kernel received over GATT" half).
 
-- **`--by-board` is a process-per-board model** (one `pytest` per lane, boards
-  overlap). A multi-board serial-only run on macOS / Windows would use the same
-  shape — the lanes are independent once each has its own port and (manual) bond.
-- **`state.json` is the one shared file.** `conftest.py` guards its
-  read-modify-write with `fcntl.flock` — POSIX, so Linux and macOS are fine;
-  Windows would need `msvcrt.locking` or `portalocker` (or per-board state
-  files) if the parallel path ever runs there.
-- **One BLE adapter, three functional streams: fine.** Zero dropped events over
-  a 25-iteration 3-board soak. Only *timed* traffic degrades under contention
-  (`clean_rate` ~-25%), which is why `--bench` stays sequential.
-- The retired `host/hil/parallel.py` spike proved the above; its checks now live
-  in the real `test_*.py` suite driven per-lane by `tester/test-all.sh --by-board`.
+Mark those assertions `@pytest.mark.serial_only`; `pytest -m serial_only` then
+runs on Windows (`COM*`) and macOS (`/dev/cu.usbserial-*`), with pairing done by
+hand once in the OS BLE settings and the run in `--no-pair`. A helper can poll
+`CONN?` and prompt "pair the board now, waiting…" — no CoreBluetooth /
+`Windows.Devices.Bluetooth` code needed.
+
+Catches: firmware regressions in descriptor generation, report sizing, the
+serial protocol, connection params — a laptop smoke test between full Linux HIL
+runs. Can't catch: anything that needs the host's HID interpretation.
+
+A multi-board serial-only run would reuse the `--by-board` shape (one process per
+board, independent once each has its port + manual bond). The one shared file,
+`state.json`, is `fcntl.flock`-guarded — POSIX, so macOS is fine; Windows would
+need `msvcrt.locking` / `portalocker` or per-board state files.
+
+### 2. What replaces evdev on each platform
+
+To run the **behavioural** assertions (press → one distinct event, axis → one
+ABS code, …) off-Linux you need a host read path. **Prefer the host OS's native
+input system** — the same one SDL's per-platform backends use. The point of
+these tests is "what does a real app on this OS see?", and only the native stack
+answers that: it applies the OS's own HID parsing, its usage→control mapping,
+and any platform quirks we'd want a test to pin (the way the Linux suite pins
+evdev's ~79-button ceiling, `ABS_HAT0`-only, and the reversed-hat quirk).
+
+| Platform | Native input system (target) | SDL backend it mirrors | Python route |
+|---|---|---|---|
+| Linux (current) | evdev — `/dev/input/event*`, OS-decoded events | `linux/SDL_evdev` | `python-evdev` (`host/hil/evdev_utils.py`) |
+| macOS | IOKit HID — `IOHIDManager`, HID elements decoded by usage-page/usage | `darwin/SDL_iokitjoystick` | `pyobjc-framework-IOKit`; **Input Monitoring** TCC grant for the pytest process |
+| Windows | Raw Input + `hid.dll` preparsed data (`HidP_GetCaps` / `HidP_GetUsages`); `Windows.Gaming.Input` for the higher-level gamepad view | `SDL_rawinputjoystick`, `SDL_windows_gaming_input` | `pywinusb` or `ctypes` → `hid.dll`; WGI via `winrt` |
+
+Each native backend needs its own per-platform expected-value table (gap-list
+item 3), because each OS exposes the device its own way — that's the cost of
+testing the real thing, and it's the same table SDL maintains as its mapping DB.
+
+**hidapi as the last resort.** `hidapi` (what SDL wraps as `SDL_hidapi`) reads
+**raw HID input reports** straight off the device on all three OSes
+(hidraw / IOHIDManager / `hid.dll` underneath), bypassing the OS's input
+interpretation. Parse those against the descriptor golden
+(`firmware/golden/<profile>.hiddesc`) and you get button/axis/hat state with no
+per-platform table — but you're then testing **the descriptor + firmware**, not
+what the OS makes of them. Reach for it only to:
+
+- bootstrap a platform before its native backend is written, or
+- cover a corner case the native API can't observe (a field the OS collapses or
+  hides), as an explicitly-marked complement to the native assertions.
+
+CI on macOS/Windows stays hard (item 5): both want a logged-in GUI session for
+BLE; macOS needs the Input Monitoring grant pre-provisioned. A self-hosted
+runner, or a "run this locally before a release" checklist item, is more
+realistic than hosted CI.
