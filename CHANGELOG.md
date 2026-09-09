@@ -18,6 +18,18 @@ What a bump means:
 
 ## [Unreleased]
 
+### Changed
+
+- **`hil.yml` runs the parallel functional matrix by default.** Push,
+  `repository_dispatch` (the library's correctness gate), and a plain
+  `workflow_dispatch` now run `tester/test-all.sh --by-board` — ~3x faster,
+  ~15 min instead of ~1 h. The
+  sequential `--bench` latency/throughput sweep is no longer on every push: it
+  runs on a weekly `schedule` (Mondays 02:00 UTC / 04:00 SAST) and on a
+  `workflow_dispatch` with `bench: true`. Its gates are deliberately loose, so
+  gating every push on it bought little. The remote heredoc falls back to a
+  sequential functional run if the rig commit under test predates `--by-board`.
+
 ### Fixed
 
 - Bundle staging no longer races the rig lock. `hil.yml` (and the library's

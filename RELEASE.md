@@ -16,7 +16,12 @@ GitHub Release, and two attached tarballs:
 1. Land everything for the release on `main`. Move the `## [Unreleased]` bullets
    in [CHANGELOG.md](CHANGELOG.md) into shape (they become the release body
    alongside GitHub's auto-generated notes).
-2. From a clean `main`:
+2. Run the latency/throughput sweep on `main` — it's no longer on every push.
+   Trigger [`hil.yml`](.github/workflows/hil.yml) via the Actions tab (or
+   `gh workflow run hil.yml -f bench=true`), or just take the most recent Monday
+   `schedule` run if `main` hasn't moved since. Regenerate
+   `docs/bench/bench-table.md` + SVGs from its `results/` if the numbers moved.
+3. From a clean `main`:
 
    ```bash
    scripts/release.sh 0.2.0            # bump VERSION, roll the changelog, commit, tag
@@ -26,7 +31,7 @@ GitHub Release, and two attached tarballs:
 
    `scripts/release.sh` refuses a dirty tree, an existing tag, or an empty
    `[Unreleased]` section.
-3. Pushing the `v*` tag triggers [`.github/workflows/release.yml`](.github/workflows/release.yml):
+4. Pushing the `v*` tag triggers [`.github/workflows/release.yml`](.github/workflows/release.yml):
    it checks `VERSION` matches the tag, builds the firmware matrix against the
    library (repo variable `HIL_LIB_REF`, else `master` — override with the
    `lib_ref` input on a manual re-run), runs `scripts/make-release-artifacts.sh`,
