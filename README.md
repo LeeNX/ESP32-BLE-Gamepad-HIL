@@ -54,14 +54,20 @@ push to the tester, run, pull results). One box can be both roles
 
 ### Compile profiles (`firmware/include/hil_profile.h`)
 
-| Profile | Layout | Purpose |
-|---|---|---|
-| `default` | 64 btn, 4 hat, 8 axis (0..32767) | mirrors `TestAll.ino` — known good |
-| `signed-axes` | as default, axis min −32767 | signed-axis convention |
-| `specials` | 16 btn, 1 hat, 8 axis, 8 special buttons | consumer/desktop special usages |
-| `minimal` | 1 btn, 1 axis | smallest possible input report |
-| `maxbtn` | 128 btn, no hats/axes | the library's button ceiling |
-| `reports` | 16 btn, 2 axis, Output + Feature reports | `setEnableOutputReport` / `setEnableFeatureReport` |
+| Profile | Layout | Purpose | In CI |
+|---|---|---|---|
+| `default` | 64 btn, 4 hat, 8 axis (0..32767) | mirrors `TestAll.ino` — known good | every push |
+| `specials` | 16 btn, 1 hat, 8 axis, 8 special buttons | consumer/desktop special usages | every push |
+| `reports` | 16 btn, 2 axis, Output + Feature reports | `setEnableOutputReport` / `setEnableFeatureReport` | every push |
+| `signed-axes` | as default, axis min −32767 | signed-axis convention | opt-in |
+| `minimal` | 1 btn, 1 axis | smallest possible input report | opt-in |
+| `maxbtn` | 128 btn, no hats/axes | the library's button ceiling | opt-in |
+
+The everyday build+test matrix is the three profiles with distinct functional
+coverage. `signed-axes` / `minimal` / `maxbtn` are opt-in — pass `--profiles` (or
+the `profiles` workflow_dispatch input), and a release runs the full six (see
+[RELEASE.md](RELEASE.md)). Fewer profiles per run means less flash wear on the rig
+and a faster suite.
 
 Each profile is a distinct HID report descriptor; the host caches the descriptor
 at bond time, so switching profiles on a board makes the old bond stale and the
@@ -361,7 +367,8 @@ Two workflows:
 self-hosted runner, no inbound ports on your network:
 
 - **build** — `pip install platformio`, `builder/build.sh`, upload the bundles.
-  The **full** `board × profile` matrix is built (`esp32dev` + `esp32c3` + `esp32s3`).
+  All 3 boards (`esp32dev` + `esp32c3` + `esp32s3`) × the 3 default profiles
+  (`default` `specials` `reports`); a `profiles` dispatch input widens it.
 - **hil-test** — brings up an **ephemeral Tailscale node** for the job
   (`tailscale/github-action`), `rsync`s the bundles to the tester over the
   tailnet, `ssh`es in to **`git reset --hard`** the tester's own checkout to the
@@ -386,7 +393,7 @@ loose, so gating every push on it wasn't worth the rig time. Regenerate
 | input | effect |
 |---|---|
 | `boards` | space-separated subset to build + test (blank = all three) |
-| `profiles` | space-separated profile subset (blank = all six) |
+| `profiles` | space-separated profile subset (blank = the default `default specials reports`; full set adds `signed-axes minimal maxbtn`) |
 | `test_filter` | a pytest `-k` expression, e.g. `feature_report` or `battery or descriptor` (blank = whole suite) |
 | `bench` | run the sequential `--bench` sweep instead of the parallel functional matrix (~40 min) |
 
@@ -402,9 +409,10 @@ red test. Locally the same:
 
 `tester/test-all.sh --by-board` runs one **lane per board** concurrently — each
 lane flashes + tests its own profiles sequentially, but the boards overlap. On
-the 3-board reference rig the full 18-bundle functional matrix runs in
-**~12 min** (measured, `-k "buttons or descriptor"`) versus ~35 min sequential —
-about 3x, bounded by the slowest board's lane.
+the 3-board reference rig the full 18-bundle functional matrix ran in **~12 min**
+(measured, `-k "buttons or descriptor"`) versus ~35 min sequential — about 3x,
+bounded by the slowest board's lane. The every-push matrix is now 3 profiles
+(9 bundles), so shorter still.
 
 Only the timing-insensitive checks parallelise. `--by-board` **refuses
 `--bench`**: the latency / throughput sweep stays sequential and as close to solo

@@ -29,6 +29,15 @@ What a bump means:
   `workflow_dispatch` with `bench: true`. Its gates are deliberately loose, so
   gating every push on it bought little. The remote heredoc falls back to a
   sequential functional run if the rig commit under test predates `--by-board`.
+- **Default profile matrix trimmed 6 → 3** (`default specials reports` — the
+  set with distinct functional coverage). `signed-axes`, `minimal` and `maxbtn`
+  are opt-in via `--profiles` / the `profiles` dispatch input; their tests
+  `SKIP` on a normal push (signed axis negative rail, 128-button ceiling +
+  descriptor-buffer stress, the latency-curve endpoints). A release runs the
+  full six (`RELEASE.md`), and `release.yml` still ships all six bundles. Halves
+  per-push flash wear on the rig and suite time. `[builder] profiles` in
+  `hil_config.toml` changed to match, so local `run.sh` / `builder/build.sh`
+  default to the same three.
 
 ### Fixed
 

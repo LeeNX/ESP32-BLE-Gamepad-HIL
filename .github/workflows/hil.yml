@@ -51,7 +51,7 @@ on:
         description: 'space-separated subset to build+test (blank = all: esp32dev esp32c3 esp32s3)'
         default: ""
       profiles:
-        description: 'space-separated subset (blank = all: default signed-axes specials minimal maxbtn reports)'
+        description: 'space-separated subset (blank = the default set: default specials reports; the full set adds signed-axes minimal maxbtn)'
         default: ""
       test_filter:
         description: 'pytest -k expression for a focused run, e.g. "feature_report" or "battery or descriptor" (blank = whole suite)'
@@ -78,13 +78,16 @@ env:
   # changes live on a fork branch not yet merged upstream) > the built-in.
   LIB_REPO: ${{ inputs.lib_repo || github.event.client_payload.lib_repo || vars.HIL_LIB_REPO || 'https://github.com/LeeNX/ESP32-BLE-Gamepad.git' }}
   LIB_REF:  ${{ inputs.lib_ref  || github.event.client_payload.lib_ref  || vars.HIL_LIB_REF  || 'master' }}
-  # Build the full matrix by default; a workflow_dispatch can narrow it (and the
-  # pytest selection below) for a focused re-test. The tester runs only the
-  # boards it has wired (host/hil/detect.py -> tester/test.sh SKIPs the rest) --
-  # esp32c3 / esp32s3 ship with CHANGE-ME ports so they build here but skip on a
-  # tester until real ports are set. All three verified green on the reference rig.
+  # Every push builds all 3 boards but only the 3 profiles that carry distinct
+  # functional coverage (default / specials / reports). signed-axes / minimal /
+  # maxbtn are opt-in via the `profiles` input -- signed-axis range rarely moves
+  # and minimal/maxbtn are latency-curve endpoints a release-time full run still
+  # covers. Fewer profiles = less rig flash wear + a faster every-push suite.
+  # The tester runs only the boards it has wired (host/hil/detect.py ->
+  # tester/test.sh SKIPs the rest) -- esp32c3 / esp32s3 ship with CHANGE-ME ports
+  # so they build here but skip on a tester until real ports are set.
   BOARDS: ${{ inputs.boards || 'esp32dev esp32c3 esp32s3' }}
-  PROFILES: ${{ inputs.profiles || 'default signed-axes specials minimal maxbtn reports' }}
+  PROFILES: ${{ inputs.profiles || 'default specials reports' }}
   TEST_FILTER: ${{ inputs.test_filter }}
   # The Monday schedule and an explicit `bench: true` dispatch run the sequential
   # latency/throughput sweep; every other trigger runs the parallel functional

@@ -33,6 +33,10 @@ env:
   LIB_REPO: ${{ vars.HIL_LIB_REPO || 'https://github.com/LeeNX/ESP32-BLE-Gamepad.git' }}
   LIB_REF: ${{ inputs.lib_ref || vars.HIL_LIB_REF || 'master' }}
   BOARDS: esp32dev esp32c3 esp32s3
+  # The release ships the COMPLETE bundle set (all 6 profiles) for reproducibility
+  # -- REPRODUCE.md consumers replay without a rig. Everyday CI (hil.yml) only
+  # builds+tests default/specials/reports; run a full-matrix hil.yml dispatch to
+  # validate the other three before tagging (see RELEASE.md).
   PROFILES: default signed-axes specials minimal maxbtn reports
 
 jobs:
