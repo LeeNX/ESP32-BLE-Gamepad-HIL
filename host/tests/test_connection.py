@@ -22,8 +22,7 @@ def test_advertised_name(dut, rigcfg, manifest):
     assert len(got) <= 18, f"advertised name {got!r} is {len(got)} chars (> 18)"
     expected = manifest.get("device_name") or rigcfg["device_name"]
     assert got == expected, (
-        f"advertised name {got!r} != expected {expected!r} "
-        f"(the name the harness pairs by)"
+        f"advertised name {got!r} != expected {expected!r} (the name the harness pairs by)"
     )
 
 
