@@ -55,6 +55,17 @@ def pytest_addoption(parser):
         action="store_true",
         help="use whatever firmware is already on the board (ignore --bundle)",
     )
+    parser.addoption(
+        "--latency-n",
+        type=int,
+        default=int(os.environ.get("HIL_LATENCY_N", 100)),
+        help="press/release transitions to time (-m latency; default 100)",
+    )
+    parser.addoption(
+        "--latency-json",
+        action="store_true",
+        help="-m latency: also write the record to desktop/results/latency-*.json",
+    )
 
 
 @pytest.fixture(scope="session")

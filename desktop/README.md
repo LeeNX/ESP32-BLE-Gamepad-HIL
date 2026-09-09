@@ -18,6 +18,7 @@ directly. One repo, one source of truth for the protocol and the goldens.
 | Serial-only assertions (`tests/test_serial_only.py`, `-m serial_only`) | ✅ done |
 | One-time BLE pairing (manual, in OS settings) | ✅ `pair-assist.py` — names the device to click, clears stale bonds, waits on `CONN?` |
 | Behavioural — buttons (`-m sdl`, SDL joystick, + `-m hid`, raw reports) | ✅ `test_buttons.py` / `test_hid_reports.py`; board must be bonded here |
+| Press-to-host latency (`-m latency`) | ✅ `test_latency.py`; hidapi timestamps (rig-comparable only loosely — see below) |
 | Behavioural — axes / hats | 🔴 next (same SDL pattern) |
 | GATT reads (Device Info / PnP / Battery over CoreBluetooth / WinRT) | 🔴 later step |
 | Remote drive (SSH / CI runner) | 🔴 later — for now, run it by hand (below) |
@@ -35,8 +36,17 @@ directly. One repo, one source of truth for the protocol and the goldens.
 - **`-m hid`** — the **raw HID input reports** off the device (hidapi), decoded
   against the report layout. Pins **firmware + descriptor + transport**,
   independent of SDL / the OS. The lower-level cross-check.
+- **`-m latency`** *(opt-in — a bare `pytest` run skips it)* — `TPRESS` on the
+  serial channel, then time the blocking hidapi read of the resulting report.
+  p50 / p90 / p99 for BLE-air (`ble`) and end-to-end (`e2e`), plus a dropped
+  count and the serial `ping` baseline. `--latency-n` (default 100),
+  `--latency-json` writes `results/latency-*.json`. **Not directly comparable to
+  the rig's numbers** — the rig times off the kernel evdev timestamp; here it's
+  a userspace hidapi read, so a few ms high and jittier. Good for regression /
+  same-box comparison.
 
-`-m sdl` and `-m hid` need the board **bonded to this host** (`pair-assist.py`).
+`-m sdl` / `-m hid` / `-m latency` need the board **bonded to this host**
+(`pair-assist.py`).
 
 ### Not covered yet
 
@@ -96,8 +106,11 @@ Find the port — macOS `ls /dev/cu.usbserial-*`, Windows `Get-PnpDevice -Class 
 .venv/bin/pytest -m serial_only --no-flash --profile=local --port=/dev/cu.usbserial-110
 
 # + the behavioural button tests (board must be bonded here -- pair-assist.py first):
-.venv/bin/pytest --no-flash --profile=local --port=/dev/cu.usbserial-110       # all markers
+.venv/bin/pytest --no-flash --profile=local --port=/dev/cu.usbserial-110       # all markers except latency
 .venv/bin/pytest -m sdl --no-flash --profile=local --port=/dev/cu.usbserial-110
+
+# latency sweep (opt-in, ~15-30s, board bonded):
+.venv/bin/pytest -m latency --no-flash --profile=local --port=/dev/cu.usbserial-110 -s --latency-json
 ```
 
 esptool output streams live during the flash (~10s) — it's not a hang.

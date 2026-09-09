@@ -26,6 +26,13 @@ What a bump means:
   any that overruns the 150-byte buffer. Runs on any dev box with PlatformIO + a
   wired board — closes the v0.2.1 gap where `specials` / `minimal` shipped
   without goldens.
+- **`desktop/` latency sweep** (`pytest -m latency`, opt-in — a bare `pytest`
+  run skips it): `TPRESS` on the serial channel, then time the blocking hidapi
+  read of the resulting HID report. p50 / p90 / p99 for BLE-air and end-to-end,
+  a dropped count, and the serial `ping` baseline. `--latency-n` (default 100),
+  `--latency-json` writes `desktop/results/latency-*.json`. Host-side hidapi
+  timestamps, so a few ms high and jittier than the rig's kernel-timestamped
+  `--bench` numbers — for regression / same-box comparison.
 
 ## [0.2.1] — 2026-09-09
 
