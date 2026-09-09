@@ -6,3 +6,5 @@ hil_config.local.toml
 __pycache__/
 *.pyc
 .venv/
+.pytest_cache/
+.ruff_cache/

@@ -576,6 +576,12 @@ cross-platform. Two things worth scoping:
 
 ### 1. A serial-only subset that runs anywhere `pyserial` does
 
+**Step 1 done — lives in [`desktop/`](desktop/).** `desktop/` reuses this repo's
+`hil.serialdev` / `hil.hidraw` and the `firmware/golden/` files directly (not a
+fork) and adds `desktop/tests/test_serial_only.py` (`-m serial_only`). Verified
+green on macOS against a local `esp32dev`. The rest of this subsection is the
+original scoping notes.
+
 The serial command channel needs no BLE and no host HID stack. It can already
 verify:
 

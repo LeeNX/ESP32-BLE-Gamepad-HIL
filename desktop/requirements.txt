@@ -1,0 +1,5 @@
+# Desktop (macOS / Windows) serial-only tester deps. Pure-Python / cross-platform.
+# The behavioural layer (native HID read backend) is not here yet -- see README.
+pyserial>=3.5
+esptool>=4.7
+pytest>=8.0

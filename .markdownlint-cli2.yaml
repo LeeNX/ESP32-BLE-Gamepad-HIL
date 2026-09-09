@@ -13,3 +13,4 @@ ignores:
   - "bundles/**"
   - "results/**"
   - "firmware/.pio/**"
+  - "**/.venv/**"
