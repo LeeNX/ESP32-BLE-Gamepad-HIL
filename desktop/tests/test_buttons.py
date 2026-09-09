@@ -17,8 +17,12 @@ pytestmark = pytest.mark.sdl
 @pytest.fixture(autouse=True)
 def _reset(dut, sdlpad):
     dut.reset()
-    sdlgamepad.settle()
+    sdlgamepad.wait_until(lambda: sdlgamepad.buttons(sdlpad), set())
     yield
+
+
+def _btns(sdlpad, want):
+    return sdlgamepad.wait_until(lambda: sdlgamepad.buttons(sdlpad), want)
 
 
 def test_sdl_sees_the_profile_shape(dut, sdlpad):
@@ -34,14 +38,9 @@ def test_each_button_is_seen_alone(dut, sdlpad):
     n = dut.config()["buttons"]
     for b in range(1, n + 1):
         dut.press(b)
-        sdlgamepad.settle()
-        assert sdlgamepad.buttons(sdlpad) == {b}, (
-            f"button {b}: SDL saw {sdlgamepad.buttons(sdlpad)}"
-        )
-
+        assert _btns(sdlpad, {b}) == {b}, f"button {b}: SDL saw {sdlgamepad.buttons(sdlpad)}"
         dut.release(b)
-        sdlgamepad.settle()
-        assert sdlgamepad.buttons(sdlpad) == set(), f"button {b} release: SDL still sees it"
+        assert _btns(sdlpad, set()) == set(), f"button {b} release: SDL still sees it"
 
 
 def test_buttons_are_one_to_one(dut, sdlpad):
@@ -50,10 +49,9 @@ def test_buttons_are_one_to_one(dut, sdlpad):
     seen = {}
     for b in range(1, n + 1):
         dut.press(b)
-        sdlgamepad.settle()
-        down = sdlgamepad.buttons(sdlpad)
+        down = sdlgamepad.wait_until(lambda: sdlgamepad.buttons(sdlpad), lambda v: len(v) == 1)
         dut.release(b)
-        sdlgamepad.settle()
+        _btns(sdlpad, set())
         assert len(down) == 1, f"button {b}: SDL saw {down}"
         idx = next(iter(down))
         assert idx not in seen.values(), f"buttons {seen}, {b} all map to SDL #{idx}"
@@ -65,12 +63,9 @@ def test_two_buttons_combine(dut, sdlpad):
     a, z = 1, n
     dut.press(a)
     dut.press(z)
-    sdlgamepad.settle()
-    assert sdlgamepad.buttons(sdlpad) == {a, z}
+    assert _btns(sdlpad, {a, z}) == {a, z}
 
     dut.release(a)
-    sdlgamepad.settle()
-    assert sdlgamepad.buttons(sdlpad) == {z}
+    assert _btns(sdlpad, {z}) == {z}
     dut.release(z)
-    sdlgamepad.settle()
-    assert sdlgamepad.buttons(sdlpad) == set()
+    assert _btns(sdlpad, set()) == set()

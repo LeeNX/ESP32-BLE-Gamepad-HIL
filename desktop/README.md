@@ -16,10 +16,9 @@ directly. One repo, one source of truth for the protocol and the goldens.
 | `esptool` flashing (`../tester/flash.py`) | ✅ reused as-is, cross-platform |
 | Serial protocol client (`hil.serialdev.SerialDev`) | ✅ reused as-is |
 | Serial-only assertions (`tests/test_serial_only.py`, `-m serial_only`) | ✅ done |
-| One-time BLE pairing (manual, in OS settings) | ✅ `pair-assist.py` — names the device to click, clears stale bonds, waits on `CONN?` |
-| Behavioural — buttons (`-m sdl`, SDL joystick, + `-m hid`, raw reports) | ✅ `test_buttons.py` / `test_hid_reports.py`; board must be bonded here |
+| One-time BLE pairing | ✅ `pair-assist.py` — names the device to click, `--clear-bonds`, `--reconnect` (macOS blueutil), waits on `CONN?` |
+| Behavioural — buttons / axes / hats (`-m sdl`, SDL joystick, + `-m hid` raw for buttons) | ✅ `test_buttons.py` / `test_axes.py` / `test_hats.py` / `test_hid_reports.py`; board bonded here |
 | Press-to-host latency (`-m latency`) | ✅ `test_latency.py`; hidapi timestamps (rig-comparable only loosely — see below) |
-| Behavioural — axes / hats | 🔴 next (same SDL pattern) |
 | GATT reads (Device Info / PnP / Battery over CoreBluetooth / WinRT) | 🔴 later step |
 | Remote drive (SSH / CI runner) | 🔴 later — for now, run it by hand (below) |
 
@@ -31,8 +30,9 @@ directly. One repo, one source of truth for the protocol and the goldens.
   BLE bond — a laptop smoke test.
 - **`-m sdl`** — the DUT as an **SDL joystick** (pygame). SDL's per-OS driver
   (IOKit / RawInput / evdev) does the HID parsing and control numbering, so this
-  is **"what a game sees"** — the behavioural layer. Headless, no window, no
-  macOS permission for a game controller.
+  is **"what a game sees"** — the behavioural layer: buttons one-to-one, axes
+  monotonic with correct −1/0/+1 endpoints, all 8 hat directions. Headless, no
+  window, no macOS permission for a game controller.
 - **`-m hid`** — the **raw HID input reports** off the device (hidapi), decoded
   against the report layout. Pins **firmware + descriptor + transport**,
   independent of SDL / the OS. The lower-level cross-check.
@@ -48,12 +48,32 @@ directly. One repo, one source of truth for the protocol and the goldens.
 `-m sdl` / `-m hid` / `-m latency` need the board **bonded to this host**
 (`pair-assist.py`).
 
-### Not covered yet
+### What macOS/SDL does differently from the Linux rig
 
-Axes and hats (next), and the per-platform quirk table the Linux suite keeps
-(evdev's ~79-button ceiling, `ABS_HAT0`-only, reversed hat) — SDL smooths some
-of those over, so a raw IOKit / Raw Input backend may still be wanted later for
-the parts SDL hides.
+- **All hats work** — SDL surfaces every hat (the rig's evdev only ever makes
+  `ABS_HAT0`). But the library still emits the hat fields **reversed**, so
+  firmware hat `h` is SDL hat `n_hats − h`. `test_hats.py` pins that.
+- **8 axis slots** — SDL reports `get_numaxes() == 8` on `default` and each
+  responds to its firmware axis (Linux collapses the second bare
+  `Usage(Slider)`, `s2`, a strict xfail on the rig).
+- **Buttons**: SDL exposes all 64 on `default`, one-to-one — no ~79-code
+  ceiling like the Linux gamepad keycode block.
+- SDL normalises any HID logical range to `[−1.0, +1.0]`.
+
+So SDL is a *cleaner* view than evdev here. A raw `pyobjc-IOKit` backend would
+only be needed to observe something SDL's remapping hides — none found yet.
+
+### Latency — first run (macOS 26, esp32dev, `minimal`, n=100)
+
+```text
+link: interval 30 ms, MTU 255      ping RTT (serial) p50 3.6 ms
+ble  p50 23  p90 78  p99 173  max 229   (ms)     dropped 0
+```
+
+p50 ≈ half the connection interval + stack, in line with the rig's ~19 ms
+median (the rig's interval is 48.75 ms, this one 30). The **tail** is the story
+— p99 ~170 ms vs the rig's ~20–68: macOS isn't a real-time BLE-HID host, and
+the userspace hidapi read adds its own jitter. 0 dropped over 100 presses.
 
 ## Setup
 
@@ -144,14 +164,20 @@ waits for the firmware to see the link (`CONN?` — no host BLE API):
 ```bash
 .venv/bin/python pair-assist.py --port=/dev/cu.usbserial-110
 .venv/bin/python pair-assist.py --port=/dev/cu.usbserial-110 --clear-bonds  # if it won't pair clean
+.venv/bin/python pair-assist.py --port=/dev/cu.usbserial-110 --reconnect    # macOS: after a re-flash
 .venv/bin/python pair-assist.py --port=/dev/cu.usbserial-110 --check        # just show state
 ```
 
-- **macOS**: System Settings ▸ Bluetooth ▸ *Connect* next to the name
-  `pair-assist.py` prints. **Windows**: Settings ▸ Bluetooth & devices ▸ Add
-  device.
-- Re-pair when you change profile — the OS caches the HID descriptor against the
-  bond.
+- **First pair** — **macOS**: System Settings ▸ Bluetooth ▸ *Connect* next to
+  the name `pair-assist.py` prints. **Windows**: Settings ▸ Bluetooth & devices
+  ▸ Add device. (`blueutil` can't do the *first* BLE pair — it can't scan.)
+- **After a re-flash that changes the profile** the OS clings to the old bond +
+  cached HID descriptor (SDL shows the wrong button/hat count, no input flows).
+  On macOS, `--reconnect` fixes it without the GUI: `brew install blueutil`,
+  then `pair-assist.py --reconnect` power-cycles Bluetooth and reconnects the
+  paired entry — the board's Just Works agent re-bonds with the fresh
+  descriptor. (`blueutil --connect` prints `Failed to connect` even when it
+  works; `--reconnect` polls `CONN?` for the truth.)
 
 **"I don't see my board, only `ESP32 BLE Gamepad` / `HILpad …`"** —
 
