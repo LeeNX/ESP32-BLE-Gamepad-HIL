@@ -33,6 +33,9 @@ env:
   LIB_REPO: ${{ vars.HIL_LIB_REPO || 'https://github.com/LeeNX/ESP32-BLE-Gamepad.git' }}
   LIB_REF: ${{ inputs.lib_ref || vars.HIL_LIB_REF || 'master' }}
   BOARDS: esp32dev esp32c3 esp32s3
+  # The release ships all 4 CI profiles. Everyday pushes build 3 (minimal is the
+  # bench anchor, weekly-only); a release bundles it too, and the pre-tag
+  # full-matrix hil.yml dispatch (RELEASE.md) is what tests it on hardware.
   PROFILES: default specials minimal maxbtn
 
 jobs:

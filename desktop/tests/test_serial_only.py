@@ -24,17 +24,17 @@ GOLDEN_DIR = pathlib.Path(__file__).resolve().parents[2] / "firmware" / "golden"
 ALL_AXES = ["x", "y", "z", "rx", "ry", "rz", "s1", "s2"]
 PROFILE_LAYOUT = {
     "default": dict(buttons=64, hats=4, special="none", axes=ALL_AXES, axesMin=0, axesMax=0x7FFF),
-    # specials also carries the signed-axis range (min -32767); minimal also
-    # carries the Output + Feature reports (separate HID report types).
+    # specials carries the signed-axis range (min -32767) and the Output +
+    # Feature reports (separate HID report types), on top of the special buttons.
     "specials": dict(
         buttons=16,
-        hats=1,
-        axes=ALL_AXES,
+        hats=0,
+        axes=["x", "y"],
         axesMin=-32767,
         axesMax=0x7FFF,
         special="start,select,menu,home,back,volinc,voldec,volmute",
     ),
-    "minimal": dict(buttons=1, hats=0, special="none", axes=["x"], axesMin=0, axesMax=0x7FFF),
+    "minimal": dict(buttons=2, hats=0, special="none", axes=["x", "y"], axesMin=0, axesMax=0x7FFF),
     "maxbtn": dict(buttons=128, hats=0, special="none", axes=[], axesMin=0, axesMax=0x7FFF),
     "local": dict(buttons=4, hats=1, special="none", axes=["x", "y"], axesMin=0, axesMax=0x7FFF),
 }

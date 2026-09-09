@@ -54,20 +54,21 @@ push to the tester, run, pull results). One box can be both roles
 
 ### Compile profiles (`firmware/include/hil_profile.h`)
 
-| Profile | Layout | Purpose |
-|---|---|---|
-| `default` | 64 btn, 4 hat, 8 axis (0..32767) | mirrors `TestAll.ino` — known good |
-| `specials` | 16 btn, 1 hat, 8 axis (**−32767..32767**), 8 special buttons | consumer/desktop special usages **+ signed-axis convention** |
-| `minimal` | 1 btn, 1 axis, **+ Output + Feature reports** | smallest possible input report **+ `setEnableOutputReport` / `setEnableFeatureReport`** |
-| `maxbtn` | 128 btn, no hats/axes | the library's button ceiling |
-| `local` | 4 btn, 1 hat, 2 axis | **ad-hoc, not built by CI** — for local developer smoke tests ([`desktop/`](desktop/)). Advertises as `HILdev <board>`, not `HILpad <board>`, so a dev board doesn't clash with the rig |
+| Profile | Layout | Why it's there | In CI |
+|---|---|---|---|
+| `default` | 64 btn, 4 hat, 8 axis (0..32767) | what most people run — the known-good baseline (mirrors `TestAll.ino`) | every push |
+| `specials` | 16 btn, X/Y axis (**−32767..32767**), 8 special buttons, **Output + Feature reports** | the fragile, least-exercised surface in one flash: special usages, signed axes (`test_ranges` negative rail), and the O/F report plumbing (`setEnable{Output,Feature}Report`) | every push |
+| `maxbtn` | 128 btn, no hats/axes | the largest layout the HID transport currently supports — the library's 128-button ceiling | every push |
+| `minimal` | 2 btn, X/Y axis | smallest input report — the latency-curve low-end anchor, and nothing else depends on it | weekly + release |
+| `local` | 4 btn, 1 hat, 2 axis | **ad-hoc, not built by CI** — for local developer smoke tests ([`desktop/`](desktop/)). Advertises as `HILdev <board>`, not `HILpad <board>`, so a dev board doesn't clash with the rig | never |
 
-Four CI profiles, each carrying more than one concern so a full matrix run stays
-at 4 × (boards) flashes: `specials` folds in the old `signed-axes` profile (its 8
-axes are signed), `minimal` folds in the old `reports` profile (Output + Feature
-reports are separate HID report types — they add descriptor bytes but not
-input-report bytes, so `minimal` stays the latency-curve low-end anchor). `local`
-is a fifth, developer-only profile — never built by CI or a release.
+Four CI profiles, each folding in more than one concern so a matrix run stays
+small. `default`, `specials`, `maxbtn` run on every push/PR (3 flashes per
+board); `minimal` joins them on the weekly `schedule` and at release. `specials`
+absorbed the old `signed-axes` and `reports` profiles (signed range + O/F reports
+cost descriptor bytes, not input-report bytes) and is trimmed to X/Y with no hat
+to stay clear of the fixed 150-byte descriptor buffer. `local` is a fifth,
+developer-only profile — never built by CI or a release.
 
 Each profile is a distinct HID report descriptor; the host caches the descriptor
 at bond time, so switching profiles on a board makes the old bond stale and the
@@ -170,7 +171,7 @@ descriptor golden files).
 | Device Information | model / serial / fw / hw / sw revision + manufacturer, read over GATT, match the firmware config |
 | PnP ID | `0x2A50` vendor / product / version match `setVid` / `setPid` / `setGuidVersion` |
 | Battery | `setBatteryLevel()` via raw `0x2A19`, BlueZ `Battery1` D-Bus, and `upower` where installed; nothing in `/sys/class/power_supply` (BLE Battery Service, not a HID battery usage). `setPowerStateAll()` bitfield via `0x2A1A` |
-| Feature / Output reports | `minimal` profile — Feature Report both directions (`setFeatureBuffer` ↔ `HIDIOCGFEATURE`, `HIDIOCSFEATURE` ↔ `getFeatureBuffer`); Output Report host→device via `write(/dev/hidraw*)` → `getOutputBuffer` |
+| Feature / Output reports | `specials` profile — Feature Report both directions (`setFeatureBuffer` ↔ `HIDIOCGFEATURE`, `HIDIOCSFEATURE` ↔ `getFeatureBuffer`); Output Report host→device via `write(/dev/hidraw*)` → `getOutputBuffer` |
 | Latency / throughput | `--bench`, see below |
 
 ## Benchmarking (`--bench`)
@@ -376,7 +377,9 @@ Two workflows:
 self-hosted runner, no inbound ports on your network:
 
 - **build** — `pip install platformio`, `builder/build.sh`, upload the bundles.
-  The **full** `board × profile` matrix is built (`esp32dev` + `esp32c3` + `esp32s3`).
+  All 3 boards (`esp32dev` + `esp32c3` + `esp32s3`) × the profiles for this
+  trigger: `default specials maxbtn` on a push, `+ minimal` on the weekly
+  schedule, or whatever a `profiles` dispatch input asks for.
 - **hil-test** — brings up an **ephemeral Tailscale node** for the job
   (`tailscale/github-action`), `rsync`s the bundles to the tester over the
   tailnet, `ssh`es in to **`git reset --hard`** the tester's own checkout to the
@@ -401,13 +404,13 @@ loose, so gating every push on it wasn't worth the rig time. Regenerate
 | input | effect |
 |---|---|
 | `boards` | space-separated subset to build + test (blank = all three) |
-| `profiles` | space-separated profile subset (blank = all four) |
+| `profiles` | space-separated profile subset (blank = `default specials maxbtn`; the weekly schedule also builds `minimal`) |
 | `test_filter` | a pytest `-k` expression, e.g. `feature_report` or `battery or descriptor` (blank = whole suite) |
 | `bench` | run the sequential `--bench` sweep instead of the parallel functional matrix (~40 min) |
 
 Narrowing `boards` / `profiles` narrows the build matrix, and only the built
 bundles are pushed, so the flash + test set shrinks with it. So
-`boards=esp32s3`, `profiles=minimal`, `test_filter=feature_report` flashes one
+`boards=esp32s3`, `profiles=specials`, `test_filter=feature_report` flashes one
 bundle and runs a handful of tests (~10 min) — the fast path for chasing a single
 red test. Locally the same:
 `HIL_TEST_FILTER='battery or descriptor' tester/test-all.sh`, or just
@@ -417,9 +420,10 @@ red test. Locally the same:
 
 `tester/test-all.sh --by-board` runs one **lane per board** concurrently — each
 lane flashes + tests its own profiles sequentially, but the boards overlap. On
-the 3-board reference rig the full 18-bundle functional matrix runs in
-**~12 min** (measured, `-k "buttons or descriptor"`) versus ~35 min sequential —
-about 3x, bounded by the slowest board's lane.
+the 3-board reference rig the old 18-bundle functional matrix ran in **~12 min**
+(measured, `-k "buttons or descriptor"`) versus ~35 min sequential — about 3x,
+bounded by the slowest board's lane. Every push now builds 3 profiles (9
+bundles), so it's quicker still.
 
 Only the timing-insensitive checks parallelise. `--by-board` **refuses
 `--bench`**: the latency / throughput sweep stays sequential and as close to solo

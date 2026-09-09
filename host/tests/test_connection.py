@@ -30,16 +30,16 @@ def test_advertised_name(dut, rigcfg, manifest):
 ALL_AXES = ["x", "y", "z", "rx", "ry", "rz", "s1", "s2"]
 PROFILE_LAYOUT = {
     "default": dict(buttons=64, hats=4, special="none", axes=ALL_AXES),
-    # specials also carries signed axes (min -32767); minimal also carries the
-    # Output + Feature reports. test_config_matches_profile doesn't assert on
-    # axesMin / feat / out, so the layout dicts stay as the button/hat/axis set.
+    # specials carries signed axes (min -32767) + Output/Feature reports too, but
+    # test_config_matches_profile doesn't assert on axesMin / feat / out -- the
+    # layout dict is just the button/hat/axis set.
     "specials": dict(
         buttons=16,
-        hats=1,
-        axes=ALL_AXES,
+        hats=0,
+        axes=["x", "y"],
         special="start,select,menu,home,back,volinc,voldec,volmute",
     ),
-    "minimal": dict(buttons=1, hats=0, special="none", axes=["x"]),
+    "minimal": dict(buttons=2, hats=0, special="none", axes=["x", "y"]),
     "maxbtn": dict(buttons=128, hats=0, special="none", axes=[]),
     "local": dict(buttons=4, hats=1, special="none", axes=["x", "y"]),
 }

@@ -36,7 +36,7 @@ ALL_HAT_CODES = set(range(ecodes.ABS_HAT0X, ecodes.ABS_HAT3Y + 1))
 @pytest.fixture(scope="module", autouse=True)
 def _require_hats(connected_dut):
     if connected_dut.config()["hats"] == 0:
-        pytest.skip("profile has no hats (minimal / maxbtn)")
+        pytest.skip("profile has no hats (specials / minimal / maxbtn)")
 
 
 @pytest.fixture(scope="module")

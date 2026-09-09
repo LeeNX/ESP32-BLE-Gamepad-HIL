@@ -63,26 +63,29 @@ What a bump means:
   `workflow_dispatch` with `bench: true`. Its gates are deliberately loose, so
   gating every push on it bought little. The remote heredoc falls back to a
   sequential functional run if the rig commit under test predates `--by-board`.
-- **Compile profiles 6 → 4.** Two pairs merged, no coverage lost:
-  - `signed-axes` folded into **`specials`** — its 8 axes now run −32767..32767,
-    so `test_ranges::test_signed_axis_reaches_negative_rail` (and the signed half
-    of the endpoint sweep) runs on `specials`. Zero descriptor cost: the library
-    already emits a 16-bit Logical Minimum either way.
-  - `reports` folded into **`minimal`** — Output + Feature reports are separate
-    HID report types, so they add ~30 descriptor bytes but not input-report
-    bytes; `minimal` stays the latency-curve low-end anchor and now also carries
-    `test_feature_report.py` / `test_output_report.py`.
-  A full `board × profile` matrix run is now 4 flashes per board instead of 6
-  (**−⅓ flashes / re-pairs / wear**); `--by-board` functional ~12 → ~8 min.
-  All four CI profiles still build + test on every board (`esp32h2` included once
-  wired); the `local` dev profile is unaffected.
+- **Compile profiles 6 → 4, and only 3 run on every push.** `signed-axes` and
+  `reports` folded into **`specials`**, which is now the one "fragile surface"
+  flash: 8 special (consumer/desktop) usages, signed axes (`test_ranges`
+  negative rail), *and* the Output + Feature reports (`test_feature_report.py` /
+  `test_output_report.py`). Trimmed to X/Y axes, no hat, to stay clear of the
+  fixed 150-byte HID descriptor buffer. **`minimal`** is now 2 btn / X-Y (was
+  1 / X) — purely the latency-curve low-end anchor, nothing depends on it, so it
+  is the one CI profile left **off push/PR**: it builds only on the weekly
+  `schedule` and at release.
+  - push / PR / local `builder/build.sh` default: `default specials maxbtn`
+  - weekly `schedule` + release: `+ minimal`, with `--bench`
+  - rationale, per profile: `default` = what most people run;
+    `specials` = the fragile, least-exercised surface; `maxbtn` = the largest
+    layout the HID transport supports (128-button ceiling).
+  Cuts a push matrix from 6 flashes/board to 3. `specials` loses its lone hat
+  (`test_hats` real coverage is `default`'s 4). `local` dev profile unaffected.
 
 ### Removed
 
 - `signed-axes` and `reports` compile profiles, their `platformio.ini` envs, and
   `firmware/golden/{signed-axes,reports}.hiddesc`. `firmware/golden/{minimal,
   specials}.hiddesc` dropped too — regenerate on the rig with
-  `pytest --update-golden` and commit (the descriptor changed for both).
+  `pytest --update-golden` and commit (both descriptors changed).
 
 ### Fixed
 
