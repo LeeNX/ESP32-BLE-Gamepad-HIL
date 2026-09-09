@@ -50,6 +50,7 @@ push to the tester, run, pull results). One box can be both roles
 | `hil_config.toml` (+ gitignored `hil_config.local.toml`) | per-machine ports, ssh host, builder board/profile matrix, per-board `enabled` |
 | `run.sh` | one-box: build all bundles then flash+test each |
 | `scripts/release.sh` `scripts/make-release-artifacts.sh` | cut a rig release (`VERSION` + `CHANGELOG.md` → tag → `release.yml`); see [RELEASE.md](RELEASE.md) |
+| `scripts/update-goldens.py` | rebuild + reflash a board per profile, read `RMAP?` over serial, rewrite `firmware/golden/<profile>.hiddesc` — after an intentional descriptor change |
 | `.github/workflows/hil.yml` `release.yml` | CI: build → SSH-to-tester test; tag → firmware/suite release |
 
 ### Compile profiles (`firmware/include/hil_profile.h`)
@@ -158,6 +159,18 @@ Useful pytest options: `--bundle <dir>` (flash a bundle via esptool),
 `--no-flash`, `--no-pair`, `--repair` (drop bond + pair fresh), `--profile`,
 `--bench` (latency / throughput sweep), `--update-golden` (rewrite the HID
 descriptor golden files).
+
+After an **intentional descriptor change** (a new profile, a changed layout),
+regenerate the goldens with [`scripts/update-goldens.py`](scripts/update-goldens.py) —
+it builds, flashes one board, reads the descriptor back over serial (`RMAP?` —
+no BLE, no Linux), and writes `firmware/golden/<profile>.hiddesc`, refusing any
+that overruns the 150-byte buffer. Runs on any dev box with PlatformIO + a wired
+board (the Pi rig can't build):
+
+```bash
+desktop/.venv/bin/python scripts/update-goldens.py specials minimal
+git add firmware/golden/ && git commit
+```
 
 ## What it covers
 
