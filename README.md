@@ -44,7 +44,7 @@ push to the tester, run, pull results). One box can be both roles
 | `builder/build.sh` `builder/make_bundle.py` | compile → firmware bundle(s) → optional `--push` rsync to the tester. Library path comes from `$HIL_LIB_DIR` (exported from `rig.lib_dir`) |
 | `tester/bootstrap-host.sh` (root) `tester/bootstrap.sh` (user) | tester provisioning, split: privileged half (apt / bluetooth / groups / udev) vs unprivileged half (venv / config / health check) |
 | `tester/flash.py` `tester/test.sh` | flash a bundle with esptool, run the suite + benchmark, write `results/`; SKIPs a board the tester doesn't have |
-| `tester/test-all.sh` | loop `tester/test.sh` over every bundle in `~/hil-bundles`, one retry each (what CI runs); `--by-board` runs the boards as parallel lanes (functional only) |
+| `tester/test-all.sh` | loop `tester/test.sh` over every bundle in `~/hil-bundles`, one retry each; `--by-board` runs the boards as parallel lanes (functional only, what CI runs by default); `--bench` is the sequential sweep (weekly + at release) |
 | `tester/rig-lock.sh` `tester/rig-status.sh` `host/hil/riglock.py` | one-rig `flock` + run-status file — serialise CI and local runs; `rig-status.sh` shows who/what is running (see [CI](#rig-lock--status)) |
 | `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite. Helpers: `serialdev`, `evdev_utils`, `bluetooth`, `gatt` (DIS/PnP/battery over BlueZ D-Bus), `hidraw` (Feature/Output reports + descriptor), `latency`+`bench`, `sysinfo`, `detect` (present boards), `charts`, `summarize` |
 | `hil_config.toml` (+ gitignored `hil_config.local.toml`) | per-machine ports, ssh host, builder board/profile matrix, per-board `enabled` |
@@ -376,9 +376,17 @@ self-hosted runner, no inbound ports on your network:
   (`tailscale/github-action`), `rsync`s the bundles to the tester over the
   tailnet, `ssh`es in to **`git reset --hard`** the tester's own checkout to the
   rig commit under test (`git clean -ffdx` keeps only the gitignored
-  `hil_config.local.toml`, so the checkout never drifts), runs
-  `tester/test-all.sh --bench` (flash + test every bundle, one retry each), pulls
-  `results/` back (even on failure), publishes the JUnit report.
+  `hil_config.local.toml`, so the checkout never drifts), runs the test batch,
+  pulls `results/` back (even on failure), publishes the JUnit report.
+
+**Two run modes.** Push, `repository_dispatch` (the library's correctness gate),
+and a plain `workflow_dispatch` run `tester/test-all.sh --by-board` — the parallel
+functional matrix, ~15 min. The sequential `--bench` latency/throughput sweep
+(~40 min, solo) runs only on the **weekly `schedule`** (Mondays 02:00 UTC /
+04:00 SAST) and on a `workflow_dispatch` with `bench: true` — its gates are
+loose, so gating every push on it wasn't worth the rig time. Regenerate
+`docs/bench/bench-table.md` from a bench run's `results/` at release time (see
+[RELEASE.md](RELEASE.md)).
 
 ### Focused re-runs
 
@@ -390,13 +398,14 @@ self-hosted runner, no inbound ports on your network:
 | `boards` | space-separated subset to build + test (blank = all three) |
 | `profiles` | space-separated profile subset (blank = all six) |
 | `test_filter` | a pytest `-k` expression, e.g. `feature_report` or `battery or descriptor` (blank = whole suite) |
+| `bench` | run the sequential `--bench` sweep instead of the parallel functional matrix (~40 min) |
 
 Narrowing `boards` / `profiles` narrows the build matrix, and only the built
 bundles are pushed, so the flash + test set shrinks with it. So
 `boards=esp32s3`, `profiles=reports`, `test_filter=feature_report` flashes one
-bundle and runs a handful of tests (~10 min) instead of the full ~80-min sweep —
-the fast path for chasing a single red test. Locally the same:
-`HIL_TEST_FILTER='battery or descriptor' tester/test-all.sh --bench`, or just
+bundle and runs a handful of tests (~10 min) — the fast path for chasing a single
+red test. Locally the same:
+`HIL_TEST_FILTER='battery or descriptor' tester/test-all.sh`, or just
 `tester/test.sh <bundle> -k battery`.
 
 ### Parallel functional runs (`--by-board`)
@@ -410,7 +419,8 @@ about 3x, bounded by the slowest board's lane.
 Only the timing-insensitive checks parallelise. `--by-board` **refuses
 `--bench`**: the latency / throughput sweep stays sequential and as close to solo
 as possible (with peers connected `clean_rate` drops ~25% — the `bench-table.md`
-**links** column flags it). Run bench as its own pass.
+**links** column flags it). Bench runs as its own pass — the weekly `schedule`
+and `workflow_dispatch -f bench=true` (see above).
 
 Why it's safe: the boards have independent serial channels and evdev nodes, and
 one BLE adapter carries three concurrent *functional* HID streams with zero
@@ -419,8 +429,8 @@ dropped events (a 25-iteration 3-board soak, ~3900 button cycles, was clean).
 `state.json` writes, and pairing — the `BtCtl` session (one `bluetoothctl` agent)
 lives entirely inside the pair lock, so lanes never run two agents at once.
 
-Not wired into `hil.yml` yet — prove it on your own rig first
-(`tester/rig-lock.sh -- tester/test-all.sh --by-board`).
+This is the default `hil.yml` path (push, `repository_dispatch`). Locally:
+`tester/rig-lock.sh -- tester/test-all.sh --by-board`.
 
 ### Rig lock / status
 

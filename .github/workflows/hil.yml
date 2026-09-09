@@ -2,8 +2,16 @@
 # HID suite on the physical tester -- reached over an ephemeral Tailscale node
 # the runner brings up for the job (no self-hosted runner, no inbound ports).
 #
-# Runs on push, on manual dispatch, and on repository_dispatch (so the library
-# repo can trigger it). `lib_ref` selects the ESP32-BLE-Gamepad ref under test.
+# Runs on push, on manual dispatch, on repository_dispatch (so the library repo
+# can trigger it), and on a weekly schedule. `lib_ref` selects the
+# ESP32-BLE-Gamepad ref under test.
+#
+# Two run modes (see tester/test-all.sh):
+#   default  -- parallel functional matrix (--by-board), ~1 lane per board, ~15 min.
+#               push / repository_dispatch / a plain dispatch use this.
+#   --bench  -- the sequential latency/throughput sweep, solo, ~40 min. Only the
+#               Monday schedule and a dispatch with `bench: true` run it; its
+#               loose gates aren't worth blocking every push on.
 #
 # Required repo secrets:
 #   TS_OAUTH_CLIENT_ID / TS_OAUTH_SECRET   Tailscale OAuth client (scope:
@@ -26,6 +34,11 @@ name: HIL
 on:
   push:
     branches: [main, "hil-*"]
+  schedule:
+    # Mon 02:00 UTC = 04:00 SAST -- the weekly --bench sweep on main. ~40 min of
+    # rig time plus build/queue; comfortably done before the workday. GitHub can
+    # delay a cron run 30-60 min under load, which still lands well before 08:00.
+    - cron: "0 2 * * 1"
   workflow_dispatch:
     inputs:
       lib_repo:
@@ -43,6 +56,10 @@ on:
       test_filter:
         description: 'pytest -k expression for a focused run, e.g. "feature_report" or "battery or descriptor" (blank = whole suite)'
         default: ""
+      bench:
+        description: 'run the sequential --bench latency/throughput sweep (~40 min) instead of the parallel functional matrix'
+        type: boolean
+        default: false
   repository_dispatch:
     types: [hil]
 
@@ -69,6 +86,10 @@ env:
   BOARDS: ${{ inputs.boards || 'esp32dev esp32c3 esp32s3' }}
   PROFILES: ${{ inputs.profiles || 'default signed-axes specials minimal maxbtn reports' }}
   TEST_FILTER: ${{ inputs.test_filter }}
+  # The Monday schedule and an explicit `bench: true` dispatch run the sequential
+  # latency/throughput sweep; every other trigger runs the parallel functional
+  # matrix (--by-board). See tester/test-all.sh.
+  HIL_MODE: ${{ (github.event_name == 'schedule' || inputs.bench == true) && '--bench' || '--by-board' }}
 
 jobs:
   build:
@@ -156,15 +177,19 @@ jobs:
           RIG_SHA: ${{ github.sha }}
           RIG_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          # bundles are build artifacts (not in git) -- push them over
-          rsync -a --delete bundles/ hil-tester:hil-bundles/
+          # bundles are build artifacts (not in git) -- push them to a *staging*
+          # dir; test-all.sh swaps it into ~/hil-bundles under the rig lock. A
+          # plain `rsync --delete` straight to ~/hil-bundles races a concurrent
+          # local scripts/hil.sh doing the same before either holds the lock.
+          rsync -a --delete bundles/ hil-tester:hil-bundles.ci/
           # the tester runs the exact rig commit under test: fetch + hard-reset
           # its own checkout to it (keeps only the gitignored local port config),
           # so the checkout stays coherent instead of drifting under an rsync.
-          # RIG_SHA / RIG_RUN_URL / HIL_TEST_FILTER are prepended as assignment
-          # lines (printf %q-quoted), so the remote body can stay a literal heredoc.
+          # RIG_SHA / RIG_RUN_URL / HIL_TEST_FILTER / HIL_MODE are prepended as
+          # assignment lines (printf %q-quoted), so the remote body can stay a
+          # literal heredoc. HIL_MODE is --by-board (parallel functional) or --bench.
           rc=0
-          { printf 'RIG_SHA=%q RIG_RUN_URL=%q HIL_TEST_FILTER=%q\n' "$RIG_SHA" "$RIG_RUN_URL" "$TEST_FILTER"; cat <<'REMOTE'; } | ssh hil-tester bash -se || rc=$?
+          { printf 'RIG_SHA=%q RIG_RUN_URL=%q HIL_TEST_FILTER=%q HIL_MODE=%q\n' "$RIG_SHA" "$RIG_RUN_URL" "$TEST_FILTER" "$HIL_MODE"; cat <<'REMOTE'; } | ssh hil-tester bash -se || rc=$?
           cd ~/ESP32-BLE-Gamepad-HIL
           # one physical rig -- take the lock *before* touching the checkout, so a
           # concurrent local run isn't reset/cleaned out from under itself. Raw
@@ -182,12 +207,22 @@ jobs:
             || { echo "::error::tester: rig commit $RIG_SHA not reachable from origin"; exit 1; }
           git clean --quiet -ffdx -e /hil_config.local.toml -e /.venv -e /.venvs
           rm -rf results && mkdir results
+          # swap staged bundles in under the lock (test-all.sh also would, but do
+          # it here too so it works when RIG_SHA predates that code)
+          [ -d "$HOME/hil-bundles.ci" ] && { rm -rf "$HOME/hil-bundles"; mv "$HOME/hil-bundles.ci" "$HOME/hil-bundles"; }
           export HIL_RIG_LOCK_HELD=$$ HIL_RUN_PID=$$ HIL_RUN_WHO=CI HIL_RUN_URL="$RIG_RUN_URL"
-          export HIL_TEST_FILTER
-          export HIL_RUN_WHAT="flash+test --bench${HIL_TEST_FILTER:+ -k '$HIL_TEST_FILTER'}"
+          export HIL_TEST_FILTER HIL_BUNDLE_STAGE="$HOME/hil-bundles.ci"
+          # --by-board landed in rig v0.2.0; if RIG_SHA predates it, fall back to
+          # the sequential functional run rather than feeding pytest a bad arg.
+          mode="$HIL_MODE"
+          if [ "$mode" = "--by-board" ] && ! grep -q -- '--by-board' tester/test-all.sh; then
+            echo "::warning::rig commit predates --by-board -- running sequential functional"
+            mode=""
+          fi
+          export HIL_RUN_WHAT="flash+test ${mode:-(sequential)}${HIL_TEST_FILTER:+ -k '$HIL_TEST_FILTER'}"
           tester/rig-lock.sh --status-write busy || true
           trc=0
-          tester/test-all.sh --bench || trc=$?
+          tester/test-all.sh $mode || trc=$?
           tester/rig-lock.sh --status-write idle "$trc" || true
           echo; cat results/run-verdicts.md || true
           exit $trc

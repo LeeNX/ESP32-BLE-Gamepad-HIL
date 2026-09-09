@@ -8,6 +8,11 @@
 #   HIL_TEST_FILTER='battery or descriptor' tester/test-all.sh --bench   # focused (what CI does)
 #   tester/test-all.sh --by-board          # one lane per board, in parallel (functional only)
 #
+# $HIL_BUNDLE_STAGE: a dir the caller rsync'd bundles into. It is swapped into
+# $HIL_BUNDLE_DIR *under the rig lock* -- an unlocked `rsync --delete` straight
+# to ~/hil-bundles races a concurrent run (CI vs a local scripts/hil.sh) that
+# does the same. Stage to a private dir, hand us the path, we swap atomically.
+#
 # --by-board runs the boards concurrently -- each lane loops its own profiles
 # sequentially -- for ~3x on a 3-board rig. Timing-insensitive checks only: it
 # refuses --bench, which must stay sequential + solo. Lane output goes to
@@ -21,6 +26,15 @@ cd "$(dirname "$0")/.." || exit 1
 source tester/rig-lock.sh
 rig_lock_acquire || exit $?
 
+# swap staged bundles into place, now that we hold the lock
+BUNDLE_DIR=${HIL_BUNDLE_DIR:-$HOME/hil-bundles}
+if [ -n "${HIL_BUNDLE_STAGE:-}" ] && [ -d "$HIL_BUNDLE_STAGE" ] \
+   && [ "$HIL_BUNDLE_STAGE" != "$BUNDLE_DIR" ]; then
+  echo "== staging bundles: $HIL_BUNDLE_STAGE -> $BUNDLE_DIR"
+  rm -rf "$BUNDLE_DIR"
+  mv "$HIL_BUNDLE_STAGE" "$BUNDLE_DIR"
+fi
+
 BY_BOARD=0
 rest=()
 for a in "$@"; do
@@ -33,7 +47,6 @@ set -- ${rest[@]+"${rest[@]}"}
 
 kargs=()
 [ -n "${HIL_TEST_FILTER:-}" ] && kargs=(-k "$HIL_TEST_FILTER")
-BUNDLE_DIR=${HIL_BUNDLE_DIR:-$HOME/hil-bundles}
 trc=0
 
 ts() { date +%H:%M:%S; }
