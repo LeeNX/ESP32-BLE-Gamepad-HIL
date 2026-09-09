@@ -18,6 +18,32 @@ What a bump means:
 
 ## [Unreleased]
 
+### Added
+
+- **`desktop/` — a macOS / Windows tester** for the portable slice of the rig,
+  reusing `hil.serialdev` / `hil.hidraw` and `firmware/golden/` directly (not a
+  fork). Three test levels, pytest markers:
+  - `-m serial_only` — the `hil_runner` serial channel only, no BLE bond:
+    descriptor generation (`RMAP?` vs golden), report sizing, DIS / PnP, the
+    advertised name, protocol round-trips. Runs on macOS/Windows with just
+    `pyserial`.
+  - `-m sdl` — the DUT as an SDL joystick (`pygame`): button behaviour "as a
+    game sees it", one code path for all three OSes, headless.
+  - `-m hid` — raw HID input reports (`hidapi`): firmware + descriptor +
+    transport, byte-level.
+  - `pair-assist.py` — reads the board over serial and says which BLE entry to
+    pair, clears stale bonds, waits on `CONN?`.
+- **`local` firmware profile** (`HIL_PROFILE_LOCAL`, 4 btn / 1 hat / X-Y) —
+  ad-hoc, for local developer testing. **Never built by CI or a release**
+  (explicit profile lists; `hil_config.toml` notes it). Advertises as
+  `HILdev <board>`, not `HILpad <board>`.
+- **Serial protocol:** `NAME?` (advertised BLE name / `getDeviceName()`),
+  `BONDS?` (stored-bond peer list), `CLEARBONDS` (`ble_store_clear()`).
+- **`HIL_DEVICE_NAME`** build flag / `builder/build.sh --name` /
+  `$HIL_DEVICE_NAME` / `hil_config` `[rig] local_device_name` — override the
+  advertised BLE name (≤ 18 chars, or NimBLE drops the HID service UUID then the
+  name from the legacy advertising packet).
+
 ### Changed
 
 - **`hil.yml` runs the parallel functional matrix by default.** Push,

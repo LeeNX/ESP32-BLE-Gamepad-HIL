@@ -20,12 +20,15 @@
 
 #include <Arduino.h>
 #include <BleGamepad.h>
+#include <NimBLEDevice.h>
 #include "hil_profile.h"
 
-// Keep this short: it has to fit in the 31-byte legacy BLE advertising packet
-// alongside flags + appearance + the HID service UUID, or NimBLE truncates it
-// and the host sees a clipped name it can't match on.
-static BleGamepad bleGamepad("HILpad " HIL_BOARD_NAME, HIL_DIS_MANUFACTURER);
+// HIL_DEVICE_NAME (hil_profile.h): "HILpad <board>" for CI/release, "HILdev
+// <board>" for the `local` profile, or a -D override. Keep it <= 18 chars --
+// it has to fit the 31-byte legacy BLE advertising packet alongside flags +
+// appearance + the HID service UUID or NimBLE drops the UUID then the name.
+// hil_runner reports the live value over serial via `NAME?`.
+static BleGamepad bleGamepad(HIL_DEVICE_NAME, HIL_DIS_MANUFACTURER);
 static BleGamepadConfiguration bleGamepadConfig;
 
 // Upper bound on BURST iterations -- a tight sendReport() loop past this risks
@@ -144,6 +147,14 @@ static void handle(const String &cmd)
         return;
     }
 
+    if (c == "NAME?")
+    {
+        // The advertised BLE name (getDeviceName()) -- so the host knows exactly
+        // which device to pair without guessing from board/profile.
+        Serial.printf("NAME %s\n", bleGamepad.getDeviceName().c_str());
+        return;
+    }
+
     if (c == "CONFIG?")
     {
         char axes[40];
@@ -212,6 +223,32 @@ static void handle(const String &cmd)
     if (c == "CONN?")
     {
         reply(bleGamepad.isConnected() ? "CONN 1" : "CONN 0");
+        return;
+    }
+
+    if (c == "BONDS?")
+    {
+        // Peers this board has a stored bond for. A leftover bond (e.g. from
+        // stock "ESP32 BLE Gamepad" firmware, or a previous profile) makes the
+        // host show a stale device and can auto-reconnect the wrong way --
+        // CLEARBONDS drops them.
+        int nb = NimBLEDevice::getNumBonds();
+        Serial.printf("BONDS %d", nb);
+        for (int i = 0; i < nb; i++)
+            Serial.printf(" %s", NimBLEDevice::getBondedAddress(i).toString().c_str());
+        Serial.println();
+        return;
+    }
+
+    if (c == "CLEARBONDS")
+    {
+        // ble_store_clear() wipes the persistent security store (bonds + CCCDs)
+        // in one shot -- more reliable here than iterating deleteBond(), which
+        // can no-op if an address doesn't match the stored identity.
+        int before = NimBLEDevice::getNumBonds();
+        int rc = ble_store_clear();
+        int after = NimBLEDevice::getNumBonds();
+        Serial.printf("OK cleared=%d remaining=%d rc=%d\n", before - after, after, rc);
         return;
     }
 

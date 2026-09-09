@@ -24,18 +24,40 @@ BOARDS=(${HIL_BOARDS:-$(cfg builder.boards)}); BOARDS=(${BOARDS[@]:-esp32dev})
 PROFILES=(${HIL_PROFILES:-$(cfg builder.profiles)}); PROFILES=(${PROFILES[@]:-default})
 OUT_ROOT=${HIL_BUNDLES:-$REPO/bundles}
 
+# Advertised BLE name override (intended for `--profiles local`), highest wins:
+#   --name <n>  >  $HIL_DEVICE_NAME  >  hil_config.local.toml [rig] local_device_name
+# Unset -> firmware default from hil_profile.h ("HILpad <board>", or
+# "HILdev <board>" for the local profile).
+DEVICE_NAME=${HIL_DEVICE_NAME:-$(cfg rig.local_device_name)}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --boards) BOARDS=($2); shift 2 ;;
     --profiles) PROFILES=($2); shift 2 ;;
+    --name) DEVICE_NAME=$2; shift 2 ;;
     --out) OUT_ROOT=$2; shift 2 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
 
+# Cap at 18 chars -- past that NimBLE drops the HID service UUID from the advert,
+# then the name (README "How pairing works").
+if [[ -n "$DEVICE_NAME" ]]; then
+  if (( ${#DEVICE_NAME} > 18 )); then
+    echo "== warning: --name '$DEVICE_NAME' is ${#DEVICE_NAME} chars; truncating to 18" >&2
+    DEVICE_NAME=${DEVICE_NAME:0:18}
+  fi
+  # PlatformIO shlex-splits PLATFORMIO_BUILD_FLAGS: '"..."' keeps the inner
+  # double quotes so the compiler sees a real C string literal (needed -- a
+  # name can contain a space).
+  export PLATFORMIO_BUILD_FLAGS="${PLATFORMIO_BUILD_FLAGS:-} -DHIL_DEVICE_NAME='\"${DEVICE_NAME}\"'"
+  echo "== advertised name: $DEVICE_NAME"
+fi
+
 profile_suffix() { case "$1" in
   default) echo "" ;; signed-axes) echo "-signed" ;; specials) echo "-specials" ;;
   minimal) echo "-minimal" ;; maxbtn) echo "-maxbtn" ;; reports) echo "-reports" ;;
+  local) echo "-local" ;;
   *) echo "unknown profile: $1" >&2; exit 2 ;; esac; }
 board_chip() { case "$1" in
   esp32dev) echo esp32 ;; esp32c3) echo esp32c3 ;; esp32s3) echo esp32s3 ;; esp32c6) echo esp32c6 ;;

@@ -62,6 +62,7 @@ push to the tester, run, pull results). One box can be both roles
 | `minimal` | 1 btn, 1 axis | smallest possible input report |
 | `maxbtn` | 128 btn, no hats/axes | the library's button ceiling |
 | `reports` | 16 btn, 2 axis, Output + Feature reports | `setEnableOutputReport` / `setEnableFeatureReport` |
+| `local` | 4 btn, 1 hat, 2 axis | **ad-hoc, not built by CI** — for local developer smoke tests ([`desktop/`](desktop/)). Advertises as `HILdev <board>`, not `HILpad <board>`, so a dev board doesn't clash with the rig |
 
 Each profile is a distinct HID report descriptor; the host caches the descriptor
 at bond time, so switching profiles on a board makes the old bond stale and the
@@ -229,6 +230,7 @@ banner and any debug lines are skipped by the host.
 |---|---|
 | `PING` | `PONG` |
 | `ID?` | `ID hil_runner profile=… board=… built=…` |
+| `NAME?` | `NAME <advertised BLE name>` — `getDeviceName()`; `HILpad <board>`, or `HILdev <board>` / a `-D HIL_DEVICE_NAME` override for the `local` profile |
 | `CONFIG?` | `CONFIG buttons=… hats=… axes=… special=… axesMin=… axesMax=… vid=… pid=… ver=… reportId=… feat=… out=… profile=…` |
 | `DIS?` | `DIS model=… serial=… fw=… hw=… sw=… mfr=…` — the DIS strings the firmware configured |
 | `PNP?` | `PNP vidsrc=1 vid=… pid=… ver=…` |
@@ -237,6 +239,8 @@ banner and any debug lines are skipped by the host.
 | `PEERINFO?` | `PEER interval=<1.25ms units> latency=<n> timeout=<10ms units> mtu=<n>` / `ERR notconnected` |
 | `BEGIN` | `OK` — handshake only; `bleGamepad.begin()` already ran in `setup()` |
 | `CONN?` | `CONN 0` / `CONN 1` |
+| `BONDS?` | `BONDS <n> [<mac> …]` — peers this board has a stored bond for |
+| `CLEARBONDS` | `OK cleared=<n> remaining=<n> rc=<n>` — `ble_store_clear()`; drop stale bonds (also "forget" the device host-side) |
 | `PRESS <n>` / `RELEASE <n>` | `OK` / `ERR range` |
 | `TPRESS <n>` / `TRELEASE <n>` | `T <micros>` — like PRESS/RELEASE, replies `micros()` captured just before `sendReport()` |
 | `BURST <btn> <count> <gap_us>` | `BURST OK <count> <elapsed_us>` — `count` ≤ 2000 |
@@ -254,8 +258,14 @@ banner and any debug lines are skipped by the host.
 `loop()` on the BEGIN command wedged the NimBLE server task on the classic
 ESP32. So the firmware always advertises once booted; each board carries a
 distinct name (`HILpad esp32dev` / `esp32c3` / `esp32s3`) so the harness bonds
-the right one. The name is kept short — a longer one didn't fit the legacy BLE
-advertising packet and NimBLE silently truncated it.
+the right one. The name is set at build time (`HIL_DEVICE_NAME` in
+`hil_profile.h`) and reported live over serial (`NAME?`). Keep it **≤ 18
+chars**: it shares the 31-byte legacy advertising packet with the flags,
+appearance and HID service UUID, and NimBLE drops the service UUID (then the
+name) once it overruns. The `local` profile defaults to `HILdev <board>`;
+override it per box with `$HIL_DEVICE_NAME` or `builder/build.sh --name "…"` —
+so a developer's board never collides with the rig, or with another dev, in a
+shared BLE space.
 
 Hand-test: `python3 -m serial.tools.miniterm <port> 115200`, type `PING`,
 `CONFIG?`, `CONN?`, `PRESS 5`, `AXIS x 16000`, `HAT 4 3`.
@@ -586,6 +596,13 @@ cross-platform. Two things worth scoping:
 
 ### 1. A serial-only subset that runs anywhere `pyserial` does
 
+**Step 1 done — lives in [`desktop/`](desktop/).** `desktop/` reuses this repo's
+`hil.serialdev` / `hil.hidraw` and the `firmware/golden/` files directly (not a
+fork) and adds `desktop/tests/test_serial_only.py` (`-m serial_only`). Verified
+green on macOS against a local `esp32dev` on the `local` profile (`HILdev
+<board>` — a dev board that doesn't clash with the rig). The rest of this
+subsection is the original scoping notes.
+
 The serial command channel needs no BLE and no host HID stack. It can already
 verify:
 
@@ -629,9 +646,16 @@ evdev's ~79-button ceiling, `ABS_HAT0`-only, and the reversed-hat quirk).
 | macOS | IOKit HID — `IOHIDManager`, HID elements decoded by usage-page/usage | `darwin/SDL_iokitjoystick` | `pyobjc-framework-IOKit`; **Input Monitoring** TCC grant for the pytest process |
 | Windows | Raw Input + `hid.dll` preparsed data (`HidP_GetCaps` / `HidP_GetUsages`); `Windows.Gaming.Input` for the higher-level gamepad view | `SDL_rawinputjoystick`, `SDL_windows_gaming_input` | `pywinusb` or `ctypes` → `hid.dll`; WGI via `winrt` |
 
-Each native backend needs its own per-platform expected-value table (gap-list
-item 3), because each OS exposes the device its own way — that's the cost of
-testing the real thing, and it's the same table SDL maintains as its mapping DB.
+**Or just use SDL** — `pygame`'s joystick module *is* SDL's per-OS driver, one
+code path for all three. `desktop/` does this (`pytest -m sdl`): headless
+(`SDL_VIDEODRIVER=dummy`), no window, no macOS permission for a game controller,
+and it's genuinely "what a game sees". `test_buttons.py` is green on macOS this
+way. It trades some fidelity — SDL applies its own remapping/quirk handling, so
+a few things the Linux suite pins (the reversed-hat quirk, the exact button
+ceiling) may be smoothed over; a raw `pyobjc-IOKit` / Raw Input backend is still
+the way to observe *those*. Each backend (SDL included) still wants a
+per-platform expected-value table, because each OS/driver exposes the device its
+own way — the same table SDL itself maintains as its mapping DB.
 
 **hidapi as the last resort.** `hidapi` (what SDL wraps as `SDL_hidapi`) reads
 **raw HID input reports** straight off the device on all three OSes
@@ -641,9 +665,16 @@ interpretation. Parse those against the descriptor golden
 per-platform table — but you're then testing **the descriptor + firmware**, not
 what the OS makes of them. Reach for it only to:
 
-- bootstrap a platform before its native backend is written, or
+- bootstrap a platform before its native backend is written **(done — `desktop/`
+  step, `pytest -m hid`: `test_hid_reports.py` is green on macOS this way)**, or
 - cover a corner case the native API can't observe (a field the OS collapses or
   hides), as an explicitly-marked complement to the native assertions.
+
+hidapi's `hid_open` is **non-seizing** — the OS still delivers the gamepad's
+input to the foreground app during a run (benign on a dedicated tester; gamepad
+buttons/axes do nothing in a shell/file manager). A hard lock is
+`IOHIDDeviceOpen(kIOHIDOptionsTypeSeizeDevice)` / `RIDEV_NOLEGACY`, which on
+macOS wants root; the Linux rig doesn't seize either.
 
 CI on macOS/Windows stays hard (item 5): both want a logged-in GUI session for
 BLE; macOS needs the Input Monitoring grant pre-provisioned. A self-hosted
