@@ -18,6 +18,16 @@ What a bump means:
 
 ## [Unreleased]
 
+### Fixed
+
+- Bundle staging no longer races the rig lock. `hil.yml` (and the library's
+  `scripts/hil.sh`) rsync'd bundles straight to `~/hil-bundles` with `--delete`
+  *before* acquiring the lock, so a concurrent CI + local run clobbered each
+  other's bundles mid-flash. Callers now rsync to a staging dir and pass
+  `HIL_BUNDLE_STAGE`; `tester/test-all.sh` swaps it into `~/hil-bundles`
+  atomically once it holds the lock (`hil.yml` also swaps in its heredoc, so it
+  works when the rig commit under test predates this).
+
 ## [0.2.0] — 2026-09-08
 
 ### Added
