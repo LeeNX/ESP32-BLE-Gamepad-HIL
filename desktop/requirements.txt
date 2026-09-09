@@ -1,10 +1,13 @@
 # Desktop (macOS / Windows) tester deps. Pure-Python / cross-platform wheels.
+# Python 3.10-3.13 (pygame has no 3.14 wheel yet).
 pyserial>=3.5
 esptool>=4.7
 pytest>=8.0
 
-# Raw HID input reports (the `hid` marker -- test_buttons.py etc). Reads the
-# report straight off the bonded device; bundles libhidapi in the wheel. This
-# is the "what the descriptor + firmware produce" path, not "what the OS input
-# stack makes of it" -- that native backend (IOKit / Raw Input) comes later.
+# -m hid: raw HID input reports straight off the bonded device. The
+# "firmware + descriptor + transport" check. Bundles libhidapi in the wheel.
 hidapi>=0.14
+
+# -m sdl: the DUT as an SDL joystick -- "what a game sees" (SDL's per-OS driver
+# does the HID parsing + control numbering). Bundles SDL2 in the wheel.
+pygame>=2.6

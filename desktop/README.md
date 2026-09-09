@@ -17,37 +17,43 @@ directly. One repo, one source of truth for the protocol and the goldens.
 | Serial protocol client (`hil.serialdev.SerialDev`) | ✅ reused as-is |
 | Serial-only assertions (`tests/test_serial_only.py`, `-m serial_only`) | ✅ done |
 | One-time BLE pairing (manual, in OS settings) | ✅ `pair-assist.py` — names the device to click, clears stale bonds, waits on `CONN?` |
-| Raw-HID behavioural tests (`-m hid`) — buttons so far | ✅ `test_buttons.py`; needs the board bonded here |
+| Behavioural — buttons (`-m sdl`, SDL joystick, + `-m hid`, raw reports) | ✅ `test_buttons.py` / `test_hid_reports.py`; board must be bonded here |
+| Behavioural — axes / hats | 🔴 next (same SDL pattern) |
 | GATT reads (Device Info / PnP / Battery over CoreBluetooth / WinRT) | 🔴 later step |
-| Native input backend (IOKit HID / Windows Raw Input) — "what an app sees" | 🔴 later step |
 | Remote drive (SSH / CI runner) | 🔴 later — for now, run it by hand (below) |
 
-### Two levels of test
+### Three levels of test
 
-- **`-m serial_only`** — the serial command channel only. Catches firmware
-  regressions in HID **descriptor generation** (`RMAP?` vs the golden), **report
-  sizing**, the **DIS / PnP** config, the **advertised BLE name** (`NAME?`), and
-  the serial protocol round-trips. No BLE bond needed — a laptop smoke test.
-- **`-m hid`** — presses/axes over serial, then reads the DUT's **raw HID input
-  reports** off the bonded device (hidapi) and decodes them against the report
-  layout. Proves firmware + descriptor + BLE transport end to end. Needs the
-  board **bonded to this host** (`pair-assist.py`).
+- **`-m serial_only`** — the serial command channel only. Firmware regressions
+  in HID **descriptor generation** (`RMAP?` vs the golden), **report sizing**,
+  **DIS / PnP**, the **advertised BLE name** (`NAME?`), protocol round-trips. No
+  BLE bond — a laptop smoke test.
+- **`-m sdl`** — the DUT as an **SDL joystick** (pygame). SDL's per-OS driver
+  (IOKit / RawInput / evdev) does the HID parsing and control numbering, so this
+  is **"what a game sees"** — the behavioural layer. Headless, no window, no
+  macOS permission for a game controller.
+- **`-m hid`** — the **raw HID input reports** off the device (hidapi), decoded
+  against the report layout. Pins **firmware + descriptor + transport**,
+  independent of SDL / the OS. The lower-level cross-check.
 
-### What neither level does yet
+`-m sdl` and `-m hid` need the board **bonded to this host** (`pair-assist.py`).
 
-How the host OS **maps** the device — button → key code, axis → control,
-`ABS_HAT0`-only, the reversed-hat quirk. That's "what a real app on this OS
-sees", and it needs the native input backend (IOKit / Raw Input) — a later step.
-`-m hid` reads the report bytes; it doesn't ask macOS/Windows what they mean.
+### Not covered yet
+
+Axes and hats (next), and the per-platform quirk table the Linux suite keeps
+(evdev's ~79-button ceiling, `ABS_HAT0`-only, reversed hat) — SDL smooths some
+of those over, so a raw IOKit / Raw Input backend may still be wanted later for
+the parts SDL hides.
 
 ## Setup
 
-Python 3.10+ and a USB-serial driver for your board's bridge (CP210x / CH34x —
-usually built into macOS; vendor VCP on Windows).
+**Python 3.10–3.13** (pygame has no 3.14 wheel yet) and a USB-serial driver for
+your board's bridge (CP210x / CH34x — usually built into macOS; vendor VCP on
+Windows).
 
 ```bash
 cd desktop
-python3 -m venv .venv
+python3.13 -m venv .venv        # a 3.10-3.13 interpreter; `uv venv` needs --seed for pip
 .venv/bin/pip install -r requirements.txt        # Windows: .venv\Scripts\pip
 ```
 
@@ -89,23 +95,25 @@ Find the port — macOS `ls /dev/cu.usbserial-*`, Windows `Get-PnpDevice -Class 
 # board already flashed:
 .venv/bin/pytest -m serial_only --no-flash --profile=local --port=/dev/cu.usbserial-110
 
-# + the raw-HID button tests (board must be bonded here -- pair-assist.py first):
-.venv/bin/pytest --no-flash --profile=local --port=/dev/cu.usbserial-110      # both markers
-.venv/bin/pytest -m hid --no-flash --profile=local --port=/dev/cu.usbserial-110
+# + the behavioural button tests (board must be bonded here -- pair-assist.py first):
+.venv/bin/pytest --no-flash --profile=local --port=/dev/cu.usbserial-110       # all markers
+.venv/bin/pytest -m sdl --no-flash --profile=local --port=/dev/cu.usbserial-110
 ```
 
 esptool output streams live during the flash (~10s) — it's not a hang.
 
-**Does the test spew input into my desktop?** The `-m hid` tests press buttons
-and move axes on a bonded gamepad. Opening the device with hidapi does **not**
-seize it, so the OS still routes that input to the foreground app — but a
-gamepad's buttons/axes do nothing in Finder / Terminal / an editor, so on a
-dedicated tester box it's a non-issue. A hard lock (nothing else sees the
-device) needs `IOHIDDeviceOpen(kIOHIDOptionsTypeSeizeDevice)`, which on macOS
-requires running as **root**; not done here. The Linux rig doesn't seize either.
-On macOS, if `-m hid` skips with *"no input reports arrived"*, grant **Input
-Monitoring** to the venv Python (System Settings ▸ Privacy & Security ▸ Input
-Monitoring ▸ **+** ▸ `…/desktop/.venv/bin/python3`).
+**Does the test spew input into my desktop?** `-m sdl` / `-m hid` press buttons
+and move axes on a bonded gamepad. Neither SDL nor hidapi **seizes** the device,
+so the OS still routes that input to the foreground app — but a gamepad's
+buttons/axes do nothing in Finder / Terminal / an editor, so on a dedicated
+tester box it's a non-issue. A hard lock (nothing else sees the device) needs
+`IOHIDDeviceOpen(kIOHIDOptionsTypeSeizeDevice)`, which on macOS requires running
+as **root**; not done here. The Linux rig doesn't seize either.
+
+`-m sdl` runs headless (a game controller needs no macOS permission). If `-m
+hid` skips with *"no input reports arrived"*, grant **Input Monitoring** to the
+venv Python (System Settings ▸ Privacy & Security ▸ Input Monitoring ▸ **+** ▸
+`…/desktop/.venv/bin/python3`).
 
 Write path-valued options with `=` (`--bundle=../x`, not `--bundle ../x`) — a
 bare path arg pointing outside `desktop/` makes pytest walk up loading

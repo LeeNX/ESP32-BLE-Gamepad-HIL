@@ -636,9 +636,16 @@ evdev's ~79-button ceiling, `ABS_HAT0`-only, and the reversed-hat quirk).
 | macOS | IOKit HID — `IOHIDManager`, HID elements decoded by usage-page/usage | `darwin/SDL_iokitjoystick` | `pyobjc-framework-IOKit`; **Input Monitoring** TCC grant for the pytest process |
 | Windows | Raw Input + `hid.dll` preparsed data (`HidP_GetCaps` / `HidP_GetUsages`); `Windows.Gaming.Input` for the higher-level gamepad view | `SDL_rawinputjoystick`, `SDL_windows_gaming_input` | `pywinusb` or `ctypes` → `hid.dll`; WGI via `winrt` |
 
-Each native backend needs its own per-platform expected-value table (gap-list
-item 3), because each OS exposes the device its own way — that's the cost of
-testing the real thing, and it's the same table SDL maintains as its mapping DB.
+**Or just use SDL** — `pygame`'s joystick module *is* SDL's per-OS driver, one
+code path for all three. `desktop/` does this (`pytest -m sdl`): headless
+(`SDL_VIDEODRIVER=dummy`), no window, no macOS permission for a game controller,
+and it's genuinely "what a game sees". `test_buttons.py` is green on macOS this
+way. It trades some fidelity — SDL applies its own remapping/quirk handling, so
+a few things the Linux suite pins (the reversed-hat quirk, the exact button
+ceiling) may be smoothed over; a raw `pyobjc-IOKit` / Raw Input backend is still
+the way to observe *those*. Each backend (SDL included) still wants a
+per-platform expected-value table, because each OS/driver exposes the device its
+own way — the same table SDL itself maintains as its mapping DB.
 
 **hidapi as the last resort.** `hidapi` (what SDL wraps as `SDL_hidapi`) reads
 **raw HID input reports** straight off the device on all three OSes
@@ -649,7 +656,7 @@ per-platform table — but you're then testing **the descriptor + firmware**, no
 what the OS makes of them. Reach for it only to:
 
 - bootstrap a platform before its native backend is written **(done — `desktop/`
-  step, `pytest -m hid`: `test_buttons.py` is green on macOS this way)**, or
+  step, `pytest -m hid`: `test_hid_reports.py` is green on macOS this way)**, or
 - cover a corner case the native API can't observe (a field the OS collapses or
   hides), as an explicitly-marked complement to the native assertions.
 

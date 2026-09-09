@@ -161,3 +161,31 @@ def hidgamepad(dut):
 
     yield h
     h.close()
+
+
+@pytest.fixture(scope="session")
+def sdlpad(dut):
+    """The DUT as an SDL joystick (pygame) -- "what a game sees".
+
+    Skips unless the board is bonded to this host (`pair-assist.py`) and SDL
+    enumerates it. Headless (SDL_VIDEODRIVER=dummy); a game controller needs no
+    macOS TCC grant.
+    """
+    pytest.importorskip("pygame", reason="pip install pygame")
+    import sdlgamepad
+
+    if not dut.connected():
+        pytest.skip("board not bonded/connected -- run  python pair-assist.py --port <port>  first")
+
+    sdlgamepad.init()
+    j = sdlgamepad.find(HIL_VID, HIL_PID)
+    if j is None:
+        pytest.skip("SDL does not enumerate the DUT -- bonded? try re-plugging / re-pairing")
+    print(
+        f"\n[sdl] {j.get_name()!r} guid={j.get_guid()} "
+        f"buttons={j.get_numbuttons()} axes={j.get_numaxes()} hats={j.get_numhats()}"
+    )
+    yield j
+    import pygame
+
+    pygame.quit()
