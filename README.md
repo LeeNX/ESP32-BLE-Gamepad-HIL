@@ -62,6 +62,7 @@ push to the tester, run, pull results). One box can be both roles
 | `minimal` | 1 btn, 1 axis | smallest possible input report |
 | `maxbtn` | 128 btn, no hats/axes | the library's button ceiling |
 | `reports` | 16 btn, 2 axis, Output + Feature reports | `setEnableOutputReport` / `setEnableFeatureReport` |
+| `local` | 4 btn, 1 hat, 2 axis | **ad-hoc, not built by CI** — for local developer smoke tests ([`desktop/`](desktop/)). Advertises as `HILdev <board>`, not `HILpad <board>`, so a dev board doesn't clash with the rig |
 
 Each profile is a distinct HID report descriptor; the host caches the descriptor
 at bond time, so switching profiles on a board makes the old bond stale and the
@@ -229,6 +230,7 @@ banner and any debug lines are skipped by the host.
 |---|---|
 | `PING` | `PONG` |
 | `ID?` | `ID hil_runner profile=… board=… built=…` |
+| `NAME?` | `NAME <advertised BLE name>` — `getDeviceName()`; `HILpad <board>`, or `HILdev <board>` / a `-D HIL_DEVICE_NAME` override for the `local` profile |
 | `CONFIG?` | `CONFIG buttons=… hats=… axes=… special=… axesMin=… axesMax=… vid=… pid=… ver=… reportId=… feat=… out=… profile=…` |
 | `DIS?` | `DIS model=… serial=… fw=… hw=… sw=… mfr=…` — the DIS strings the firmware configured |
 | `PNP?` | `PNP vidsrc=1 vid=… pid=… ver=…` |
@@ -254,8 +256,13 @@ banner and any debug lines are skipped by the host.
 `loop()` on the BEGIN command wedged the NimBLE server task on the classic
 ESP32. So the firmware always advertises once booted; each board carries a
 distinct name (`HILpad esp32dev` / `esp32c3` / `esp32s3`) so the harness bonds
-the right one. The name is kept short — a longer one didn't fit the legacy BLE
-advertising packet and NimBLE silently truncated it.
+the right one. The name is set at build time (`HIL_DEVICE_NAME` in
+`hil_profile.h`) and reported live over serial (`NAME?`). Keep it **≤ 18
+chars**: it shares the 31-byte legacy advertising packet with the flags,
+appearance and HID service UUID, and NimBLE drops the service UUID (then the
+name) once it overruns. The `local` profile defaults to `HILdev <board>`, and
+`builder/build.sh --name "…"` overrides it — so a developer's board never
+collides with the reference rig in a shared BLE space.
 
 Hand-test: `python3 -m serial.tools.miniterm <port> 115200`, type `PING`,
 `CONFIG?`, `CONN?`, `PRESS 5`, `AXIS x 16000`, `HAT 4 3`.
@@ -579,8 +586,9 @@ cross-platform. Two things worth scoping:
 **Step 1 done — lives in [`desktop/`](desktop/).** `desktop/` reuses this repo's
 `hil.serialdev` / `hil.hidraw` and the `firmware/golden/` files directly (not a
 fork) and adds `desktop/tests/test_serial_only.py` (`-m serial_only`). Verified
-green on macOS against a local `esp32dev`. The rest of this subsection is the
-original scoping notes.
+green on macOS against a local `esp32dev` on the `local` profile (`HILdev
+<board>` — a dev board that doesn't clash with the rig). The rest of this
+subsection is the original scoping notes.
 
 The serial command channel needs no BLE and no host HID stack. It can already
 verify:

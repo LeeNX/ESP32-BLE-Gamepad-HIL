@@ -38,6 +38,7 @@ PROFILE_LAYOUT = {
     "minimal": dict(buttons=1, hats=0, special="none", axes=["x"], axesMin=0, axesMax=0x7FFF),
     "maxbtn": dict(buttons=128, hats=0, special="none", axes=[], axesMin=0, axesMax=0x7FFF),
     "reports": dict(buttons=16, hats=0, special="none", axes=["x", "y"], axesMin=0, axesMax=0x7FFF),
+    "local": dict(buttons=4, hats=1, special="none", axes=["x", "y"], axesMin=0, axesMax=0x7FFF),
 }
 
 # hil_profile.h HIL_VID / HIL_PID / HIL_GUID_VERSION and the HIL_DIS_* strings.
@@ -71,6 +72,17 @@ def test_id_reports_expected_profile(dut, profile):
     fid = dut.firmware_id()
     assert fid.startswith("ID hil_runner")
     assert f"profile={profile}" in fid
+
+
+def test_advertised_name(dut, profile):
+    """NAME? -- the BLE name the board advertises. <= 18 chars (fits the legacy
+    advertising packet next to the HID service UUID). The `local` profile must
+    NOT use the rig's "HILpad " prefix, or a dev board clashes with the rig."""
+    name = dut.device_name()
+    assert name, "NAME? returned nothing"
+    assert len(name) <= 18, f"advertised name {name!r} is {len(name)} chars (>18)"
+    if profile == "local":
+        assert not name.startswith("HILpad "), f"{name!r} clashes with the reference rig namespace"
 
 
 # --- configuration -------------------------------------------------------

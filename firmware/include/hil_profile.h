@@ -31,6 +31,7 @@
 #define HIL_PROFILE_MINIMAL 4
 #define HIL_PROFILE_MAXBTN 5
 #define HIL_PROFILE_REPORTS 6
+#define HIL_PROFILE_LOCAL 7
 
 #ifndef HIL_PROFILE
 #define HIL_PROFILE HIL_PROFILE_DEFAULT
@@ -38,6 +39,25 @@
 
 #ifndef HIL_BOARD_NAME
 #define HIL_BOARD_NAME "esp32"
+#endif
+
+// The advertised BLE name. hil_runner also reports it over serial (`NAME?`).
+// Keep it <= 18 chars: it shares the 31-byte legacy advertising packet with
+// flags + appearance + the HID service UUID, and NimBLE drops the service UUID
+// (then the name itself) once it overruns -- see README "How pairing works".
+//
+//  - CI / release builds:  "HILpad <board>"  (the reference rig)
+//  - `local` profile:       "HILdev <board>"  -- distinct, so a developer's
+//                           board doesn't clash with the rig in a shared BLE
+//                           space. Override with -D HIL_DEVICE_NAME=... (the
+//                           builder's --name does this) to disambiguate two
+//                           developers.
+#ifndef HIL_DEVICE_NAME
+#if HIL_PROFILE == HIL_PROFILE_LOCAL
+#define HIL_DEVICE_NAME "HILdev " HIL_BOARD_NAME
+#else
+#define HIL_DEVICE_NAME "HILpad " HIL_BOARD_NAME
+#endif
 #endif
 
 // Stable, deliberately not the library default (0xE502/0xBBAB) nor the SInput
@@ -133,6 +153,27 @@
 #define HIL_AX_S2 0
 #define HIL_OUTPUT_REPORT_LEN 16
 #define HIL_FEATURE_REPORT_LEN 16
+#elif HIL_PROFILE == HIL_PROFILE_LOCAL
+// Ad-hoc profile for local developer smoke-testing -- deliberately NOT in the
+// CI build matrix (hil_config.toml [builder] profiles) or any release. A small
+// classic-gamepad layout: 4 buttons, 1 hat, left stick (X/Y). It advertises
+// under a distinct BLE name (see HIL_DEVICE_NAME below -- "HILdev <board>" by
+// default) so a developer's board never clashes with the reference rig's
+// "HILpad <board>" gamepads in a shared BLE space.
+#define HIL_PROFILE_NAME "local"
+#define HIL_BUTTON_COUNT 4
+#define HIL_HAT_COUNT 1
+#define HIL_AXES_MIN 0x0000
+#define HIL_AXES_MAX 0x7FFF
+#define HIL_SPECIALS 0
+#define HIL_AX_X 1
+#define HIL_AX_Y 1
+#define HIL_AX_Z 0
+#define HIL_AX_RX 0
+#define HIL_AX_RY 0
+#define HIL_AX_RZ 0
+#define HIL_AX_S1 0
+#define HIL_AX_S2 0
 #else
 #error "unknown HIL_PROFILE"
 #endif

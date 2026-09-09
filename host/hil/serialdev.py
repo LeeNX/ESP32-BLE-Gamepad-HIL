@@ -13,6 +13,7 @@ REPLY_PREFIXES = (
     "PONG",
     "CONN",
     "ID",
+    "NAME",
     "CONFIG",
     "DIS",
     "PNP",
@@ -161,6 +162,11 @@ class SerialDev:
 
     def firmware_id(self):
         return self.command("ID?")
+
+    def device_name(self):
+        """`NAME?` -> the advertised BLE name (getDeviceName())."""
+        r = self.command("NAME?")
+        return r.split(" ", 1)[1] if r.startswith("NAME ") else ""
 
     def config(self, retries=3):
         for attempt in range(retries):

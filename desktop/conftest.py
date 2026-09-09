@@ -68,18 +68,38 @@ def port(pytestconfig):
 
 @pytest.fixture(scope="session")
 def flashed(pytestconfig, port, profile):
-    """Flash --bundle with esptool (reusing tester/flash.py) unless --no-flash."""
+    """Flash --bundle with esptool (reusing tester/flash.py) unless --no-flash.
+
+    esptool output is streamed live (capture is suspended for it) -- a flash is
+    a ~10s hardware operation and silence looks like a hang.
+    """
     bundle = pytestconfig.getoption("bundle")
-    if not bundle or pytestconfig.getoption("no_flash"):
+    if pytestconfig.getoption("no_flash"):
+        print("\n[flash] --no-flash: using the firmware already on the board")
         return None
+    if not bundle:
+        print(
+            "\n[flash] no --bundle: using the firmware already on the board "
+            "(pass --bundle=<dir> to flash one)"
+        )
+        return None
+
     bundle = pathlib.Path(bundle).expanduser()
     manifest = json.loads((bundle / "manifest.json").read_text())
     if manifest["profile"] != profile:
         pytest.exit(f"bundle profile {manifest['profile']!r} != expected {profile!r}")
     flash_port = pytestconfig.getoption("flash_port") or port
-    r = subprocess.run([sys.executable, str(FLASH_PY), str(bundle), "--port", flash_port])
+
+    cmd = [sys.executable, str(FLASH_PY), str(bundle), "--port", flash_port]
+    capmgr = pytestconfig.pluginmanager.getplugin("capturemanager")
+    print(f"\n[flash] {bundle.name} -> {flash_port}")
+    with capmgr.global_and_fixture_disabled():
+        r = subprocess.run(cmd)
     if r.returncode != 0:
-        pytest.exit(f"flashing {bundle} failed")
+        pytest.exit(f"flashing {bundle} failed (exit {r.returncode}) -- see esptool output above")
+    print(
+        f"[flash] ok: {manifest['board']}/{manifest['profile']} {manifest.get('lib_describe', '')}"
+    )
     return manifest
 
 

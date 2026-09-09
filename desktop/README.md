@@ -25,9 +25,10 @@ directly. One repo, one source of truth for the protocol and the goldens.
 
 Firmware regressions in HID **descriptor generation** (`RMAP?` vs
 `firmware/golden/<profile>.hiddesc`), **report sizing** (`RSIZE?` vs the 150-byte
-buffer ceiling), the **DIS / PnP** config the firmware reports, and the serial
-protocol round-trips (`PRESS` / `AXIS` / `HAT` / range errors). A laptop smoke
-test between full Linux HIL runs.
+buffer ceiling), the **DIS / PnP** config the firmware reports, the **advertised
+BLE name** (`NAME?` — ≤ 18 chars, `local` not in the rig namespace), and the
+serial protocol round-trips (`PRESS` / `AXIS` / `HAT` / range errors). A laptop
+smoke test between full Linux HIL runs.
 
 ### What it can't
 
@@ -46,28 +47,44 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt        # Windows: .venv\Scripts\pip
 ```
 
-## Firmware
+## Firmware — use the `local` profile
 
-The tester never compiles (same rule as the rig) — it flashes a **bundle**
-(`../builder/build.sh` output, or a rig firmware release). Point `--bundle` at
-one `board-profile-sha/` dir; `../tester/flash.py` does the rest with `esptool`.
+The tester never compiles (same rule as the rig) — it flashes a **bundle**.
+Build one for the **`local`** profile: it's a small classic-gamepad layout
+(4 btn / 1 hat / X-Y) that is **not in the CI matrix**, and it advertises as
+**`HILdev <board>`** instead of `HILpad <board>` — so your board doesn't clash
+with the reference rig's gamepads in the Bluetooth list.
 
-Or flash by hand / with the rig and pass `--no-flash`.
+```bash
+# from the repo root -- needs PlatformIO + the library checkout (rig setup)
+HIL_BOARDS=esp32dev HIL_PROFILES=local builder/build.sh
+# -> bundles/esp32dev-local-<sha>/
+
+# two developers sharing BLE space? give yours a name (<= 18 chars):
+builder/build.sh --profiles local --name "HILdev clt"
+```
+
+`../tester/flash.py` flashes the bundle with `esptool` (the `flashed` fixture
+calls it). Or flash by hand / with the rig and pass `--no-flash`. The board
+reports its own advertised name over serial — `NAME?`, or
+`python -m serial.tools.miniterm <port> 115200`.
 
 ## Running
 
 Find the port — macOS `ls /dev/cu.usbserial-*`, Windows `Get-PnpDevice -Class Ports`.
 
 ```bash
-# flash a bundle, then run the serial-only subset
+# flash the local bundle, then run the serial-only subset
 .venv/bin/pytest -m serial_only \
-    --bundle=../bundles/esp32dev-default-<sha> \
-    --profile=default \
+    --bundle=../bundles/esp32dev-local-<sha> \
+    --profile=local \
     --port=/dev/cu.usbserial-110
 
 # board already has the firmware:
-.venv/bin/pytest -m serial_only --no-flash --profile=default --port=/dev/cu.usbserial-110
+.venv/bin/pytest -m serial_only --no-flash --profile=local --port=/dev/cu.usbserial-110
 ```
+
+esptool output streams live during the flash (~10s) — it's not a hang.
 
 Write path-valued options with `=` (`--bundle=../x`, not `--bundle ../x`) — a
 bare path arg pointing outside `desktop/` makes pytest walk up loading
@@ -80,7 +97,7 @@ it with env vars: `HIL_PORT` / `HIL_PROFILE` / `HIL_BUNDLE` / `HIL_FLASH_PORT`
 macOS and Windows hand a bonded BLE-HID device to the OS HID stack — an app
 can't cleanly initiate the bond. So pair **once, by hand**:
 
-- Flash a bundle so the board advertises as `HILpad esp32dev`.
+- Flash a bundle so the board advertises (as `HILdev esp32dev` for `local`).
 - **macOS**: System Settings ▸ Bluetooth ▸ *Connect*.
   **Windows**: Settings ▸ Bluetooth & devices ▸ Add device.
 - Re-pair when you change profile — the OS caches the HID descriptor against the

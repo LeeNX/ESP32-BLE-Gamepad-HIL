@@ -22,6 +22,7 @@ PROFILE_LAYOUT = {
     "minimal": dict(buttons=1, hats=0, special="none", axes=["x"]),
     "maxbtn": dict(buttons=128, hats=0, special="none", axes=[]),
     "reports": dict(buttons=16, hats=0, special="none", axes=["x", "y"]),
+    "local": dict(buttons=4, hats=1, special="none", axes=["x", "y"]),
 }
 
 
