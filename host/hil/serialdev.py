@@ -14,6 +14,7 @@ REPLY_PREFIXES = (
     "CONN",
     "ID",
     "NAME",
+    "BONDS",
     "CONFIG",
     "DIS",
     "PNP",
@@ -167,6 +168,17 @@ class SerialDev:
         """`NAME?` -> the advertised BLE name (getDeviceName())."""
         r = self.command("NAME?")
         return r.split(" ", 1)[1] if r.startswith("NAME ") else ""
+
+    def bonds(self):
+        """`BONDS?` -> list of bonded peer MACs the firmware has stored."""
+        parts = self.command("BONDS?").split()
+        return parts[2:] if len(parts) >= 2 and parts[0] == "BONDS" else []
+
+    def clear_bonds(self):
+        """`CLEARBONDS` -> wipe the security store. Returns (cleared, remaining)."""
+        r = self.command("CLEARBONDS")
+        kv = self._kv(r)
+        return int(kv.get("cleared", 0)), int(kv.get("remaining", 0))
 
     def config(self, retries=3):
         for attempt in range(retries):

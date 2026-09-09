@@ -239,6 +239,8 @@ banner and any debug lines are skipped by the host.
 | `PEERINFO?` | `PEER interval=<1.25ms units> latency=<n> timeout=<10ms units> mtu=<n>` / `ERR notconnected` |
 | `BEGIN` | `OK` — handshake only; `bleGamepad.begin()` already ran in `setup()` |
 | `CONN?` | `CONN 0` / `CONN 1` |
+| `BONDS?` | `BONDS <n> [<mac> …]` — peers this board has a stored bond for |
+| `CLEARBONDS` | `OK cleared=<n> remaining=<n> rc=<n>` — `ble_store_clear()`; drop stale bonds (also "forget" the device host-side) |
 | `PRESS <n>` / `RELEASE <n>` | `OK` / `ERR range` |
 | `TPRESS <n>` / `TRELEASE <n>` | `T <micros>` — like PRESS/RELEASE, replies `micros()` captured just before `sendReport()` |
 | `BURST <btn> <count> <gap_us>` | `BURST OK <count> <elapsed_us>` — `count` ≤ 2000 |

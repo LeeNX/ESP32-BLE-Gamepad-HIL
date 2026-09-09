@@ -20,6 +20,7 @@
 
 #include <Arduino.h>
 #include <BleGamepad.h>
+#include <NimBLEDevice.h>
 #include "hil_profile.h"
 
 // HIL_DEVICE_NAME (hil_profile.h): "HILpad <board>" for CI/release, "HILdev
@@ -222,6 +223,32 @@ static void handle(const String &cmd)
     if (c == "CONN?")
     {
         reply(bleGamepad.isConnected() ? "CONN 1" : "CONN 0");
+        return;
+    }
+
+    if (c == "BONDS?")
+    {
+        // Peers this board has a stored bond for. A leftover bond (e.g. from
+        // stock "ESP32 BLE Gamepad" firmware, or a previous profile) makes the
+        // host show a stale device and can auto-reconnect the wrong way --
+        // CLEARBONDS drops them.
+        int nb = NimBLEDevice::getNumBonds();
+        Serial.printf("BONDS %d", nb);
+        for (int i = 0; i < nb; i++)
+            Serial.printf(" %s", NimBLEDevice::getBondedAddress(i).toString().c_str());
+        Serial.println();
+        return;
+    }
+
+    if (c == "CLEARBONDS")
+    {
+        // ble_store_clear() wipes the persistent security store (bonds + CCCDs)
+        // in one shot -- more reliable here than iterating deleteBond(), which
+        // can no-op if an address doesn't match the stored identity.
+        int before = NimBLEDevice::getNumBonds();
+        int rc = ble_store_clear();
+        int after = NimBLEDevice::getNumBonds();
+        Serial.printf("OK cleared=%d remaining=%d rc=%d\n", before - after, after, rc);
         return;
     }
 
