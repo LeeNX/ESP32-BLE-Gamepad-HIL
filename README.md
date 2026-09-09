@@ -262,9 +262,10 @@ the right one. The name is set at build time (`HIL_DEVICE_NAME` in
 `hil_profile.h`) and reported live over serial (`NAME?`). Keep it **≤ 18
 chars**: it shares the 31-byte legacy advertising packet with the flags,
 appearance and HID service UUID, and NimBLE drops the service UUID (then the
-name) once it overruns. The `local` profile defaults to `HILdev <board>`, and
-`builder/build.sh --name "…"` overrides it — so a developer's board never
-collides with the reference rig in a shared BLE space.
+name) once it overruns. The `local` profile defaults to `HILdev <board>`;
+override it per box with `$HIL_DEVICE_NAME` or `builder/build.sh --name "…"` —
+so a developer's board never collides with the rig, or with another dev, in a
+shared BLE space.
 
 Hand-test: `python3 -m serial.tools.miniterm <port> 115200`, type `PING`,
 `CONFIG?`, `CONN?`, `PRESS 5`, `AXIS x 16000`, `HAT 4 3`.

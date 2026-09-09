@@ -60,9 +60,13 @@ with the reference rig's gamepads in the Bluetooth list.
 HIL_BOARDS=esp32dev HIL_PROFILES=local builder/build.sh
 # -> bundles/esp32dev-local-<sha>/
 
-# two developers sharing BLE space? give yours a name (<= 18 chars):
+# sharing BLE space with a rig / another dev? name yours (<= 18 chars) --
+# $HIL_DEVICE_NAME in the env, or --name (--name wins):
+HIL_DEVICE_NAME="HILdev clt" HIL_PROFILES=local builder/build.sh
 builder/build.sh --profiles local --name "HILdev clt"
 ```
+
+The board reports whatever it ended up with over serial — `NAME?` (or `pair.py`).
 
 `../tester/flash.py` flashes the bundle with `esptool` (the `flashed` fixture
 calls it). Or flash by hand / with the rig and pass `--no-flash`. The board

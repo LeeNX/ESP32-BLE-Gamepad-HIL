@@ -24,7 +24,11 @@ BOARDS=(${HIL_BOARDS:-$(cfg builder.boards)}); BOARDS=(${BOARDS[@]:-esp32dev})
 PROFILES=(${HIL_PROFILES:-$(cfg builder.profiles)}); PROFILES=(${PROFILES[@]:-default})
 OUT_ROOT=${HIL_BUNDLES:-$REPO/bundles}
 
-DEVICE_NAME=""   # --name: override the advertised BLE name (the `local` profile)
+# Advertised BLE name override (intended for `--profiles local`), highest wins:
+#   --name <n>  >  $HIL_DEVICE_NAME  >  hil_config.local.toml [rig] local_device_name
+# Unset -> firmware default from hil_profile.h ("HILpad <board>", or
+# "HILdev <board>" for the local profile).
+DEVICE_NAME=${HIL_DEVICE_NAME:-$(cfg rig.local_device_name)}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -36,9 +40,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# --name overrides HIL_DEVICE_NAME for every env this run builds (intended for
-# `--profiles local`). Cap at 18 chars -- past that NimBLE drops the HID service
-# UUID from the advert, then the name (README "How pairing works").
+# Cap at 18 chars -- past that NimBLE drops the HID service UUID from the advert,
+# then the name (README "How pairing works").
 if [[ -n "$DEVICE_NAME" ]]; then
   if (( ${#DEVICE_NAME} > 18 )); then
     echo "== warning: --name '$DEVICE_NAME' is ${#DEVICE_NAME} chars; truncating to 18" >&2

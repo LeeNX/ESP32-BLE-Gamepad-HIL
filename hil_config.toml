@@ -7,6 +7,10 @@
 lib_dir = "~/src/ESP32-BLE-Gamepad"   # library checkout the builder compiles against
 device_name = "HILpad"                # firmware advertises "<device_name> <board>"
 pio = "pio"                           # or an absolute path, e.g. ~/.venvs/pio/bin/pio
+# local_device_name -- override the advertised BLE name for `--profiles local`
+# builds on THIS box (<= 18 chars), so a dev board doesn't collide with the rig
+# or another dev. Put it in hil_config.local.toml. $HIL_DEVICE_NAME / --name win.
+# local_device_name = "HILdev <you>"
 
 # BUILDER role -- what builder/build.sh compiles by default. Profiles:
 # default | signed-axes | specials | minimal | maxbtn | reports
