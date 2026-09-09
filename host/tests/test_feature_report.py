@@ -1,4 +1,4 @@
-"""HID Feature Report round-trip (bidirectional), on the `reports` profile.
+"""HID Feature Report round-trip (bidirectional), on the `specials` profile.
 
   device -> host : firmware `FEATURE SET <hex>`, host HIDIOCGFEATURE reads it
   host -> device : host HIDIOCSFEATURE, firmware `FEATURE?` shows recv=1 + data
@@ -16,7 +16,7 @@ from hil import hidraw
 def feat(connected_dut, bt_mac):
     cfg = connected_dut.config()
     if not cfg.get("feat"):
-        pytest.skip("profile has no Feature Report (use --profile reports)")
+        pytest.skip("profile has no Feature Report (use --profile specials)")
     node = hidraw.find_node(mac=bt_mac)
     if node is None:
         pytest.skip("no /dev/hidraw node for the DUT")

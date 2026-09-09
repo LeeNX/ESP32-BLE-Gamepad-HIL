@@ -2,14 +2,14 @@
 
   * axis endpoints -- commanding exactly axesMin / centre / axesMax lands at
     the evdev absinfo min / centre / max (within the kernel's fuzz/flat), for
-    both the unsigned `default` and the signed `signed-axes` profiles;
-  * the `minimal` profile really is minimal (one button, one axis, no hats);
+    both the unsigned `default` and the signed `specials` profiles;
+  * the `minimal` profile really is minimal (two buttons, X-Y, no hats);
   * the `maxbtn` profile exercises the library's 128-button ceiling -- the
     per-button cleanliness is covered by test_buttons.py running against it,
     here we just assert the count surfaced.
 
 Run the profile-specific tests by flashing that profile:
-    scripts/hil.sh --profiles "default signed-axes minimal maxbtn"
+    scripts/hil.sh --profiles "default specials minimal maxbtn"
 """
 
 import pytest
@@ -110,11 +110,11 @@ def test_minimal_profile_is_minimal(connected_dut, gamepad):
     if cfg["profile"] != "minimal":
         pytest.skip("not the minimal profile")
     dev, _ = gamepad
-    assert cfg["buttons"] == 1
+    assert cfg["buttons"] == 2
     assert cfg["hats"] == 0
-    assert cfg["axes"] == ["x"]
+    assert cfg["axes"] == ["x", "y"]
     abs_codes = {c for c, _ in dev.capabilities().get(ecodes.EV_ABS, [])}
-    assert abs_codes - HAT_ABS_CODES == {ecodes.ABS_X}
+    assert abs_codes - HAT_ABS_CODES == {ecodes.ABS_X, ecodes.ABS_Y}
     assert not abs_codes & HAT_ABS_CODES
 
 

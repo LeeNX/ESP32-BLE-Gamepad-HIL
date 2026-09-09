@@ -43,6 +43,14 @@ What a bump means:
   `$HIL_DEVICE_NAME` / `hil_config` `[rig] local_device_name` — override the
   advertised BLE name (≤ 18 chars, or NimBLE drops the HID service UUID then the
   name from the legacy advertising packet).
+- **`test_connection.py::test_advertised_name`** (+ the desktop `serial_only`
+  equivalent) — asserts `NAME?` is *exactly* the name the harness discovers and
+  bonds by, not just a sane-looking string. Expected value is the build-time
+  override recorded in the bundle manifest, else `<HILpad|HILdev> <board>`.
+- Bundle `manifest.json` carries **`device_name`** when the advertised name was
+  overridden at build time (`builder/build.sh --name` etc.), so the tester can
+  check the post-truncation result. Omitted when the firmware default is used.
+  New `manifest` pytest fixture exposes the flashed bundle's manifest.
 
 ### Changed
 
@@ -55,6 +63,29 @@ What a bump means:
   `workflow_dispatch` with `bench: true`. Its gates are deliberately loose, so
   gating every push on it bought little. The remote heredoc falls back to a
   sequential functional run if the rig commit under test predates `--by-board`.
+- **Compile profiles 6 → 4, and only 3 run on every push.** `signed-axes` and
+  `reports` folded into **`specials`**, which is now the one "fragile surface"
+  flash: 8 special (consumer/desktop) usages, signed axes (`test_ranges`
+  negative rail), *and* the Output + Feature reports (`test_feature_report.py` /
+  `test_output_report.py`). Trimmed to X/Y axes, no hat, to stay clear of the
+  fixed 150-byte HID descriptor buffer. **`minimal`** is now 2 btn / X-Y (was
+  1 / X) — purely the latency-curve low-end anchor, nothing depends on it, so it
+  is the one CI profile left **off push/PR**: it builds only on the weekly
+  `schedule` and at release.
+  - push / PR / local `builder/build.sh` default: `default specials maxbtn`
+  - weekly `schedule` + release: `+ minimal`, with `--bench`
+  - rationale, per profile: `default` = what most people run;
+    `specials` = the fragile, least-exercised surface; `maxbtn` = the largest
+    layout the HID transport supports (128-button ceiling).
+  Cuts a push matrix from 6 flashes/board to 3. `specials` loses its lone hat
+  (`test_hats` real coverage is `default`'s 4). `local` dev profile unaffected.
+
+### Removed
+
+- `signed-axes` and `reports` compile profiles, their `platformio.ini` envs, and
+  `firmware/golden/{signed-axes,reports}.hiddesc`. `firmware/golden/{minimal,
+  specials}.hiddesc` dropped too — regenerate on the rig with
+  `pytest --update-golden` and commit (both descriptors changed).
 
 ### Fixed
 

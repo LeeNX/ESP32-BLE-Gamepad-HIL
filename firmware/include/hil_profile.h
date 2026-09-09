@@ -18,20 +18,36 @@
  * test_connection.py::test_descriptor_within_buffer fails if it nears 150.
  *
  * The set of profiles is also deliberately spread across HID input-report
- * sizes (minimal ~1 byte .. maxbtn 16 bytes of buttons) so the latency
+ * sizes (minimal ~2 bytes .. maxbtn 16 bytes of buttons) so the latency
  * benchmark (host/hil/bench.py) can plot latency / throughput vs report size.
+ *
+ * Four CI profiles. Three run on every push/PR (default/specials/maxbtn), the
+ * full four plus --bench run on the weekly schedule + at release. Each carries
+ * more than one concern so the flash/pair count per matrix run stays low:
+ *   default  -- what most people run: 64 btn / 4 hat / 8 unsigned axes, mirrors
+ *               TestAll.ino. The known-good baseline.
+ *   specials -- the fragile, least-exercised surface, in one flash: 8 special
+ *               (consumer/desktop) usages, signed axes (min -32767, so the
+ *               negative-rail check rides here), AND the Output + Feature
+ *               reports (separate HID report types -- host exercises them over
+ *               hidraw). Trimmed to X/Y axes, no hat, to keep the descriptor
+ *               clear of the 150-byte buffer (~122 B; it's the biggest one).
+ *   maxbtn   -- the largest layout the HID transport currently supports: the
+ *               library's 128-button ceiling. Also the bench high-end anchor.
+ *   minimal  -- 2 btn / X-Y, smallest input report -- the bench low-end anchor.
+ *               Nothing else depends on it, so it's the one profile left off
+ *               push/PR (weekly + release only).
+ * `local` is a fifth, ad-hoc developer profile -- never built by CI or a release.
  *
  * Select with a build flag: -D HIL_PROFILE=HIL_PROFILE_SPECIALS
  * (platformio.ini wires one env per profile x board).
  */
 
 #define HIL_PROFILE_DEFAULT 1
-#define HIL_PROFILE_SIGNED_AXES 2
-#define HIL_PROFILE_SPECIALS 3
-#define HIL_PROFILE_MINIMAL 4
-#define HIL_PROFILE_MAXBTN 5
-#define HIL_PROFILE_REPORTS 6
-#define HIL_PROFILE_LOCAL 7
+#define HIL_PROFILE_SPECIALS 2
+#define HIL_PROFILE_MINIMAL 3
+#define HIL_PROFILE_MAXBTN 4
+#define HIL_PROFILE_LOCAL 5
 
 #ifndef HIL_PROFILE
 #define HIL_PROFILE HIL_PROFILE_DEFAULT
@@ -85,31 +101,43 @@
 #define HIL_AXES_MIN 0x0000
 #define HIL_AXES_MAX 0x7FFF
 #define HIL_SPECIALS 0
-#elif HIL_PROFILE == HIL_PROFILE_SIGNED_AXES
-#define HIL_PROFILE_NAME "signed-axes"
-#define HIL_BUTTON_COUNT 64
-#define HIL_HAT_COUNT 4
-#define HIL_AXES_MIN ((int16_t)0x8001) // -32767
-#define HIL_AXES_MAX 0x7FFF
-#define HIL_SPECIALS 0
 #elif HIL_PROFILE == HIL_PROFILE_SPECIALS
+// The fragile / least-exercised surface, folded into one flash: 8 special
+// (consumer/desktop) usages, signed axes (min -32767 -- test_ranges' negative-
+// rail check rides here), AND Output + Feature reports (separate HID report
+// types the host drives over hidraw: test_feature_report / test_output_report).
+// Trimmed to X/Y axes and no hat -- special buttons + O/F reports push the
+// descriptor toward the fixed tempHidReportDescriptor[150] buffer, and the
+// full 8-axis / 4-hat ground truth is already covered by `default`.
 #define HIL_PROFILE_NAME "specials"
 #define HIL_BUTTON_COUNT 16
-#define HIL_HAT_COUNT 1
-#define HIL_AXES_MIN 0x0000
+#define HIL_HAT_COUNT 0
+#define HIL_AXES_MIN ((int16_t)0x8001) // -32767
 #define HIL_AXES_MAX 0x7FFF
 #define HIL_SPECIALS 1
+#define HIL_AX_X 1
+#define HIL_AX_Y 1
+#define HIL_AX_Z 0
+#define HIL_AX_RX 0
+#define HIL_AX_RY 0
+#define HIL_AX_RZ 0
+#define HIL_AX_S1 0
+#define HIL_AX_S2 0
+#define HIL_OUTPUT_REPORT_LEN 16
+#define HIL_FEATURE_REPORT_LEN 16
 #elif HIL_PROFILE == HIL_PROFILE_MINIMAL
-// Smallest input report the library can emit: one button, one axis, nothing
-// else. Anchors the low end of the latency-vs-report-size curve.
+// Smallest input report worth calling a gamepad: 2 buttons, X + Y, nothing
+// else. Anchors the low end of the latency-vs-report-size curve. Nothing else
+// depends on it, so it's the one CI profile left off push/PR (weekly + release
+// only).
 #define HIL_PROFILE_NAME "minimal"
-#define HIL_BUTTON_COUNT 1
+#define HIL_BUTTON_COUNT 2
 #define HIL_HAT_COUNT 0
 #define HIL_AXES_MIN 0x0000
 #define HIL_AXES_MAX 0x7FFF
 #define HIL_SPECIALS 0
 #define HIL_AX_X 1
-#define HIL_AX_Y 0
+#define HIL_AX_Y 1
 #define HIL_AX_Z 0
 #define HIL_AX_RX 0
 #define HIL_AX_RY 0
@@ -133,26 +161,6 @@
 #define HIL_AX_RZ 0
 #define HIL_AX_S1 0
 #define HIL_AX_S2 0
-#elif HIL_PROFILE == HIL_PROFILE_REPORTS
-// Output Report (host->device) + Feature Report (bidirectional) enabled, so
-// the host can exercise them via hidraw. Small button/axis set keeps the
-// descriptor well under 150 (the Output/Feature items add ~30 bytes).
-#define HIL_PROFILE_NAME "reports"
-#define HIL_BUTTON_COUNT 16
-#define HIL_HAT_COUNT 0
-#define HIL_AXES_MIN 0x0000
-#define HIL_AXES_MAX 0x7FFF
-#define HIL_SPECIALS 0
-#define HIL_AX_X 1
-#define HIL_AX_Y 1
-#define HIL_AX_Z 0
-#define HIL_AX_RX 0
-#define HIL_AX_RY 0
-#define HIL_AX_RZ 0
-#define HIL_AX_S1 0
-#define HIL_AX_S2 0
-#define HIL_OUTPUT_REPORT_LEN 16
-#define HIL_FEATURE_REPORT_LEN 16
 #elif HIL_PROFILE == HIL_PROFILE_LOCAL
 // Ad-hoc profile for local developer smoke-testing -- deliberately NOT in the
 // CI build matrix (hil_config.toml [builder] profiles) or any release. A small

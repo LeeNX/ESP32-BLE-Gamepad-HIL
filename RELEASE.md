@@ -16,10 +16,18 @@ GitHub Release, and two attached tarballs:
 1. Land everything for the release on `main`. Move the `## [Unreleased]` bullets
    in [CHANGELOG.md](CHANGELOG.md) into shape (they become the release body
    alongside GitHub's auto-generated notes).
-2. Run the latency/throughput sweep on `main` — it's no longer on every push.
-   Trigger [`hil.yml`](.github/workflows/hil.yml) via the Actions tab (or
-   `gh workflow run hil.yml -f bench=true`), or just take the most recent Monday
-   `schedule` run if `main` hasn't moved since. Regenerate
+2. Full-matrix validation on `main`. Everyday pushes build 3 profiles
+   (`default specials maxbtn`) and skip `--bench`; a release covers all 4 +
+   bench. Trigger [`hil.yml`](.github/workflows/hil.yml):
+
+   ```bash
+   gh workflow run hil.yml \
+     -f profiles="default specials minimal maxbtn" \
+     -f bench=true
+   ```
+
+   (or take the most recent Monday `schedule` run if `main` hasn't moved — it
+   builds all 4 + bench). Confirm it's green, then regenerate
    `docs/bench/bench-table.md` + SVGs from its `results/` if the numbers moved.
 3. From a clean `main`:
 

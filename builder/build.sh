@@ -55,12 +55,13 @@ if [[ -n "$DEVICE_NAME" ]]; then
 fi
 
 profile_suffix() { case "$1" in
-  default) echo "" ;; signed-axes) echo "-signed" ;; specials) echo "-specials" ;;
-  minimal) echo "-minimal" ;; maxbtn) echo "-maxbtn" ;; reports) echo "-reports" ;;
+  default) echo "" ;; specials) echo "-specials" ;;
+  minimal) echo "-minimal" ;; maxbtn) echo "-maxbtn" ;;
   local) echo "-local" ;;
   *) echo "unknown profile: $1" >&2; exit 2 ;; esac; }
 board_chip() { case "$1" in
-  esp32dev) echo esp32 ;; esp32c3) echo esp32c3 ;; esp32s3) echo esp32s3 ;; esp32c6) echo esp32c6 ;;
+  esp32dev) echo esp32 ;; esp32c3) echo esp32c3 ;; esp32s3) echo esp32s3 ;;
+  esp32c6) echo esp32c6 ;; esp32h2) echo esp32h2 ;;
   *) echo "unknown board: $1" >&2; exit 2 ;; esac; }
 
 if [[ -n "${LIB_REF:-}" ]]; then
@@ -83,7 +84,8 @@ for board in "${BOARDS[@]}"; do
     python3 builder/make_bundle.py \
       --build-dir "$REPO/firmware/.pio/build/$env" \
       --idedata "$ide" --env "$env" --profile "$profile" \
-      --board "$board" --chip "$chip" --lib-dir "$LIB_DIR" --out-root "$OUT_ROOT"
+      --board "$board" --chip "$chip" --lib-dir "$LIB_DIR" --out-root "$OUT_ROOT" \
+      --device-name "$DEVICE_NAME"
     rm -f "$ide"
   done
 done

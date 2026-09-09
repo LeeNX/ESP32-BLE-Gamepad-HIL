@@ -91,7 +91,13 @@ def rigcfg(pytestconfig):
     # and command channel are physically different interfaces set it (esp32-c3
     # with an external UART bridge; see README "ESP32-C3 serial bridge").
     b["flash_port"] = pytestconfig.getoption("flash_port") or b.get("flash_port") or b["port"]
-    b["device_name"] = f"{cfg['rig']['device_name']} {board}"
+    # The name the firmware advertises with no --name / $HIL_DEVICE_NAME override:
+    # "<rig.device_name> <board>", except the `local` dev profile which uses
+    # "HILdev <board>" (firmware/include/hil_profile.h HIL_DEVICE_NAME). An
+    # actual override is carried in the bundle manifest -- see the `manifest`
+    # fixture and test_connection.py::test_advertised_name.
+    prefix = "HILdev" if b.get("profile") == "local" else cfg["rig"]["device_name"]
+    b["device_name"] = f"{prefix} {board}"
     for key in ("port", "flash_port"):
         if "CHANGE-ME" in b[key]:
             pytest.exit(
@@ -104,11 +110,9 @@ def rigcfg(pytestconfig):
 # --- firmware --------------------------------------------------------------
 PROFILE_ENV_SUFFIX = {
     "default": "",
-    "signed-axes": "-signed",
     "specials": "-specials",
     "minimal": "-minimal",
     "maxbtn": "-maxbtn",
-    "reports": "-reports",
     "local": "-local",  # ad-hoc dev profile -- not in CI; see firmware/include/hil_profile.h
 }
 
@@ -174,6 +178,17 @@ def firmware(rigcfg, pytestconfig):
         pytest.exit(f"firmware build/upload failed:\n{r.stdout[-4000:]}\n{r.stderr[-2000:]}")
     time.sleep(2)  # let the board reboot into the new image
     return env_name
+
+
+@pytest.fixture(scope="session")
+def manifest(pytestconfig):
+    """The flashed bundle's manifest.json, or {} when building from source /
+    --no-flash. Tests read optional keys (e.g. `device_name`, set only when the
+    advertised BLE name was overridden at build time)."""
+    bundle = pytestconfig.getoption("bundle")
+    if not bundle:
+        return {}
+    return json.loads((pathlib.Path(bundle) / "manifest.json").read_text())
 
 
 # --- serial DUT -----------------------------------------------------------

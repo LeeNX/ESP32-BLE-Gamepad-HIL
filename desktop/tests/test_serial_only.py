@@ -24,20 +24,18 @@ GOLDEN_DIR = pathlib.Path(__file__).resolve().parents[2] / "firmware" / "golden"
 ALL_AXES = ["x", "y", "z", "rx", "ry", "rz", "s1", "s2"]
 PROFILE_LAYOUT = {
     "default": dict(buttons=64, hats=4, special="none", axes=ALL_AXES, axesMin=0, axesMax=0x7FFF),
-    "signed-axes": dict(
-        buttons=64, hats=4, special="none", axes=ALL_AXES, axesMin=-32767, axesMax=0x7FFF
-    ),
+    # specials carries the signed-axis range (min -32767) and the Output +
+    # Feature reports (separate HID report types), on top of the special buttons.
     "specials": dict(
         buttons=16,
-        hats=1,
-        axes=ALL_AXES,
-        axesMin=0,
+        hats=0,
+        axes=["x", "y"],
+        axesMin=-32767,
         axesMax=0x7FFF,
         special="start,select,menu,home,back,volinc,voldec,volmute",
     ),
-    "minimal": dict(buttons=1, hats=0, special="none", axes=["x"], axesMin=0, axesMax=0x7FFF),
+    "minimal": dict(buttons=2, hats=0, special="none", axes=["x", "y"], axesMin=0, axesMax=0x7FFF),
     "maxbtn": dict(buttons=128, hats=0, special="none", axes=[], axesMin=0, axesMax=0x7FFF),
-    "reports": dict(buttons=16, hats=0, special="none", axes=["x", "y"], axesMin=0, axesMax=0x7FFF),
     "local": dict(buttons=4, hats=1, special="none", axes=["x", "y"], axesMin=0, axesMax=0x7FFF),
 }
 
@@ -74,15 +72,23 @@ def test_id_reports_expected_profile(dut, profile):
     assert f"profile={profile}" in fid
 
 
-def test_advertised_name(dut, profile):
+def test_advertised_name(dut, profile, flashed):
     """NAME? -- the BLE name the board advertises. <= 18 chars (fits the legacy
     advertising packet next to the HID service UUID). The `local` profile must
-    NOT use the rig's "HILpad " prefix, or a dev board clashes with the rig."""
+    NOT use the rig's "HILpad " prefix, or a dev board clashes with the rig.
+
+    When we flashed a bundle we know the exact name to expect: the build-time
+    override from the manifest if there was one, else "<HILpad|HILdev> <board>".
+    Without a bundle (--no-flash) we can only sanity-check length + the prefix."""
     name = dut.device_name()
     assert name, "NAME? returned nothing"
     assert len(name) <= 18, f"advertised name {name!r} is {len(name)} chars (>18)"
     if profile == "local":
         assert not name.startswith("HILpad "), f"{name!r} clashes with the reference rig namespace"
+    if flashed:
+        prefix = "HILdev" if profile == "local" else "HILpad"
+        expected = flashed.get("device_name") or f"{prefix} {flashed['board']}"
+        assert name == expected, f"advertised name {name!r} != expected {expected!r}"
 
 
 # --- configuration -------------------------------------------------------

@@ -13,13 +13,25 @@ pio = "pio"                           # or an absolute path, e.g. ~/.venvs/pio/b
 # local_device_name = "HILdev <you>"
 
 # BUILDER role -- what builder/build.sh compiles by default. Profiles:
-# default | signed-axes | specials | minimal | maxbtn | reports
-# (see firmware/include/hil_profile.h). NB: `local` is an ad-hoc developer
-# profile -- build it explicitly (HIL_PROFILES=local builder/build.sh), never
-# list it here; CI and releases must not ship it.
+# default | specials | minimal | maxbtn  (see firmware/include/hil_profile.h)
+#
+#   default   -- 64 btn / 4 hat / 8 unsigned axes; what most people run, the
+#                known-good baseline (mirrors TestAll.ino).
+#   specials  -- the fragile, least-exercised surface in one flash: 8 special
+#                (consumer/desktop) usages + signed axes + Output/Feature reports.
+#   maxbtn    -- the largest layout the HID transport currently supports (the
+#                library's 128-button ceiling).
+#   minimal   -- 2 btn / X-Y, smallest report; the latency-curve low-end anchor
+#                and nothing else, so it is NOT in this default set -- it runs on
+#                the weekly CI schedule and at release. Add it back with
+#                --profiles "default specials minimal maxbtn" when you want it.
+#
+# `local` is an ad-hoc developer profile -- build it explicitly
+# (HIL_PROFILES=local builder/build.sh), never list it here; CI and releases
+# must not ship it.
 [builder]
-boards = "esp32dev esp32c3 esp32s3"                                # space separated
-profiles = "default signed-axes specials minimal maxbtn reports"  # space separated
+boards = "esp32dev esp32c3 esp32s3"    # space separated
+profiles = "default specials maxbtn"  # see note above
 
 # TESTER role -- the Raspberry Pi + ESP32(s) + BLE adapter. builder/build.sh
 # --push rsyncs bundles here; the library repo's scripts/hil.sh and the CI job
