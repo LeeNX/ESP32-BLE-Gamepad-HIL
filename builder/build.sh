@@ -84,7 +84,8 @@ for board in "${BOARDS[@]}"; do
     python3 builder/make_bundle.py \
       --build-dir "$REPO/firmware/.pio/build/$env" \
       --idedata "$ide" --env "$env" --profile "$profile" \
-      --board "$board" --chip "$chip" --lib-dir "$LIB_DIR" --out-root "$OUT_ROOT"
+      --board "$board" --chip "$chip" --lib-dir "$LIB_DIR" --out-root "$OUT_ROOT" \
+      --device-name "$DEVICE_NAME"
     rm -f "$ide"
   done
 done

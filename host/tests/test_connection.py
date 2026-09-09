@@ -9,6 +9,24 @@ def test_firmware_alive(dut):
     assert dut.ping()
 
 
+def test_advertised_name(dut, rigcfg, manifest):
+    """NAME? -- the BLE name the board actually advertises (getDeviceName()).
+    It must be exactly the name the harness discovers + bonds by, or a run
+    could pair the wrong device (or fail to find one). The expected value is
+    the build-time override from the bundle manifest if there was one, else
+    the firmware default for this profile/board (see conftest.rigcfg)."""
+    got = dut.device_name()
+    assert got, "NAME? returned nothing"
+    # NimBLE drops the HID service UUID, then the name, from the legacy
+    # advertising packet once it overruns 31 bytes -- keep the name <= 18.
+    assert len(got) <= 18, f"advertised name {got!r} is {len(got)} chars (> 18)"
+    expected = manifest.get("device_name") or rigcfg["device_name"]
+    assert got == expected, (
+        f"advertised name {got!r} != expected {expected!r} "
+        f"(the name the harness pairs by)"
+    )
+
+
 ALL_AXES = ["x", "y", "z", "rx", "ry", "rz", "s1", "s2"]
 PROFILE_LAYOUT = {
     "default": dict(buttons=64, hats=4, special="none", axes=ALL_AXES),

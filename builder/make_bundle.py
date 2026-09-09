@@ -62,6 +62,13 @@ def main():
     ap.add_argument("--chip", required=True, help="esptool --chip value, e.g. esp32 / esp32c3")
     ap.add_argument("--lib-dir", required=True)
     ap.add_argument("--out-root", required=True)
+    ap.add_argument(
+        "--device-name",
+        default="",
+        help="advertised BLE name this image was built with, when overridden "
+        "(builder/build.sh --name / $HIL_DEVICE_NAME). Recorded in the manifest "
+        "so the tester can assert NAME? against it. Empty = firmware default.",
+    )
     args = ap.parse_args()
 
     build_dir = pathlib.Path(args.build_dir)
@@ -110,6 +117,8 @@ def main():
         "builder": socket.gethostname(),
         "images": manifest_images,
     }
+    if args.device_name:
+        manifest["device_name"] = args.device_name
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(out)
 

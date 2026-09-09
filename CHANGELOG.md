@@ -43,6 +43,14 @@ What a bump means:
   `$HIL_DEVICE_NAME` / `hil_config` `[rig] local_device_name` — override the
   advertised BLE name (≤ 18 chars, or NimBLE drops the HID service UUID then the
   name from the legacy advertising packet).
+- **`test_connection.py::test_advertised_name`** (+ the desktop `serial_only`
+  equivalent) — asserts `NAME?` is *exactly* the name the harness discovers and
+  bonds by, not just a sane-looking string. Expected value is the build-time
+  override recorded in the bundle manifest, else `<HILpad|HILdev> <board>`.
+- Bundle `manifest.json` carries **`device_name`** when the advertised name was
+  overridden at build time (`builder/build.sh --name` etc.), so the tester can
+  check the post-truncation result. Omitted when the firmware default is used.
+  New `manifest` pytest fixture exposes the flashed bundle's manifest.
 
 ### Changed
 

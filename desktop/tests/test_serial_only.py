@@ -72,15 +72,23 @@ def test_id_reports_expected_profile(dut, profile):
     assert f"profile={profile}" in fid
 
 
-def test_advertised_name(dut, profile):
+def test_advertised_name(dut, profile, flashed):
     """NAME? -- the BLE name the board advertises. <= 18 chars (fits the legacy
     advertising packet next to the HID service UUID). The `local` profile must
-    NOT use the rig's "HILpad " prefix, or a dev board clashes with the rig."""
+    NOT use the rig's "HILpad " prefix, or a dev board clashes with the rig.
+
+    When we flashed a bundle we know the exact name to expect: the build-time
+    override from the manifest if there was one, else "<HILpad|HILdev> <board>".
+    Without a bundle (--no-flash) we can only sanity-check length + the prefix."""
     name = dut.device_name()
     assert name, "NAME? returned nothing"
     assert len(name) <= 18, f"advertised name {name!r} is {len(name)} chars (>18)"
     if profile == "local":
         assert not name.startswith("HILpad "), f"{name!r} clashes with the reference rig namespace"
+    if flashed:
+        prefix = "HILdev" if profile == "local" else "HILpad"
+        expected = flashed.get("device_name") or f"{prefix} {flashed['board']}"
+        assert name == expected, f"advertised name {name!r} != expected {expected!r}"
 
 
 # --- configuration -------------------------------------------------------
