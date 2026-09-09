@@ -18,6 +18,15 @@ What a bump means:
 
 ## [Unreleased]
 
+### Added
+
+- **`scripts/update-goldens.py`** — regenerate `firmware/golden/<profile>.hiddesc`
+  after an intentional descriptor change: build, flash one board, read the
+  descriptor over serial (`RMAP?` — no BLE, no Linux), write the golden, refusing
+  any that overruns the 150-byte buffer. Runs on any dev box with PlatformIO + a
+  wired board — closes the v0.2.1 gap where `specials` / `minimal` shipped
+  without goldens.
+
 ## [0.2.1] — 2026-09-09
 
 ### Added
