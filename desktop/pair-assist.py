@@ -6,10 +6,10 @@ hand in the OS Bluetooth settings. This reads the board over serial so you know
 exactly which entry to click, then polls `CONN?` until the firmware reports the
 link. No host BLE API, no permissions.
 
-    python pair.py --port /dev/cu.usbserial-110        # macOS
-    python pair.py --port COM5                         # Windows
-    python pair.py --port ... --clear-bonds            # drop stale bonds first
-    python pair.py --port ... --check                  # just print state, don't wait
+    python pair-assist.py --port /dev/cu.usbserial-110   # macOS
+    python pair-assist.py --port COM5                    # Windows
+    python pair-assist.py --port ... --clear-bonds       # drop stale bonds first
+    python pair-assist.py --port ... --check             # just print state, don't wait
 
 Falls back to $HIL_PORT for --port.
 """

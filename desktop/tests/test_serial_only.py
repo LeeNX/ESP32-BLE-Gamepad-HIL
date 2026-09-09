@@ -185,7 +185,7 @@ def test_reset(dut):
 
 def test_bonds_query(dut):
     """BONDS? parses. A board may carry stale bonds (previous host / firmware) --
-    `pair.py --clear-bonds` or CLEARBONDS drops them."""
+    `pair-assist.py --clear-bonds` or CLEARBONDS drops them."""
     for mac in dut.bonds():
         assert len(mac.split(":")) == 6, f"not a MAC: {mac!r}"
 

@@ -9,14 +9,14 @@ It is **not** a fork — it reuses the rig's `hil.serialdev` / `hil.hidraw`
 (`../host`) and the checked-in golden descriptors (`../firmware/golden`)
 directly. One repo, one source of truth for the protocol and the goldens.
 
-## Status — step 1
+## Status
 
 | Layer | State |
 |---|---|
 | `esptool` flashing (`../tester/flash.py`) | ✅ reused as-is, cross-platform |
 | Serial protocol client (`hil.serialdev.SerialDev`) | ✅ reused as-is |
-| Serial-only assertions (`tests/test_serial_only.py`, `-m serial_only`) | ✅ this step |
-| One-time BLE pairing (manual, in OS settings) | 🟢 `pair.py` — names the device to click, clears stale bonds, waits on `CONN?` |
+| Serial-only assertions (`tests/test_serial_only.py`, `-m serial_only`) | ✅ done |
+| One-time BLE pairing (manual, in OS settings) | ✅ `pair-assist.py` — names the device to click, clears stale bonds, waits on `CONN?` |
 | GATT reads (Device Info / PnP / Battery over CoreBluetooth / WinRT) | 🔴 later step |
 | Native input read backend (IOKit HID / Windows Raw Input) + behavioural tests | 🔴 later step |
 | Remote drive (SSH / CI runner) | 🔴 later — for now, run it by hand (below) |
@@ -66,7 +66,7 @@ HIL_DEVICE_NAME="HILdev clt" HIL_PROFILES=local builder/build.sh
 builder/build.sh --profiles local --name "HILdev clt"
 ```
 
-The board reports whatever it ended up with over serial — `NAME?` (or `pair.py`).
+The board reports whatever it ended up with over serial — `NAME?` (or `pair-assist.py`).
 
 `../tester/flash.py` flashes the bundle with `esptool` (the `flashed` fixture
 calls it). Or flash by hand / with the rig and pass `--no-flash`. The board
@@ -99,31 +99,32 @@ it with env vars: `HIL_PORT` / `HIL_PROFILE` / `HIL_BUNDLE` / `HIL_FLASH_PORT`
 ### One-time BLE pairing (only for the `PEERINFO?` check, and later steps)
 
 macOS and Windows hand a bonded BLE-HID device to the OS HID stack — an app
-can't cleanly initiate the bond. So pair **once, by hand**. `pair.py` reads the
-board over serial and tells you exactly which entry to click, then waits for the
-firmware to see the link (`CONN?` — no host BLE API):
+can't cleanly initiate the bond. So pair **once, by hand**. `pair-assist.py`
+reads the board over serial and tells you exactly which entry to click, then
+waits for the firmware to see the link (`CONN?` — no host BLE API):
 
 ```bash
-.venv/bin/python pair.py --port=/dev/cu.usbserial-110
-.venv/bin/python pair.py --port=/dev/cu.usbserial-110 --clear-bonds   # if it won't pair clean
-.venv/bin/python pair.py --port=/dev/cu.usbserial-110 --check         # just show state
+.venv/bin/python pair-assist.py --port=/dev/cu.usbserial-110
+.venv/bin/python pair-assist.py --port=/dev/cu.usbserial-110 --clear-bonds  # if it won't pair clean
+.venv/bin/python pair-assist.py --port=/dev/cu.usbserial-110 --check        # just show state
 ```
 
-- **macOS**: System Settings ▸ Bluetooth ▸ *Connect* next to the name `pair.py`
-  prints. **Windows**: Settings ▸ Bluetooth & devices ▸ Add device.
+- **macOS**: System Settings ▸ Bluetooth ▸ *Connect* next to the name
+  `pair-assist.py` prints. **Windows**: Settings ▸ Bluetooth & devices ▸ Add
+  device.
 - Re-pair when you change profile — the OS caches the HID descriptor against the
   bond.
 
-**"I don't see `HILdev esp32dev`, only `ESP32 BLE Gamepad` / `HILpad …`"** —
+**"I don't see my board, only `ESP32 BLE Gamepad` / `HILpad …`"** —
 
 - `HILpad esp32dev / esp32c3 / esp32s3` is the **reference rig** (a separate Pi
   with its own boards). Not yours.
 - `ESP32 BLE Gamepad` is the **library's default name** — a board running stock
   `ESP32-BLE-Gamepad` firmware, *not* `hil_runner`. If that's your board, it
-  isn't flashed: `pair.py --check` will say `is not running hil_runner`, or
-  `ID?` won't start with `ID hil_runner`.
+  isn't flashed: `pair-assist.py --check` will say `is not running hil_runner`,
+  or `ID?` won't start with `ID hil_runner`.
 - A **stale bond** (your board was paired earlier, as a different name/profile)
-  makes the host show the old entry and skip a fresh pair. `pair.py
+  makes the host show the old entry and skip a fresh pair. `pair-assist.py
   --clear-bonds` wipes it on the board (`CLEARBONDS`); then **Forget This
   Device** host-side too, and pair again.
 - Confirm what your board actually advertises: `NAME?` over serial, or
