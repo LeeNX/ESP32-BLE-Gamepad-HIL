@@ -648,9 +648,16 @@ interpretation. Parse those against the descriptor golden
 per-platform table — but you're then testing **the descriptor + firmware**, not
 what the OS makes of them. Reach for it only to:
 
-- bootstrap a platform before its native backend is written, or
+- bootstrap a platform before its native backend is written **(done — `desktop/`
+  step, `pytest -m hid`: `test_buttons.py` is green on macOS this way)**, or
 - cover a corner case the native API can't observe (a field the OS collapses or
   hides), as an explicitly-marked complement to the native assertions.
+
+hidapi's `hid_open` is **non-seizing** — the OS still delivers the gamepad's
+input to the foreground app during a run (benign on a dedicated tester; gamepad
+buttons/axes do nothing in a shell/file manager). A hard lock is
+`IOHIDDeviceOpen(kIOHIDOptionsTypeSeizeDevice)` / `RIDEV_NOLEGACY`, which on
+macOS wants root; the Linux rig doesn't seize either.
 
 CI on macOS/Windows stays hard (item 5): both want a logged-in GUI session for
 BLE; macOS needs the Input Monitoring grant pre-provisioned. A self-hosted

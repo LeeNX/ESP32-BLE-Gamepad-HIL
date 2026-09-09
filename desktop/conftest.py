@@ -1,12 +1,15 @@
-"""Fixtures for the desktop (macOS / Windows) serial-only HIL subset.
+"""Fixtures for the desktop (macOS / Windows) HIL subset.
 
-This is the portable slice of the Linux rig: everything that rides the
-`hil_runner` USB-serial command channel and needs no BLE pairing and no host
-HID stack. It reuses the rig's `hil.serialdev.SerialDev` and `hil.hidraw`
-verbatim (../host is on the path) and the checked-in golden descriptors under
-../firmware/golden.
+`dut` (serial command channel) is the portable slice of the Linux rig -- it
+needs no BLE bond and no host HID stack, and reuses the rig's
+`hil.serialdev.SerialDev` / `hil.hidraw` verbatim (../host is on the path).
 
-    dut  ->  a ready SerialDev, firmware profile confirmed
+`hidgamepad` (raw HID input reports, hidapi) needs the board **bonded to this
+host** -- run `pair-assist.py` once first. It reads the reports the firmware
+sends over BLE; the `hid`-marked tests decode them against the report layout.
+
+    dut         a ready SerialDev, firmware profile confirmed
+    hidgamepad  the DUT's HID device, opened raw (skips if not bonded / no access)
 
 Point it at a board with --port (or $HIL_PORT); flash first with --bundle.
 """
@@ -21,6 +24,9 @@ import pytest
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "host"))
+from hidgamepad import drain, read_after  # noqa: E402  -- desktop/, on pythonpath
+
+from hil.hidraw import HIL_PID, HIL_VID  # noqa: E402
 from hil.serialdev import SerialDev  # noqa: E402
 
 GOLDEN_DIR = REPO / "firmware" / "golden"
@@ -117,3 +123,41 @@ def dut(port, profile, flashed):
         )
     yield d
     d.close()
+
+
+@pytest.fixture(scope="session")
+def hidgamepad(dut):
+    """The DUT's HID device opened for raw input reports (hidapi).
+
+    Skips unless the board is bonded to this host (`pair-assist.py`) and its
+    reports actually reach us -- on macOS that can need Input Monitoring granted
+    to this Python (System Settings > Privacy & Security > Input Monitoring).
+    """
+    hid = pytest.importorskip("hid", reason="pip install hidapi")
+
+    if not dut.connected():
+        pytest.skip("board not bonded/connected -- run  python pair-assist.py --port <port>  first")
+
+    h = hid.device()
+    try:
+        h.open(HIL_VID, HIL_PID)
+    except OSError as e:
+        pytest.skip(f"can't open the DUT HID device ({e}) -- bonded? Input Monitoring granted?")
+    h.set_nonblocking(True)
+
+    # Prove reports flow: a stray press must produce at least one report.
+    dut.reset()
+    drain(h)
+    dut.press(1)
+    got = read_after(h)
+    dut.release(1)
+    drain(h)
+    if not got:
+        h.close()
+        pytest.skip(
+            "opened the HID device but no input reports arrived -- on macOS grant "
+            "Input Monitoring to this Python and re-run"
+        )
+
+    yield h
+    h.close()

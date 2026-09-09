@@ -17,24 +17,28 @@ directly. One repo, one source of truth for the protocol and the goldens.
 | Serial protocol client (`hil.serialdev.SerialDev`) | ✅ reused as-is |
 | Serial-only assertions (`tests/test_serial_only.py`, `-m serial_only`) | ✅ done |
 | One-time BLE pairing (manual, in OS settings) | ✅ `pair-assist.py` — names the device to click, clears stale bonds, waits on `CONN?` |
+| Raw-HID behavioural tests (`-m hid`) — buttons so far | ✅ `test_buttons.py`; needs the board bonded here |
 | GATT reads (Device Info / PnP / Battery over CoreBluetooth / WinRT) | 🔴 later step |
-| Native input read backend (IOKit HID / Windows Raw Input) + behavioural tests | 🔴 later step |
+| Native input backend (IOKit HID / Windows Raw Input) — "what an app sees" | 🔴 later step |
 | Remote drive (SSH / CI runner) | 🔴 later — for now, run it by hand (below) |
 
-### What the serial-only subset catches
+### Two levels of test
 
-Firmware regressions in HID **descriptor generation** (`RMAP?` vs
-`firmware/golden/<profile>.hiddesc`), **report sizing** (`RSIZE?` vs the 150-byte
-buffer ceiling), the **DIS / PnP** config the firmware reports, the **advertised
-BLE name** (`NAME?` — ≤ 18 chars, `local` not in the rig namespace), and the
-serial protocol round-trips (`PRESS` / `AXIS` / `HAT` / range errors). A laptop
-smoke test between full Linux HIL runs.
+- **`-m serial_only`** — the serial command channel only. Catches firmware
+  regressions in HID **descriptor generation** (`RMAP?` vs the golden), **report
+  sizing**, the **DIS / PnP** config, the **advertised BLE name** (`NAME?`), and
+  the serial protocol round-trips. No BLE bond needed — a laptop smoke test.
+- **`-m hid`** — presses/axes over serial, then reads the DUT's **raw HID input
+  reports** off the bonded device (hidapi) and decodes them against the report
+  layout. Proves firmware + descriptor + BLE transport end to end. Needs the
+  board **bonded to this host** (`pair-assist.py`).
 
-### What it can't
+### What neither level does yet
 
-Anything that needs the host's HID interpretation — button → key code, axis →
-ABS code, the descriptor as the **OS** parsed it. That's the behavioural layer;
-it needs a per-platform native read backend (a later step).
+How the host OS **maps** the device — button → key code, axis → control,
+`ABS_HAT0`-only, the reversed-hat quirk. That's "what a real app on this OS
+sees", and it needs the native input backend (IOKit / Raw Input) — a later step.
+`-m hid` reads the report bytes; it doesn't ask macOS/Windows what they mean.
 
 ## Setup
 
@@ -78,17 +82,30 @@ reports its own advertised name over serial — `NAME?`, or
 Find the port — macOS `ls /dev/cu.usbserial-*`, Windows `Get-PnpDevice -Class Ports`.
 
 ```bash
-# flash the local bundle, then run the serial-only subset
+# serial-only: flash the local bundle first, no bond needed
 .venv/bin/pytest -m serial_only \
-    --bundle=../bundles/esp32dev-local-<sha> \
-    --profile=local \
-    --port=/dev/cu.usbserial-110
+    --bundle=../bundles/esp32dev-local-<sha> --profile=local --port=/dev/cu.usbserial-110
 
-# board already has the firmware:
+# board already flashed:
 .venv/bin/pytest -m serial_only --no-flash --profile=local --port=/dev/cu.usbserial-110
+
+# + the raw-HID button tests (board must be bonded here -- pair-assist.py first):
+.venv/bin/pytest --no-flash --profile=local --port=/dev/cu.usbserial-110      # both markers
+.venv/bin/pytest -m hid --no-flash --profile=local --port=/dev/cu.usbserial-110
 ```
 
 esptool output streams live during the flash (~10s) — it's not a hang.
+
+**Does the test spew input into my desktop?** The `-m hid` tests press buttons
+and move axes on a bonded gamepad. Opening the device with hidapi does **not**
+seize it, so the OS still routes that input to the foreground app — but a
+gamepad's buttons/axes do nothing in Finder / Terminal / an editor, so on a
+dedicated tester box it's a non-issue. A hard lock (nothing else sees the
+device) needs `IOHIDDeviceOpen(kIOHIDOptionsTypeSeizeDevice)`, which on macOS
+requires running as **root**; not done here. The Linux rig doesn't seize either.
+On macOS, if `-m hid` skips with *"no input reports arrived"*, grant **Input
+Monitoring** to the venv Python (System Settings ▸ Privacy & Security ▸ Input
+Monitoring ▸ **+** ▸ `…/desktop/.venv/bin/python3`).
 
 Write path-valued options with `=` (`--bundle=../x`, not `--bundle ../x`) — a
 bare path arg pointing outside `desktop/` makes pytest walk up loading
