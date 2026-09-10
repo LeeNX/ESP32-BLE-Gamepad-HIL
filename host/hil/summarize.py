@@ -180,6 +180,9 @@ def main(argv):
     out_file = None
     if "--out" in argv:
         i = argv.index("--out")
+        if i + 1 >= len(argv):
+            print("summarize.py: --out needs a file path", file=sys.stderr)
+            return 2
         out_file = argv[i + 1]
         args = argv[:i] + argv[i + 2 :]
     paths = [a for a in args if not a.startswith("-")]
