@@ -68,3 +68,18 @@ def axes(j):
 def hats(j):
     pygame.event.pump()
     return [j.get_hat(i) for i in range(j.get_numhats())]
+
+
+def wait_until(read, want, timeout=2.0, poll=0.02):
+    """Pump SDL until `read()` equals `want` (or a matcher returns True), or
+    timeout. Returns the last value read -- assert on it so a failure shows what
+    SDL actually settled on. macOS's BLE-HID tail is jittery (see -m latency),
+    so a fixed sleep isn't enough for the tight state-equality checks."""
+    match = want if callable(want) else (lambda v: v == want)
+    end = time.time() + timeout
+    val = read()
+    while not match(val) and time.time() < end:
+        time.sleep(poll)
+        pygame.event.pump()
+        val = read()
+    return val

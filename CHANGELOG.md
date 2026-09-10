@@ -26,6 +26,13 @@ What a bump means:
   any that overruns the 150-byte buffer. Runs on any dev box with PlatformIO + a
   wired board — closes the v0.2.1 gap where `specials` / `minimal` shipped
   without goldens.
+- **`desktop/` behavioural tests — axes and hats** (`pytest -m sdl`,
+  `test_axes.py` / `test_hats.py`): each firmware axis → the matching SDL axis,
+  monotonic, −1/0/+1 endpoints; each firmware hat → all 8 directions on the
+  matching SDL hat. macOS/SDL surfaces **all** hats (evdev only makes
+  `ABS_HAT0`) but the library's reversed hat fields mean firmware hat `h` is SDL
+  hat `n − h` — pinned. `sdlgamepad.wait_until()` polls SDL instead of a fixed
+  sleep (macOS's BLE-HID tail is jittery).
 - **`desktop/` latency sweep** (`pytest -m latency`, opt-in — a bare `pytest`
   run skips it): `TPRESS` on the serial channel, then time the blocking hidapi
   read of the resulting HID report. p50 / p90 / p99 for BLE-air and end-to-end,
@@ -33,6 +40,10 @@ What a bump means:
   `--latency-json` writes `desktop/results/latency-*.json`. Host-side hidapi
   timestamps, so a few ms high and jittier than the rig's kernel-timestamped
   `--bench` numbers — for regression / same-box comparison.
+- **`pair-assist.py --reconnect`** (macOS): `blueutil` Bluetooth power-cycle +
+  reconnect, to refresh a stale bond / cached HID descriptor after a re-flash
+  without touching System Settings. (The *first* pair still needs the GUI —
+  blueutil can't scan for BLE.)
 
 ## [0.2.1] — 2026-09-09
 
