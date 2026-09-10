@@ -240,7 +240,12 @@ jobs:
         run: |
           # post-only -- dorny/test-reporter below is the gate, so never fail here
           if ls results/junit-*.xml >/dev/null 2>&1; then
-            python3 host/hil/summarize.py results/junit-*.xml >> "$GITHUB_STEP_SUMMARY" || true
+            rc=0
+            python3 host/hil/summarize.py results/junit-*.xml >> "$GITHUB_STEP_SUMMARY" || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              echo "::warning::summarize.py exited $rc -- job summary may be incomplete"
+              { echo; echo "> ⚠️ \`summarize.py\` exited $rc -- see the step log; raw JUnit is in the \`hil-results\` artifact and the HIL check below."; } >> "$GITHUB_STEP_SUMMARY"
+            fi
           else
             { echo "## HIL"; echo; echo "No JUnit results — the tester step produced nothing (see the step log)."; } >> "$GITHUB_STEP_SUMMARY"
           fi

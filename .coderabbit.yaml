@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit config. Minimal — just switches off checks the project doesn't run.
+
+reviews:
+  pre_merge_checks:
+    # We don't gate on a docstring-coverage percentage. The test modules and
+    # hil helpers are documented where it helps a reader; small fixtures and
+    # one-line helpers aren't, and an 80 % bar just adds noise to every PR
+    # (it fired on a docs-only diff with no Python).
+    docstrings:
+      mode: "off"

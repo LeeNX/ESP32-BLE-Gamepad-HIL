@@ -101,9 +101,9 @@ def collect(paths):
         )
         try:
             root = ET.parse(p).getroot()
-        except ET.ParseError:
+        except (ET.ParseError, OSError) as e:
             b["fail"] += 1
-            failures.append((board, profile, "-", "(junit did not parse)", p))
+            failures.append((board, profile, "-", f"(junit unreadable: {type(e).__name__})", p))
             continue
         b["time"] += _suite_time(root)
         for case in root.iter("testcase"):
@@ -180,6 +180,9 @@ def main(argv):
     out_file = None
     if "--out" in argv:
         i = argv.index("--out")
+        if i + 1 >= len(argv):
+            print("summarize.py: --out needs a file path", file=sys.stderr)
+            return 2
         out_file = argv[i + 1]
         args = argv[:i] + argv[i + 2 :]
     paths = [a for a in args if not a.startswith("-")]

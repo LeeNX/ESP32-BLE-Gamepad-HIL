@@ -62,6 +62,14 @@ What a bump means:
   `--by-board`), and to report the pytest-phase time per bundle and per MCU.
   `tester/test-all.sh` regenerates `results/summary.md` from all lanes at the
   end of a run.
+- **`lint.yml` gains a `desktop-collect` job** — imports and collects
+  `desktop/` on Linux (no hardware). The desktop tester has no hardware CI, so
+  this is the guard that a refactor of the shared `host/hil.*` helpers hasn't
+  broken its imports or fixtures.
+- **README "macOS as a tester" / "Cross-platform tester — TODO" sections
+  replaced** by a single **"Desktop tester (macOS / Windows)"** section
+  describing what `desktop/` actually is now (four test levels, all green on
+  macOS; Windows not yet run) instead of the pre-`desktop/` scoping notes.
 
 ## [0.2.1] — 2026-09-09
 
