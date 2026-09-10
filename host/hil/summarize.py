@@ -101,9 +101,9 @@ def collect(paths):
         )
         try:
             root = ET.parse(p).getroot()
-        except ET.ParseError:
+        except (ET.ParseError, OSError) as e:
             b["fail"] += 1
-            failures.append((board, profile, "-", "(junit did not parse)", p))
+            failures.append((board, profile, "-", f"(junit unreadable: {type(e).__name__})", p))
             continue
         b["time"] += _suite_time(root)
         for case in root.iter("testcase"):
