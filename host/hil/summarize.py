@@ -5,9 +5,12 @@
 
 Board and profile come from the filename (`junit-<board>-<profile>.xml`, the
 name tester/test.sh writes). The report has a bundle matrix, a feature-area
-rollup across every bundle, the failures inline, and only the skips that look
-like a real gap (missing golden, unreadable hidraw, absent dep) -- the routine
-"this profile has no rz axis" skips are counted, not listed.
+rollup across every bundle, per-MCU test time, the failures inline, and only the
+skips that look like a real gap (missing golden, unreadable hidraw, absent dep)
+-- the routine "this profile has no rz axis" skips are counted, not listed.
+
+Times are the pytest phase from each junit `<testsuite time>` -- the flash and
+the first pair (in tester/test.sh, before pytest) are not in it.
 
 Exit status is 1 if any test failed, else 0.
 """
@@ -54,6 +57,22 @@ def _first_line(text):
     return lines[0] if lines else ""
 
 
+def _dur(seconds):
+    s = int(round(seconds))
+    return f"{s // 60}m{s % 60:02d}s" if s >= 60 else f"{s}s"
+
+
+def _suite_time(root):
+    # pytest writes <testsuites><testsuite time="..">; fall back to summing cases
+    node = root if root.tag == "testsuite" else root.find("testsuite")
+    if node is not None and node.get("time"):
+        try:
+            return float(node.get("time"))
+        except ValueError:
+            pass
+    return sum(float(c.get("time") or 0) for c in root.iter("testcase"))
+
+
 def _classify(case):
     """-> ('pass' | 'fail' | 'skip' | 'xfail', message)."""
     node = case.find("failure")
@@ -77,13 +96,16 @@ def collect(paths):
 
     for p in sorted(paths):
         board, profile = _bundle(p)
-        b = bundles.setdefault((board, profile), {"pass": 0, "fail": 0, "skip": 0, "xfail": 0})
+        b = bundles.setdefault(
+            (board, profile), {"pass": 0, "fail": 0, "skip": 0, "xfail": 0, "time": 0.0}
+        )
         try:
             root = ET.parse(p).getroot()
         except ET.ParseError:
             b["fail"] += 1
             failures.append((board, profile, "-", "(junit did not parse)", p))
             continue
+        b["time"] += _suite_time(root)
         for case in root.iter("testcase"):
             kind, msg = _classify(case)
             area = _area(case.get("classname"))
@@ -106,13 +128,28 @@ def render(bundles, areas, failures, gap_skips):
     n = len(bundles)
     out = [f"## HIL — {n} bundle{'' if n == 1 else 's'} · {head}", ""]
 
-    out += ["| board / profile | pass | fail | skip | xfail |", "|---|---:|---:|---:|---:|"]
+    out += [
+        "| board / profile | pass | fail | skip | xfail | test time |",
+        "|---|---:|---:|---:|---:|---:|",
+    ]
     for (board, profile), b in sorted(bundles.items()):
         mark = "" if b["fail"] == 0 else "❌ "
         out.append(
-            f"| {mark}{board} / {profile} | {b['pass']} | {b['fail']} | {b['skip']} | {b['xfail']} |"
+            f"| {mark}{board} / {profile} | {b['pass']} | {b['fail']} | {b['skip']} | "
+            f"{b['xfail']} | {_dur(b['time'])} |"
         )
     out.append("")
+
+    by_board = defaultdict(lambda: {"n": 0, "time": 0.0})
+    for (board, _profile), b in bundles.items():
+        by_board[board]["n"] += 1
+        by_board[board]["time"] += b["time"]
+    if len(by_board) > 1 or next(iter(by_board.values()))["n"] > 1:
+        out += ["### Test time per MCU", "", "| MCU | bundles | test time |", "|---|---:|---:|"]
+        for board in sorted(by_board):
+            v = by_board[board]
+            out.append(f"| {board} | {v['n']} | {_dur(v['time'])} |")
+        out.append("")
 
     out += ["### By feature area", "", "| area | pass | fail | skip |", "|---|---:|---:|---:|"]
     for area in sorted(areas):

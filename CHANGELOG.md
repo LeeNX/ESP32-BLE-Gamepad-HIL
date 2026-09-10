@@ -46,17 +46,22 @@ What a bump means:
   blueutil can't scan for BLE.)
 - **HIL run summary on the Actions run page.** `hil.yml` writes
   `host/hil/summarize.py results/junit-*.xml` to `$GITHUB_STEP_SUMMARY`: a
-  board × profile matrix, a per-feature-area pass/fail/skip rollup across every
-  bundle, failures inline (first line of the message), and only the skips that
-  look like a real gap — routine "profile has no rz axis" skips are counted, not
-  listed. `dorny/test-reporter` still creates the gating per-test check.
+  board × profile matrix (with per-bundle test time), **test time per MCU**, a
+  per-feature-area pass/fail/skip rollup across every bundle, failures inline
+  (first line of the message), and only the skips that look like a real gap —
+  routine "profile has no rz axis" skips are counted, not listed.
+  `dorny/test-reporter` still creates the gating per-test check.
+- **`docs/TODO.md`** — parking lot for coverage gaps (simulation controls,
+  motion controls, rumble, player LED, NUS, SInput, TX power — none tested) and
+  infra ideas. Nothing planned; pick one up only if the data's wanted.
 
 ### Changed
 
 - `host/hil/summarize.py` rewritten to aggregate **multiple** junit files into
   one report (was one file → one `summary.md`, last-writer-wins under
-  `--by-board`). `tester/test-all.sh` regenerates `results/summary.md` from all
-  lanes at the end of a run.
+  `--by-board`), and to report the pytest-phase time per bundle and per MCU.
+  `tester/test-all.sh` regenerates `results/summary.md` from all lanes at the
+  end of a run.
 
 ## [0.2.1] — 2026-09-09
 

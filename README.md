@@ -52,6 +52,7 @@ push to the tester, run, pull results). One box can be both roles
 | `scripts/release.sh` `scripts/make-release-artifacts.sh` | cut a rig release (`VERSION` + `CHANGELOG.md` → tag → `release.yml`); see [RELEASE.md](RELEASE.md) |
 | `scripts/update-goldens.py` | rebuild + reflash a board per profile, read `RMAP?` over serial, rewrite `firmware/golden/<profile>.hiddesc` — after an intentional descriptor change |
 | `.github/workflows/hil.yml` `release.yml` | CI: build → SSH-to-tester test; tag → firmware/suite release |
+| [`docs/TODO.md`](docs/TODO.md) | parking lot for coverage gaps + infra ideas — nothing planned, pick up if the data's wanted |
 
 ### Compile profiles (`firmware/include/hil_profile.h`)
 
@@ -401,11 +402,13 @@ self-hosted runner, no inbound ports on your network:
   pulls `results/` back (even on failure), and publishes the report.
 
 The **run page's Summary tab** gets a rolled-up view
-(`host/hil/summarize.py results/junit-*.xml`): a board × profile matrix, a
-per-feature-area pass/fail/skip table across every bundle, failures inline, and
-the skips that look like a real gap (missing golden, unreadable hidraw, absent
-dep) — the routine "this profile has no rz axis" skips are counted, not listed.
-`dorny/test-reporter` still creates the per-test check that gates the job.
+(`host/hil/summarize.py results/junit-*.xml`): a board × profile matrix with
+per-bundle test time, **test time per MCU**, a per-feature-area
+pass/fail/skip table across every bundle, failures inline, and the skips that
+look like a real gap (missing golden, unreadable hidraw, absent dep) — the
+routine "this profile has no rz axis" skips are counted, not listed. Times are
+the pytest phase only (the flash + first pair, in `tester/test.sh`, aren't in
+them). `dorny/test-reporter` still creates the per-test check that gates the job.
 
 **Two run modes.** Push, `repository_dispatch` (the library's correctness gate),
 and a plain `workflow_dispatch` run `tester/test-all.sh --by-board` — the parallel
