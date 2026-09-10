@@ -90,8 +90,8 @@ start=$(date +%s)
   --junit-xml="$xml" "${PYTEST_EXTRA[@]}" 2>&1 | tee "$log" || rc=$?
 elapsed=$(( $(date +%s) - start ))
 
-"$VENV/bin/python" host/hil/summarize.py "$xml" "results/summary-${tag}.md" || true
-cp "results/summary-${tag}.md" results/summary.md
+"$VENV/bin/python" host/hil/summarize.py "$xml" --out "results/summary-${tag}.md" >/dev/null || true
+cp "results/summary-${tag}.md" results/summary.md 2>/dev/null || true
 
 if ls results/bench-*.json >/dev/null 2>&1; then
   PYTHONPATH=host "$VENV/bin/python" -m hil.charts results/ || true
