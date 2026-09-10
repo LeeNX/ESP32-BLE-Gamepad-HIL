@@ -67,6 +67,15 @@ test_bundle() {
     || ./tester/test.sh "$1" "${@:2}" "${kargs[@]}"
 }
 
+# roll every bundle's junit into results/summary.md and echo it (CI lifts this
+# into the job summary; locally it's the at-a-glance board x profile matrix)
+summarize_all() {
+  ls results/junit-*.xml >/dev/null 2>&1 || return 0
+  local py; py=$(command -v python3 || echo "${HIL_VENV:-$HOME/.venvs/hil}/bin/python")
+  echo
+  "$py" host/hil/summarize.py results/junit-*.xml --out results/summary.md 2>/dev/null || true
+}
+
 run_lane() {  # <board> <pytest-args...> ; loop its bundles. rc 1 on any failure.
   local board=$1 b lrc=0
   shift
@@ -101,6 +110,7 @@ if [ "$BY_BOARD" = 1 ]; then
     cat "results/lane-$board.log" 2>/dev/null || true
   done
   echo "== [$(ts)] by-board done (rc $trc)"
+  summarize_all
   exit "$trc"
 fi
 
@@ -109,4 +119,5 @@ while IFS= read -r b; do
   # then (README "Benchmarking / Rig note").
   test_bundle "$b" "$@" || trc=$?
 done < <(all_bundles)
+summarize_all
 exit "$trc"

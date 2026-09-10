@@ -398,7 +398,14 @@ self-hosted runner, no inbound ports on your network:
   tailnet, `ssh`es in to **`git reset --hard`** the tester's own checkout to the
   rig commit under test (`git clean -ffdx` keeps only the gitignored
   `hil_config.local.toml`, so the checkout never drifts), runs the test batch,
-  pulls `results/` back (even on failure), publishes the JUnit report.
+  pulls `results/` back (even on failure), and publishes the report.
+
+The **run page's Summary tab** gets a rolled-up view
+(`host/hil/summarize.py results/junit-*.xml`): a board × profile matrix, a
+per-feature-area pass/fail/skip table across every bundle, failures inline, and
+the skips that look like a real gap (missing golden, unreadable hidraw, absent
+dep) — the routine "this profile has no rz axis" skips are counted, not listed.
+`dorny/test-reporter` still creates the per-test check that gates the job.
 
 **Two run modes.** Push, `repository_dispatch` (the library's correctness gate),
 and a plain `workflow_dispatch` run `tester/test-all.sh --by-board` — the parallel

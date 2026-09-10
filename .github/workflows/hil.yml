@@ -235,6 +235,16 @@ jobs:
           rsync -a hil-tester:ESP32-BLE-Gamepad-HIL/results/ results/ || true
           exit $rc
 
+      - name: Job summary
+        if: always()
+        run: |
+          # post-only -- dorny/test-reporter below is the gate, so never fail here
+          if ls results/junit-*.xml >/dev/null 2>&1; then
+            python3 host/hil/summarize.py results/junit-*.xml >> "$GITHUB_STEP_SUMMARY" || true
+          else
+            { echo "## HIL"; echo; echo "No JUnit results — the tester step produced nothing (see the step log)."; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - uses: actions/upload-artifact@v6
         if: always()
         with:
