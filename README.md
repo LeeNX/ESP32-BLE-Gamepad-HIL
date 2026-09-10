@@ -133,11 +133,10 @@ To pair by hand: `bluetoothctl` → `scan on`, wait for `HILpad <board>`, then
 Do **both** the Builder and Tester setup on one Linux machine, plug in the
 ESP32 (via a powered hub), and `./run.sh` builds, flashes and tests in one go.
 
-**The tester box must be Linux** — the suite asserts on `/dev/input/event*` via
-`evdev` and pairs through BlueZ `bluetoothctl`. **macOS can be the builder
-only** (`builder/build.sh --push` to a Linux tester); see
-[macOS as a tester](#macos-as-a-tester-unsupported--gap-list) for what a macOS
-tester port would take.
+**The full suite needs a Linux tester box** — it asserts on `/dev/input/event*`
+via `evdev` and pairs through BlueZ `bluetoothctl`. On macOS, `builder/build.sh
+--push` sends bundles to a Linux tester; the portable slice of the suite also
+runs there directly — see [Desktop tester (macOS / Windows)](#desktop-tester-macos--windows).
 
 ## Running
 
@@ -597,118 +596,53 @@ workflow rebuilds the same firmware set from the pinned rig ref and attaches it
 to the library release too, so a library version ships the firmware it was
 HIL-validated with.
 
-## macOS as a tester (unsupported — gap list)
+## Desktop tester (macOS / Windows)
 
-Flashing and the serial command channel work on macOS (`esptool` + `pyserial`
-are cross-platform; point `[board.<b>].port` at `/dev/cu.usbserial-*`). The two
-things the suite needs from the OS — initiating the BLE bond and reading HID
-events as ground truth — have no macOS implementation:
+The Linux rig asserts against `evdev` / BlueZ / `hidraw` — Linux-only. The
+**portable slice** of it lives in [`desktop/`](desktop/): the checks that ride
+the `hil_runner` USB-serial channel, plus a behavioural layer read through SDL
+and hidapi, which are cross-platform. It is not a fork — it imports the rig's
+`hil.serialdev` / `hil.hidraw` and reuses `firmware/golden/` directly.
+[`desktop/README.md`](desktop/README.md) is the full setup and rationale; the
+short version:
 
-1. **A CoreBluetooth pairing backend** to replace BlueZ `bluetoothctl`
-   (`host/hil/bluetooth.py`). *Blocker:* macOS hands a BLE-HID device's GATT
-   service to the system HID stack, so an app can't trigger pairing; it stays a
-   one-time manual step in System Settings, with the suite run `--no-pair`.
-2. **An IOHIDManager read backend** to replace `host/hil/evdev_utils.py`. Needs
-   `pyobjc-framework-IOKit` and the **Input Monitoring** TCC permission (granted
-   by hand or MDM) for the python running pytest.
-3. **macOS ground-truth mapping tables.** Every `test_*.py` asserts against
-   Linux `hid-input` codes; IOKit exposes raw HID usages instead, so the
-   expected values must be re-characterised and kept as a per-platform table.
-4. **Backend selection + a macOS bootstrap.** `conftest.py` fixtures and
-   `tester/requirements.txt` are evdev-hardwired; they'd dispatch on
-   `sys.platform`.
-5. **CI**: a headless Mac runner needs a logged-in GUI session for BLE plus
-   pre-provisioned TCC grants — more friction than the Linux path.
+| Marker | Reads | Needs |
+|---|---|---|
+| `-m serial_only` | the `hil_runner` serial channel — descriptor generation (`RMAP?` vs golden), report sizing, DIS / PnP, advertised name (`NAME?`), protocol round-trips | `pyserial` + a flashed board. No BLE. |
+| `-m sdl` | the DUT as an SDL joystick (pygame) — buttons one-to-one, axes monotonic with −1/0/+1 endpoints, all 8 hat directions. "What a game sees." | board bonded to this host |
+| `-m hid` | raw HID input reports off the device (hidapi), decoded against the report layout — pins firmware + descriptor + transport | board bonded to this host |
+| `-m latency` (opt-in) | `TPRESS` → timed hidapi read; p50 / p90 / p99 for BLE-air and end-to-end | board bonded to this host |
 
-## Cross-platform tester (macOS / Windows) — TODO, investigate
+**Platform status:**
 
-The gap list above has one item that actually matters — **the ground-truth read
-layer**. Flashing, the serial protocol, and the firmware-id check are already
-cross-platform. Two things worth scoping:
+- **macOS** — all four levels run green against a wired board (developed on
+  macOS 26 / `esp32dev`). SDL is actually a *cleaner* view than the rig's
+  evdev: every hat surfaces (evdev only makes `ABS_HAT0`), all 8 axis slots
+  respond, all 64 buttons enumerate one-to-one — with the library's
+  reversed-hat quirk pinned (firmware hat `h` = SDL hat `n − h`).
+- **Windows** — the deps are cross-platform wheels and the code paths are
+  `sys.platform`-neutral, but **it has not been run on Windows yet**. `COM*`
+  ports, `Get-PnpDevice -Class Ports`, and *Settings ▸ Bluetooth ▸ Add device*
+  for the first pair are the expected substitutions.
 
-### 1. A serial-only subset that runs anywhere `pyserial` does
+**Still manual / not done:**
 
-**Step 1 done — lives in [`desktop/`](desktop/).** `desktop/` reuses this repo's
-`hil.serialdev` / `hil.hidraw` and the `firmware/golden/` files directly (not a
-fork) and adds `desktop/tests/test_serial_only.py` (`-m serial_only`). Verified
-green on macOS against a local `esp32dev` on the `local` profile (`HILdev
-<board>` — a dev board that doesn't clash with the rig). The rest of this
-subsection is the original scoping notes.
+- **The first BLE bond.** macOS and Windows hand a bonded BLE-HID device to the
+  OS HID stack, so an app can't cleanly initiate pairing — it's a one-time
+  click in System Settings / Windows Bluetooth. `desktop/pair-assist.py` reads
+  the board over serial, names the exact entry to click, and waits on `CONN?`;
+  `--clear-bonds`, and (macOS) `--reconnect` to refresh a stale bond after a
+  re-flash.
+- **GATT reads** (Device Info / PnP / Battery over CoreBluetooth / WinRT) — the
+  rig does these over BlueZ D-Bus; no host-native backend on the desktop side
+  yet, so DIS / PnP are checked over the serial channel instead.
+- **CI.** A hosted Mac / Windows runner needs a logged-in GUI session for BLE
+  and, on macOS, a pre-provisioned Input Monitoring grant — more friction than
+  the Linux path. For now the desktop tester is run by hand before a release;
+  `lint.yml`'s `desktop-collect` job only guards that the imports and fixtures
+  still resolve on Linux.
 
-The serial command channel needs no BLE and no host HID stack. It can already
-verify:
-
-- the board is alive and running the **expected firmware/profile**
-  (`CONFIG?` — the same `firmware_id()` check `conftest.py::dut` does),
-- the serial protocol round-trips (`PING`, `PRESS`, `AXIS`, `HAT`),
-- connection parameters and report sizing (`PEERINFO?`, `RSIZE?`),
-- the descriptor the **library** generated matches its own reported size and the
-  checked-in golden (`getHidReportDescriptor()` vs
-  `firmware/golden/<profile>.hiddesc` — the DUT-side half of the descriptor
-  test, minus the "what the kernel received over GATT" half).
-
-Mark those assertions `@pytest.mark.serial_only`; `pytest -m serial_only` then
-runs on Windows (`COM*`) and macOS (`/dev/cu.usbserial-*`), with pairing done by
-hand once in the OS BLE settings and the run in `--no-pair`. A helper can poll
-`CONN?` and prompt "pair the board now, waiting…" — no CoreBluetooth /
-`Windows.Devices.Bluetooth` code needed.
-
-Catches: firmware regressions in descriptor generation, report sizing, the
-serial protocol, connection params — a laptop smoke test between full Linux HIL
-runs. Can't catch: anything that needs the host's HID interpretation.
-
-A multi-board serial-only run would reuse the `--by-board` shape (one process per
-board, independent once each has its port + manual bond). The one shared file,
-`state.json`, is `fcntl.flock`-guarded — POSIX, so macOS is fine; Windows would
-need `msvcrt.locking` / `portalocker` or per-board state files.
-
-### 2. What replaces evdev on each platform
-
-To run the **behavioural** assertions (press → one distinct event, axis → one
-ABS code, …) off-Linux you need a host read path. **Prefer the host OS's native
-input system** — the same one SDL's per-platform backends use. The point of
-these tests is "what does a real app on this OS see?", and only the native stack
-answers that: it applies the OS's own HID parsing, its usage→control mapping,
-and any platform quirks we'd want a test to pin (the way the Linux suite pins
-evdev's ~79-button ceiling, `ABS_HAT0`-only, and the reversed-hat quirk).
-
-| Platform | Native input system (target) | SDL backend it mirrors | Python route |
-|---|---|---|---|
-| Linux (current) | evdev — `/dev/input/event*`, OS-decoded events | `linux/SDL_evdev` | `python-evdev` (`host/hil/evdev_utils.py`) |
-| macOS | IOKit HID — `IOHIDManager`, HID elements decoded by usage-page/usage | `darwin/SDL_iokitjoystick` | `pyobjc-framework-IOKit`; **Input Monitoring** TCC grant for the pytest process |
-| Windows | Raw Input + `hid.dll` preparsed data (`HidP_GetCaps` / `HidP_GetUsages`); `Windows.Gaming.Input` for the higher-level gamepad view | `SDL_rawinputjoystick`, `SDL_windows_gaming_input` | `pywinusb` or `ctypes` → `hid.dll`; WGI via `winrt` |
-
-**Or just use SDL** — `pygame`'s joystick module *is* SDL's per-OS driver, one
-code path for all three. `desktop/` does this (`pytest -m sdl`): headless
-(`SDL_VIDEODRIVER=dummy`), no window, no macOS permission for a game controller,
-and it's genuinely "what a game sees". `test_buttons.py` is green on macOS this
-way. It trades some fidelity — SDL applies its own remapping/quirk handling, so
-a few things the Linux suite pins (the reversed-hat quirk, the exact button
-ceiling) may be smoothed over; a raw `pyobjc-IOKit` / Raw Input backend is still
-the way to observe *those*. Each backend (SDL included) still wants a
-per-platform expected-value table, because each OS/driver exposes the device its
-own way — the same table SDL itself maintains as its mapping DB.
-
-**hidapi as the last resort.** `hidapi` (what SDL wraps as `SDL_hidapi`) reads
-**raw HID input reports** straight off the device on all three OSes
-(hidraw / IOHIDManager / `hid.dll` underneath), bypassing the OS's input
-interpretation. Parse those against the descriptor golden
-(`firmware/golden/<profile>.hiddesc`) and you get button/axis/hat state with no
-per-platform table — but you're then testing **the descriptor + firmware**, not
-what the OS makes of them. Reach for it only to:
-
-- bootstrap a platform before its native backend is written **(done — `desktop/`
-  step, `pytest -m hid`: `test_hid_reports.py` is green on macOS this way)**, or
-- cover a corner case the native API can't observe (a field the OS collapses or
-  hides), as an explicitly-marked complement to the native assertions.
-
-hidapi's `hid_open` is **non-seizing** — the OS still delivers the gamepad's
-input to the foreground app during a run (benign on a dedicated tester; gamepad
-buttons/axes do nothing in a shell/file manager). A hard lock is
-`IOHIDDeviceOpen(kIOHIDOptionsTypeSeizeDevice)` / `RIDEV_NOLEGACY`, which on
-macOS wants root; the Linux rig doesn't seize either.
-
-CI on macOS/Windows stays hard (item 5): both want a logged-in GUI session for
-BLE; macOS needs the Input Monitoring grant pre-provisioned. A self-hosted
-runner, or a "run this locally before a release" checklist item, is more
-realistic than hosted CI.
+Latency numbers from `-m latency` are **not directly comparable** to the rig's
+— the rig times off the kernel evdev timestamp, the desktop path off a
+userspace hidapi read, so it runs a few ms high and jittier. Good for same-box
+regression, not absolute air-time.
