@@ -39,6 +39,6 @@ if [[ "$status" == "RIG BUSY"* ]]; then
   echo "-- following (Ctrl-C to stop): ${logs[*]} --"
   exec tail -n 20 -f "${logs[@]}"
 else
-  echo "-- rig idle; tail of the last log: ${logs[*]} --"
-  tail -n 40 "${logs[@]}"
+  echo "-- rig idle; tail of the last log: ${logs[0]} --"
+  tail -n 40 "${logs[0]}"
 fi
