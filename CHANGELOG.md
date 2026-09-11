@@ -20,6 +20,11 @@ What a bump means:
 
 ### Added
 
+- **`tester/rig-status.sh -f` / `-v`** — follow the currently-running test's
+  log instead of only the one-line verdict: all `results/lane-<board>.log`
+  together under `--by-board`, or the one stamped `results/log-<board>-
+  <profile>-<stamp>.txt` for a lone `tester/test.sh` run. Prints the last log's
+  tail instead of blocking when the rig is idle.
 - **`scripts/update-goldens.py`** — regenerate `firmware/golden/<profile>.hiddesc`
   after an intentional descriptor change: build, flash one board, read the
   descriptor over serial (`RMAP?` — no BLE, no Linux), write the golden, refusing
