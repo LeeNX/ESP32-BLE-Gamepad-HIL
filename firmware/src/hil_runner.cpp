@@ -40,13 +40,18 @@ static String line;
 
 static void reply(const char *s) { Serial.println(s); }
 
-// Activity LED: one brief, non-blocking pulse per command handled, plus an
-// explicit LED ON/OFF override. Opt-in per board -- wire an LED (+resistor)
-// to a spare GPIO and set `-D HIL_LED_PIN=<gpio>` in platformio.ini (see
-// README "Rig hardware TODO"); undefined boards compile with these as no-ops
-// and LED? replies ERR unsupported. Must stay non-blocking: this firmware
-// also runs the --bench latency/throughput sweep, and a delay() here would
-// skew exactly the timing numbers that measures.
+// Two opt-in status LEDs -- neither wired on any board by default, both
+// compile out to no-ops when their pin macro is undefined. Wiring guide:
+// docs/rig-hardware.md. Pin comes in via -D HIL_LED_PIN / -D
+// HIL_CONN_LED_PIN, set per board from hil_config.toml or a
+// $HIL_LED_PIN_<BOARD> / $HIL_CONN_LED_PIN_<BOARD> env var (README "Rig
+// hardware TODO") -- never hardcoded here or in platformio.ini.
+//
+// Activity LED (HIL_LED_PIN): one brief, non-blocking pulse per command
+// handled, plus an explicit LED ON/OFF override for a wiring check with no
+// BLE pairing needed. Must stay non-blocking -- this firmware also runs the
+// --bench latency/throughput sweep, and a delay() here would skew exactly
+// the timing numbers that measures.
 #if defined(HIL_LED_PIN)
 static uint32_t ledOffAtMs = 0;
 
@@ -70,6 +75,27 @@ static void ledService()
 static void ledSetup() {}
 static void ledPulse() {}
 static void ledService() {}
+#endif
+
+// Connection LED (HIL_CONN_LED_PIN): steady on while bonded+connected over
+// BLE, off otherwise -- mirrors what CONN? reports. State-driven only, no
+// serial override: unlike the activity LED there's nothing useful to fake,
+// so verify wiring by actually pairing rather than a manual command.
+#if defined(HIL_CONN_LED_PIN)
+static bool connLedOn = false;
+
+static void connLedSetup() { pinMode(HIL_CONN_LED_PIN, OUTPUT); digitalWrite(HIL_CONN_LED_PIN, LOW); }
+
+static void connLedService()
+{
+    bool connected = bleGamepad.isConnected();
+    if (connected == connLedOn) return;
+    digitalWrite(HIL_CONN_LED_PIN, connected ? HIGH : LOW);
+    connLedOn = connected;
+}
+#else
+static void connLedSetup() {}
+static void connLedService() {}
 #endif
 
 static int axisIndex(const String &name)
@@ -502,6 +528,7 @@ void setup()
     Serial.begin(115200);
     line.reserve(64);
     ledSetup();
+    connLedSetup();
     hilApplyProfile(bleGamepadConfig);
     // begin() is called here, from setup(), exactly like the TestAll example.
     // Calling it later from loop() in response to a serial command reliably
@@ -532,4 +559,5 @@ void loop()
         }
     }
     ledService();
+    connLedService();
 }

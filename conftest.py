@@ -165,13 +165,21 @@ def firmware(rigcfg, pytestconfig):
     ]
     # platformio.ini resolves the library-under-test via symlink://${sysenv.HIL_LIB_DIR}
     env = {**os.environ, "HIL_LIB_DIR": rigcfg["rig"].get("lib_dir", "")}
-    # Activity LED GPIO (README "Rig hardware TODO"): $HIL_LED_PIN_<BOARD> (e.g.
-    # HIL_LED_PIN_ESP32DEV) wins over hil_config.toml [board.*].led_pin -- same
-    # precedence as builder/build.sh, for parity between the bundle-build path
-    # (builder/build.sh, used on the tester) and this direct-from-source one.
-    led_pin = os.environ.get(f"HIL_LED_PIN_{rigcfg['name'].upper()}") or rigcfg.get("led_pin")
+    # Status LED GPIOs (docs/rig-hardware.md, README "Rig hardware TODO"):
+    # $HIL_LED_PIN_<BOARD> / $HIL_CONN_LED_PIN_<BOARD> win over hil_config.toml
+    # [board.*].led_pin/.conn_led_pin -- same precedence as builder/build.sh,
+    # for parity between the bundle-build path (used on the tester) and this
+    # direct-from-source one.
+    board_upper = rigcfg["name"].upper()
+    led_flags = []
+    led_pin = os.environ.get(f"HIL_LED_PIN_{board_upper}") or rigcfg.get("led_pin")
     if led_pin:
-        env["PLATFORMIO_BUILD_FLAGS"] = f"{env.get('PLATFORMIO_BUILD_FLAGS', '')} -DHIL_LED_PIN={led_pin}".strip()
+        led_flags.append(f"-DHIL_LED_PIN={led_pin}")
+    conn_led_pin = os.environ.get(f"HIL_CONN_LED_PIN_{board_upper}") or rigcfg.get("conn_led_pin")
+    if conn_led_pin:
+        led_flags.append(f"-DHIL_CONN_LED_PIN={conn_led_pin}")
+    if led_flags:
+        env["PLATFORMIO_BUILD_FLAGS"] = f"{env.get('PLATFORMIO_BUILD_FLAGS', '')} {' '.join(led_flags)}".strip()
     print(f"\n[firmware] {' '.join(cmd)}")
     # Native USB-Serial/JTAG (C3/S3) uploads are flaky -- "Packet content
     # transfer stopped" -- and usually succeed on a retry.

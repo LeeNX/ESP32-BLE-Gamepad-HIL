@@ -48,12 +48,14 @@ pio_env = "esp32dev"
 # (ls -l /dev/serial/by-id/).
 port = "/dev/serial/by-id/CHANGE-ME"
 profile = "default"
-# Activity LED (README "Serial protocol" / "Rig hardware TODO"): the GPIO an
-# LED+resistor is wired to on THIS box's board, once wired -- builder/build.sh
-# passes it as -D HIL_LED_PIN=<n>. `$HIL_LED_PIN_ESP32DEV` overrides this
-# without editing config (handy from a CI runner). Unset/absent -> LED ON/OFF
-# and the activity pulse both compile out; TEMP? is unaffected.
-# led_pin = <gpio>
+# Status LEDs (docs/rig-hardware.md, README "Serial protocol" / "Rig hardware
+# TODO"): the GPIOs an LED+resistor is wired to on THIS box's board, once
+# wired -- builder/build.sh passes them as -D HIL_LED_PIN=<n> / -D
+# HIL_CONN_LED_PIN=<n>. `$HIL_LED_PIN_ESP32DEV` / `$HIL_CONN_LED_PIN_ESP32DEV`
+# override without editing config (handy from a CI runner). Unset/absent ->
+# that LED's code compiles out to a no-op; TEMP? is unaffected either way.
+# led_pin = <gpio>          # pulses on every serial command; LED ON/OFF override
+# conn_led_pin = <gpio>     # steady on while BLE-connected; no override, state-driven
 
 [board.esp32c3]
 pio_env = "esp32c3"
@@ -66,10 +68,11 @@ pio_env = "esp32c3"
 port = "/dev/serial/by-id/CHANGE-ME"
 # flash_port = "/dev/serial/by-id/CHANGE-ME"
 profile = "default"
-# Activity LED -- see board.esp32dev.led_pin above. Override: $HIL_LED_PIN_ESP32C3
-# GPIO8/9 are boot-strap pins on the C3 -- avoid them unless you've checked
-# your board's strapping behaviour.
+# Status LEDs -- see board.esp32dev above. Overrides: $HIL_LED_PIN_ESP32C3 /
+# $HIL_CONN_LED_PIN_ESP32C3. GPIO8/9 are boot-strap pins on the C3 and
+# GPIO20/21 are UART0 (hil_runner's Serial) -- avoid all four.
 # led_pin = <gpio>
+# conn_led_pin = <gpio>
 
 [board.esp32s3]
 pio_env = "esp32s3"
@@ -80,5 +83,7 @@ pio_env = "esp32s3"
 port = "/dev/serial/by-id/CHANGE-ME"
 # flash_port = "/dev/serial/by-id/CHANGE-ME"
 profile = "default"
-# Activity LED -- see board.esp32dev.led_pin above. Override: $HIL_LED_PIN_ESP32S3
+# Status LEDs -- see board.esp32dev above. Overrides: $HIL_LED_PIN_ESP32S3 /
+# $HIL_CONN_LED_PIN_ESP32S3.
 # led_pin = <gpio>
+# conn_led_pin = <gpio>

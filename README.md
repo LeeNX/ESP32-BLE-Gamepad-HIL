@@ -278,7 +278,9 @@ banner and any debug lines are skipped by the host.
 Every command also pulses the same LED for ~30ms as a received-activity
 indicator (non-blocking — see `ledPulse()`/`ledService()` in
 `hil_runner.cpp`), so a healthy board visibly flickers while a test run talks
-to it and goes dark if the link dies mid-run.
+to it and goes dark if the link dies mid-run. A second, independent LED
+(`HIL_CONN_LED_PIN`, no serial command — it just mirrors `CONN?`) stays
+steady on while BLE-connected. Wiring guide for both: `docs/rig-hardware.md`.
 
 `begin()` runs in `setup()` (like `TestAll.ino`): calling it lazily from
 `loop()` on the BEGIN command wedged the NimBLE server task on the classic
@@ -502,15 +504,17 @@ Ideas from the 2026-09-11 rig-crash investigation (see project memory
 `hil-rig-usb-bus-crash-sep11`), not yet built — the activity LED / `TEMP?`
 above are the software half; these are physical additions:
 
-- **Per-MCU activity LED**: firmware support landed (`LED ON\|OFF` + the
-  automatic pulse-on-command, see "Serial protocol" above) — still needs an
-  LED+resistor wired to a spare GPIO per board, then either set
-  `[board.<name>].led_pin` in `hil_config.local.toml` or export
-  `$HIL_LED_PIN_<BOARD>` (e.g. `HIL_LED_PIN_ESP32DEV=2`) before building —
-  the latter wins and needs no config edit, handy from a CI runner. Picked up
-  by both `builder/build.sh` (the bundle path CI/the tester use) and
-  `conftest.py`'s direct-from-source build. Mind the C3's GPIO8/9 boot-strap
-  pins when choosing one there.
+- **Per-MCU status LEDs**: firmware support landed for both — activity
+  (`LED ON\|OFF` + the automatic pulse-on-command) and connection (steady on
+  while BLE-connected), see "Serial protocol" above. Still needs actually
+  wiring an LED+resistor per board/per LED — full parts list, resistor
+  sizing, a pluggable move-between-boards approach, and per-board GPIO
+  conflicts to avoid: **`docs/rig-hardware.md`**. Once wired, set
+  `[board.<name>].led_pin`/`.conn_led_pin` in `hil_config.local.toml`, or
+  export `$HIL_LED_PIN_<BOARD>`/`$HIL_CONN_LED_PIN_<BOARD>` before building
+  (wins, no config edit — handy from a CI runner). Picked up by both
+  `builder/build.sh` (the bundle path CI/the tester use) and `conftest.py`'s
+  direct-from-source build.
 - **Ambient box temperature/humidity sensor** (e.g. BME280/SHT31 on I2C to
   the Pi): cheap, and drops straight into `tester/rig-lock.sh`'s
   `health-timeline-*.csv` sampler as one more column.
