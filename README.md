@@ -474,10 +474,16 @@ what stops CI and a local run from stomping each other (the `git reset --hard` o
 the tester checkout is the real hazard).
 
 ```sh
-ssh <tester> ESP32-BLE-Gamepad-HIL/tester/rig-status.sh   # who/what is running now
+ssh <tester> ESP32-BLE-Gamepad-HIL/tester/rig-status.sh      # who/what is running now
+ssh <tester> ESP32-BLE-Gamepad-HIL/tester/rig-status.sh -f   # + the live log (blocks; Ctrl-C to stop)
 tester/test.sh <bundle> --no-wait                          # fail immediately if busy
 tester/test.sh <bundle> --wait 300                         # give up after 5 min
 ```
+
+`-f` (or `-v`) tails whatever's actually growing: all `results/lane-<board>.log`
+together under `--by-board`, or the one stamped `results/log-<board>-<profile>-
+<stamp>.txt` for a lone `tester/test.sh` run. Rig idle — no run in progress —
+just prints the last log's tail instead of blocking.
 
 flock releases automatically when the holder dies — there's no stale lockfile. If
 a holder wedged and `rig-status.sh` shows its pid `DEAD`, clear it with
