@@ -48,6 +48,12 @@ pio_env = "esp32dev"
 # (ls -l /dev/serial/by-id/).
 port = "/dev/serial/by-id/CHANGE-ME"
 profile = "default"
+# Activity LED (README "Serial protocol" / "Rig hardware TODO"): the GPIO an
+# LED+resistor is wired to on THIS box's board, once wired -- builder/build.sh
+# passes it as -D HIL_LED_PIN=<n>. `$HIL_LED_PIN_ESP32DEV` overrides this
+# without editing config (handy from a CI runner). Unset/absent -> LED ON/OFF
+# and the activity pulse both compile out; TEMP? is unaffected.
+# led_pin = <gpio>
 
 [board.esp32c3]
 pio_env = "esp32c3"
@@ -60,6 +66,10 @@ pio_env = "esp32c3"
 port = "/dev/serial/by-id/CHANGE-ME"
 # flash_port = "/dev/serial/by-id/CHANGE-ME"
 profile = "default"
+# Activity LED -- see board.esp32dev.led_pin above. Override: $HIL_LED_PIN_ESP32C3
+# GPIO8/9 are boot-strap pins on the C3 -- avoid them unless you've checked
+# your board's strapping behaviour.
+# led_pin = <gpio>
 
 [board.esp32s3]
 pio_env = "esp32s3"
@@ -70,3 +80,5 @@ pio_env = "esp32s3"
 port = "/dev/serial/by-id/CHANGE-ME"
 # flash_port = "/dev/serial/by-id/CHANGE-ME"
 profile = "default"
+# Activity LED -- see board.esp32dev.led_pin above. Override: $HIL_LED_PIN_ESP32S3
+# led_pin = <gpio>

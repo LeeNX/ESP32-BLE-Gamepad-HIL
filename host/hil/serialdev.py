@@ -25,6 +25,7 @@ REPLY_PREFIXES = (
     "T",
     "FEATURE",
     "OUTPUT",
+    "TEMP",
 )
 
 
@@ -168,6 +169,21 @@ class SerialDev:
         """`NAME?` -> the advertised BLE name (getDeviceName())."""
         r = self.command("NAME?")
         return r.split(" ", 1)[1] if r.startswith("NAME ") else ""
+
+    def temp_c(self):
+        """`TEMP?` -> on-die temp in Celsius (all 3 boards support it, via
+        Arduino's temperatureRead() -- see hil_runner.cpp), or None if the
+        firmware ever replies ERR (e.g. a future chip with no sensor API)."""
+        r = self.command("TEMP?")
+        if r.startswith("ERR"):
+            return None
+        return float(r.split(" ", 1)[1])
+
+    def led(self, on):
+        """`LED ON|OFF` -> True if applied, False if HIL_LED_PIN isn't wired/
+        configured for this board (firmware replies ERR unsupported)."""
+        r = self.command(f"LED {'ON' if on else 'OFF'}")
+        return r == "OK"
 
     def bonds(self):
         """`BONDS?` -> list of bonded peer MACs the firmware has stored."""

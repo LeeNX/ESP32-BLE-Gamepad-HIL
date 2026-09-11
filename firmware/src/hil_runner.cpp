@@ -21,6 +21,7 @@
 #include <Arduino.h>
 #include <BleGamepad.h>
 #include <NimBLEDevice.h>
+#include <soc/soc_caps.h>
 #include "hil_profile.h"
 
 // HIL_DEVICE_NAME (hil_profile.h): "HILpad <board>" for CI/release, "HILdev
@@ -38,6 +39,38 @@ static const int HIL_BURST_MAX = 2000;
 static String line;
 
 static void reply(const char *s) { Serial.println(s); }
+
+// Activity LED: one brief, non-blocking pulse per command handled, plus an
+// explicit LED ON/OFF override. Opt-in per board -- wire an LED (+resistor)
+// to a spare GPIO and set `-D HIL_LED_PIN=<gpio>` in platformio.ini (see
+// README "Rig hardware TODO"); undefined boards compile with these as no-ops
+// and LED? replies ERR unsupported. Must stay non-blocking: this firmware
+// also runs the --bench latency/throughput sweep, and a delay() here would
+// skew exactly the timing numbers that measures.
+#if defined(HIL_LED_PIN)
+static uint32_t ledOffAtMs = 0;
+
+static void ledSetup() { pinMode(HIL_LED_PIN, OUTPUT); digitalWrite(HIL_LED_PIN, LOW); }
+
+static void ledPulse()
+{
+    digitalWrite(HIL_LED_PIN, HIGH);
+    ledOffAtMs = millis() + 30;
+}
+
+static void ledService()
+{
+    if (ledOffAtMs && (int32_t)(millis() - ledOffAtMs) >= 0)
+    {
+        digitalWrite(HIL_LED_PIN, LOW);
+        ledOffAtMs = 0;
+    }
+}
+#else
+static void ledSetup() {}
+static void ledPulse() {}
+static void ledService() {}
+#endif
 
 static int axisIndex(const String &name)
 {
@@ -137,6 +170,7 @@ static void handle(const String &cmd)
     int n = tokenize(cmd, t);
     if (n == 0) return;
     const String &c = t[0];
+    ledPulse();
 
     if (c == "PING") { reply("PONG"); return; }
 
@@ -209,6 +243,35 @@ static void handle(const String &cmd)
         Serial.printf("RMAP %d ", len);
         for (int i = 0; i < len; i++) Serial.printf("%02X", d[i]);
         Serial.println();
+        return;
+    }
+
+    if (c == "TEMP?")
+    {
+        // On-die temp sensor, via the Arduino core's temperatureRead(): the
+        // new driver on S2/S3/C3/C6 (SOC_TEMP_SENSOR_SUPPORTED), *and* the
+        // classic ESP32 too, via an undocumented ROM function
+        // (temprature_sens_read() [sic], CONFIG_IDF_TARGET_ESP32 branch in
+        // esp32-hal-misc.c). The classic-ESP32 reading is uncalibrated and
+        // known to run well above ambient -- fine for trend-watching (did
+        // this board get hotter mid-run), not for an absolute reading.
+#if defined(CONFIG_IDF_TARGET_ESP32) || SOC_TEMP_SENSOR_SUPPORTED
+        Serial.printf("TEMP %.1f\n", temperatureRead());
+#else
+        reply("ERR unsupported");
+#endif
+        return;
+    }
+
+    if (c == "LED")
+    {
+#if defined(HIL_LED_PIN)
+        if (n >= 2 && t[1] == "ON") { digitalWrite(HIL_LED_PIN, HIGH); ledOffAtMs = 0; reply("OK"); return; }
+        if (n >= 2 && t[1] == "OFF") { digitalWrite(HIL_LED_PIN, LOW); ledOffAtMs = 0; reply("OK"); return; }
+        reply("ERR args");
+#else
+        reply("ERR unsupported");
+#endif
         return;
     }
 
@@ -438,6 +501,7 @@ void setup()
 {
     Serial.begin(115200);
     line.reserve(64);
+    ledSetup();
     hilApplyProfile(bleGamepadConfig);
     // begin() is called here, from setup(), exactly like the TestAll example.
     // Calling it later from loop() in response to a serial command reliably
@@ -467,4 +531,5 @@ void loop()
             line += ch;
         }
     }
+    ledService();
 }

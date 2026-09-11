@@ -82,6 +82,9 @@ rc=0
 say "pytest  (this streams; pairing takes ~20s, --bench adds several minutes)"
 [[ $BENCH == 1 ]] && say "  bench sweep enabled -- latency + throughput, ~5-8 min"
 start=$(date +%s)
+since_iso=$(date -Iseconds)
+PYTHONPATH=host "$VENV/bin/python" -m hil.sysinfo \
+  > "results/health-before-${tag}.json" 2>/dev/null || true
 # Pin rootdir/ini: --bundle is an absolute path outside the repo and pytest's
 # first-pass arg parse treats it as a positional test path -> rootdir discovery
 # would never find this pytest.ini and conftest.py would not load.
@@ -89,6 +92,13 @@ start=$(date +%s)
   --bundle "$BUNDLE" --board "$BOARD" --profile "$PROFILE" \
   --junit-xml="$xml" "${PYTEST_EXTRA[@]}" 2>&1 | tee "$log" || rc=$?
 elapsed=$(( $(date +%s) - start ))
+PYTHONPATH=host "$VENV/bin/python" -m hil.sysinfo --dynamic-only \
+  > "results/health-after-${tag}.json" 2>/dev/null || true
+# best-effort: needs persistent journald storage + a readable journal (see
+# hil-rig-usb-bus-crash-sep11 memory) -- silently empty otherwise, non-fatal.
+journalctl --since "$since_iso" --no-pager 2>/dev/null \
+  | grep -aiE 'dwc_otg|ftdi_sio|usb[0-9].*(reset|error)|bluetoothd|hci0' \
+  > "results/usb-bt-${tag}.txt" || true
 
 "$VENV/bin/python" host/hil/summarize.py "$xml" --out "results/summary-${tag}.md" >/dev/null || true
 cp "results/summary-${tag}.md" results/summary.md 2>/dev/null || true

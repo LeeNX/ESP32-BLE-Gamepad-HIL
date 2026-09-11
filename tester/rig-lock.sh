@@ -47,13 +47,55 @@ rig_lock_acquire() {
 
   export HIL_RIG_LOCK_HELD=$$ HIL_RUN_PID=$$
   python3 "$_RL_PY" write busy || true
-  trap 'python3 "'"$_RL_PY"'" write idle "$?" || true' EXIT
+  _rl_health_start
+  trap '_rl_on_exit "$?"' EXIT
   return 0
 }
 
 _rl_busy() {
   echo "== HIL rig is busy -- current holder:" >&2
   python3 "$_RL_PY" status >&2 || true
+}
+
+# Background sampler for the lock's whole lifetime: temp/freq/under-voltage/
+# load every $HIL_HEALTH_INTERVAL_SECS (default 15s), so a crash mid-run
+# leaves a timeline behind instead of just a before/after snapshot. Linux-only
+# (sysfs paths) -- silently a no-op elsewhere (e.g. a macOS one-box dev run).
+# See hil-rig-usb-bus-crash-sep11 memory for why this exists.
+_rl_health_start() {
+  [ -d /sys/class/thermal ] || return 0
+  local out
+  out="results/health-timeline-$(date +%Y%m%d-%H%M%S)-$$.csv"
+  mkdir -p results
+  echo "ts,temp_c,freq_mhz,undervoltage,loadavg" > "$out"
+  local uv_alarm="" h
+  for h in /sys/class/hwmon/hwmon*/name; do
+    [ "$(cat "$h" 2>/dev/null)" = "rpi_volt" ] || continue
+    uv_alarm="$(dirname "$h")/in0_lcrit_alarm"
+    break
+  done
+  (
+    while true; do
+      sleep "${HIL_HEALTH_INTERVAL_SECS:-15}"
+      local temp freq uv load
+      temp=$(($(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo 0) / 1000))
+      freq=$(($(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq 2>/dev/null || echo 0) / 1000))
+      uv=$([ -n "$uv_alarm" ] && cat "$uv_alarm" 2>/dev/null || echo "")
+      load=$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || echo "?")
+      printf '%s,%s,%s,%s,%s\n' "$(date -Iseconds)" "$temp" "$freq" "$uv" "$load" >> "$out"
+    done
+  ) &
+  _RL_HEALTH_PID=$!
+}
+
+_rl_health_stop() {
+  [ -n "${_RL_HEALTH_PID:-}" ] && kill "$_RL_HEALTH_PID" 2>/dev/null
+}
+
+_rl_on_exit() {
+  local rc=$1
+  _rl_health_stop
+  python3 "$_RL_PY" write idle "$rc" || true
 }
 
 # Executed directly (not sourced): wrapper / --status-write passthrough.
