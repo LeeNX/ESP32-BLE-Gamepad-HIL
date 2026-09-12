@@ -19,6 +19,7 @@ directly. One repo, one source of truth for the protocol and the goldens.
 | One-time BLE pairing | ✅ `pair-assist.py` — names the device to click, `--clear-bonds`, `--reconnect` (macOS blueutil), waits on `CONN?` |
 | Behavioural — buttons / axes / hats (`-m sdl`, SDL joystick, + `-m hid` raw for buttons) | ✅ `test_buttons.py` / `test_axes.py` / `test_hats.py` / `test_hid_reports.py`; board bonded here |
 | Press-to-host latency (`-m latency`) | ✅ `test_latency.py`; hidapi timestamps (rig-comparable only loosely — see below) |
+| Force-feedback / rumble (`-m sdl`) | ✅ `test_rumble.py` — documents unsupported, see below |
 | GATT reads (Device Info / PnP / Battery over CoreBluetooth / WinRT) | 🔴 later step |
 | Remote drive (SSH / CI runner) | 🔴 later — for now, run it by hand (below) |
 
@@ -62,6 +63,29 @@ directly. One repo, one source of truth for the protocol and the goldens.
 
 So SDL is a *cleaner* view than evdev here. A raw `pyobjc-IOKit` backend would
 only be needed to observe something SDL's remapping hides — none found yet.
+
+**This is macOS-specific, not "SDL in general" — SDL on the Linux rig itself
+inherits evdev's limits.** SDL's Linux joystick backend is built *on* evdev
+(unlike macOS's IOKit backend, which talks to the HID transport more
+directly), so running SDL on the rig doesn't recover what evdev already
+dropped. Confirmed via `host/hil/sdlreport.py` / `host/tests/test_sdl_report.py`
+against the real rig (`default` profile, 64 buttons / 8 axes / 4 hats
+declared): SDL there sees **22 buttons, 2 axes, 0 hats** — same ceiling as
+raw evdev, not the rig's real HID report. It does still resolve
+`SDL_IsGameController() == true` with an auto-generated mapping, so a
+Linux/SDL app at least gets *a* working GameController, just a smaller one
+than the actual descriptor. This gap (and the rumble finding below) is the
+concrete case for the SInput profile (`docs/TODO.md`) — a report format
+chosen so a generic OS/SDL consumer doesn't have to guess-map around it.
+
+**Rumble / force-feedback: unsupported on both platforms**, confirmed via
+`sdlgamepad.rumble()` here (pygame `Joystick.rumble()` → `False`) and
+`SDL_JoystickRumble()` on the rig (`rc=-1`, `"That operation is not
+supported"`). Root cause on both: this HID report descriptor has no
+force-feedback usage, and neither platform's SDL backend has a hardcoded
+driver for this custom VID:PID to fall back on. `test_rumble.py` /
+`test_sdl_rumble_unsupported` pin this as a documented limit — they start
+failing (usefully) if the descriptor ever gains real FF support.
 
 ### Latency — first run (macOS 26, esp32dev, `minimal`, n=100)
 

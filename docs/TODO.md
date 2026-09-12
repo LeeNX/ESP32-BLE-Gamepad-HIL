@@ -25,7 +25,15 @@ These ESP32-BLE-Gamepad features have **no firmware command and no test**:
 - [ ] **Nordic UART Service** (`sendDataOverNUS`, NUS receive callback) — the
   HIL firmware uses a *wired* serial channel, so this needs a BLE-side test.
 - [ ] **SInput protocol** (`setEnableSInput`) — an alternate input report
-  format; scope depends on whether it's a shipped feature.
+  format; scope depends on whether it's a shipped feature. Prep work done:
+  `host/hil/sdlreport.py` (Linux rig) + `desktop/sdlgamepad.py`'s `rumble()`
+  (macOS/Windows) quantify what today's default HID descriptor actually looks
+  like through SDL, the layer most real apps/games use — see
+  `desktop/README.md` "What macOS/SDL does differently from the Linux rig".
+  Headline gaps SInput would need to address: Linux/SDL only sees 22 of 64
+  buttons and 2 of 8 axes (evdev's hid-generic mapping ceiling, not an SDL
+  limit — macOS/SDL sees all of them), and no force-feedback on either
+  platform (no FF usage in the descriptor).
 - [ ] **TX power level** (`setTXPowerLevel`) — checkable from the advertising
   data during a scan.
 
