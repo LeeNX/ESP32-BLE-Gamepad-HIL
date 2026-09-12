@@ -15,6 +15,19 @@ see hil_config.toml `[board.*].led_pin` / `.conn_led_pin`, or `$HIL_LED_PIN_
 <BOARD>` / `$HIL_CONN_LED_PIN_<BOARD>` env vars (the latter win, no config
 edit needed — handy from a CI runner). Neither is set on any board today.
 
+## Shortcut: reuse the onboard LED (esp32dev)
+
+Most `esp32dev`-style boards (DOIT DevKit V1, NodeMCU-32S-style clones) ship
+with an onboard LED already wired to **GPIO2**, resistor included — check
+your specific board (silkscreen or schematic; it varies by manufacturer).
+If yours has one, skip the whole "Parts"/wiring section below for that
+board: just set `led_pin = 2` and you get the activity LED for free, no
+soldering. This is also why GPIO2 is safe to reuse for this purpose despite
+being a boot-strapping pin — manufacturers use it this way at scale. The
+caution under "Picking a GPIO per board" is about wiring a *new* external LED
+to a strapping pin yourself in an unverified orientation, not about reusing
+one that's already there.
+
 ## Parts (per LED)
 
 - One 5mm LED. Different colours for the two LEDs (e.g. yellow = activity,
@@ -71,8 +84,9 @@ Both LEDs are equally fine on any spare GPIO; the only thing that matters is
 avoiding pins something else already claims. Known conflicts:
 
 - **esp32dev**: GPIO1/GPIO3 (UART0 — `hil_runner`'s `Serial` *and* flashing);
-  GPIO0/2/5/12/15 (boot-strapping — an LED load on these can affect boot mode
-  detection).
+  GPIO0/5/12/15 (boot-strapping — an LED load on these can affect boot mode
+  detection). GPIO2 is also a strapping pin, but see "reuse the onboard LED"
+  above — the exception, not a recommendation to wire a *new* LED there.
 - **esp32c3**: GPIO20/GPIO21 (UART0 — `hil_runner`'s `Serial`, see README
   "ESP32-C3 serial bridge"); GPIO8/GPIO9 (boot-strapping).
 - **esp32s3**: GPIO43/GPIO44 (UART0 on most DevKitC-1 boards — check yours);

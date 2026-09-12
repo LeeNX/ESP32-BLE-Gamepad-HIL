@@ -179,7 +179,9 @@ def firmware(rigcfg, pytestconfig):
     if conn_led_pin:
         led_flags.append(f"-DHIL_CONN_LED_PIN={conn_led_pin}")
     if led_flags:
-        env["PLATFORMIO_BUILD_FLAGS"] = f"{env.get('PLATFORMIO_BUILD_FLAGS', '')} {' '.join(led_flags)}".strip()
+        env["PLATFORMIO_BUILD_FLAGS"] = (
+            f"{env.get('PLATFORMIO_BUILD_FLAGS', '')} {' '.join(led_flags)}".strip()
+        )
     print(f"\n[firmware] {' '.join(cmd)}")
     # Native USB-Serial/JTAG (C3/S3) uploads are flaky -- "Packet content
     # transfer stopped" -- and usually succeed on a retry.

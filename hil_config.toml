@@ -56,6 +56,8 @@ profile = "default"
 # that LED's code compiles out to a no-op; TEMP? is unaffected either way.
 # led_pin = <gpio>          # pulses on every serial command; LED ON/OFF override
 # conn_led_pin = <gpio>     # steady on while BLE-connected; no override, state-driven
+# Most esp32dev-style boards already have an onboard LED on GPIO2 -- check
+# yours, then just `led_pin = 2` with nothing to wire. See docs/rig-hardware.md.
 
 [board.esp32c3]
 pio_env = "esp32c3"
