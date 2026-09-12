@@ -111,7 +111,22 @@ def _cpu_freq_mhz():
 def _throttled():
     v = _cmd(["vcgencmd", "get_throttled"])  # "throttled=0x0"
     m = re.search(r"0x[0-9a-fA-F]+", v)
-    return m.group(0) if m else None
+    if m:
+        return m.group(0)
+    return None
+
+
+def _undervoltage_now():
+    """rpi_volt hwmon alarm -- unlike vcgencmd, readable with no sudo/group."""
+    for name_path in glob.glob("/sys/class/hwmon/hwmon*/name"):
+        try:
+            if open(name_path).read().strip() != "rpi_volt":
+                continue
+            alarm = os.path.join(os.path.dirname(name_path), "in0_lcrit_alarm")
+            return open(alarm).read().strip() == "1"
+        except Exception:
+            pass
+    return None
 
 
 def dynamic():
@@ -121,10 +136,15 @@ def dynamic():
         "cpu_temp_c": _cpu_temp_c(),
         "cpu_freq_mhz": _cpu_freq_mhz(),
         "throttled": _throttled(),
+        "undervoltage_now": _undervoltage_now(),
     }
 
 
 if __name__ == "__main__":
     import json
+    import sys
 
-    print(json.dumps({"static": static_env(), "dynamic": dynamic()}, indent=2))
+    if "--dynamic-only" in sys.argv:
+        print(json.dumps(dynamic(), indent=2))
+    else:
+        print(json.dumps({"static": static_env(), "dynamic": dynamic()}, indent=2))

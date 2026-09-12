@@ -21,6 +21,7 @@
 #include <Arduino.h>
 #include <BleGamepad.h>
 #include <NimBLEDevice.h>
+#include <soc/soc_caps.h>
 #include "hil_profile.h"
 
 // HIL_DEVICE_NAME (hil_profile.h): "HILpad <board>" for CI/release, "HILdev
@@ -38,6 +39,64 @@ static const int HIL_BURST_MAX = 2000;
 static String line;
 
 static void reply(const char *s) { Serial.println(s); }
+
+// Two opt-in status LEDs -- neither wired on any board by default, both
+// compile out to no-ops when their pin macro is undefined. Wiring guide:
+// docs/rig-hardware.md. Pin comes in via -D HIL_LED_PIN / -D
+// HIL_CONN_LED_PIN, set per board from hil_config.toml or a
+// $HIL_LED_PIN_<BOARD> / $HIL_CONN_LED_PIN_<BOARD> env var (README "Rig
+// hardware TODO") -- never hardcoded here or in platformio.ini.
+//
+// Activity LED (HIL_LED_PIN): one brief, non-blocking pulse per command
+// handled, plus an explicit LED ON/OFF override for a wiring check with no
+// BLE pairing needed. Must stay non-blocking -- this firmware also runs the
+// --bench latency/throughput sweep, and a delay() here would skew exactly
+// the timing numbers that measures.
+#if defined(HIL_LED_PIN)
+static uint32_t ledOffAtMs = 0;
+
+static void ledSetup() { pinMode(HIL_LED_PIN, OUTPUT); digitalWrite(HIL_LED_PIN, LOW); }
+
+static void ledPulse()
+{
+    digitalWrite(HIL_LED_PIN, HIGH);
+    ledOffAtMs = millis() + 30;
+}
+
+static void ledService()
+{
+    if (ledOffAtMs && (int32_t)(millis() - ledOffAtMs) >= 0)
+    {
+        digitalWrite(HIL_LED_PIN, LOW);
+        ledOffAtMs = 0;
+    }
+}
+#else
+static void ledSetup() {}
+static void ledPulse() {}
+static void ledService() {}
+#endif
+
+// Connection LED (HIL_CONN_LED_PIN): steady on while bonded+connected over
+// BLE, off otherwise -- mirrors what CONN? reports. State-driven only, no
+// serial override: unlike the activity LED there's nothing useful to fake,
+// so verify wiring by actually pairing rather than a manual command.
+#if defined(HIL_CONN_LED_PIN)
+static bool connLedOn = false;
+
+static void connLedSetup() { pinMode(HIL_CONN_LED_PIN, OUTPUT); digitalWrite(HIL_CONN_LED_PIN, LOW); }
+
+static void connLedService()
+{
+    bool connected = bleGamepad.isConnected();
+    if (connected == connLedOn) return;
+    digitalWrite(HIL_CONN_LED_PIN, connected ? HIGH : LOW);
+    connLedOn = connected;
+}
+#else
+static void connLedSetup() {}
+static void connLedService() {}
+#endif
 
 static int axisIndex(const String &name)
 {
@@ -137,6 +196,7 @@ static void handle(const String &cmd)
     int n = tokenize(cmd, t);
     if (n == 0) return;
     const String &c = t[0];
+    ledPulse();
 
     if (c == "PING") { reply("PONG"); return; }
 
@@ -209,6 +269,35 @@ static void handle(const String &cmd)
         Serial.printf("RMAP %d ", len);
         for (int i = 0; i < len; i++) Serial.printf("%02X", d[i]);
         Serial.println();
+        return;
+    }
+
+    if (c == "TEMP?")
+    {
+        // On-die temp sensor, via the Arduino core's temperatureRead(): the
+        // new driver on S2/S3/C3/C6 (SOC_TEMP_SENSOR_SUPPORTED), *and* the
+        // classic ESP32 too, via an undocumented ROM function
+        // (temprature_sens_read() [sic], CONFIG_IDF_TARGET_ESP32 branch in
+        // esp32-hal-misc.c). The classic-ESP32 reading is uncalibrated and
+        // known to run well above ambient -- fine for trend-watching (did
+        // this board get hotter mid-run), not for an absolute reading.
+#if defined(CONFIG_IDF_TARGET_ESP32) || SOC_TEMP_SENSOR_SUPPORTED
+        Serial.printf("TEMP %.1f\n", temperatureRead());
+#else
+        reply("ERR unsupported");
+#endif
+        return;
+    }
+
+    if (c == "LED")
+    {
+#if defined(HIL_LED_PIN)
+        if (n >= 2 && t[1] == "ON") { digitalWrite(HIL_LED_PIN, HIGH); ledOffAtMs = 0; reply("OK"); return; }
+        if (n >= 2 && t[1] == "OFF") { digitalWrite(HIL_LED_PIN, LOW); ledOffAtMs = 0; reply("OK"); return; }
+        reply("ERR args");
+#else
+        reply("ERR unsupported");
+#endif
         return;
     }
 
@@ -438,6 +527,8 @@ void setup()
 {
     Serial.begin(115200);
     line.reserve(64);
+    ledSetup();
+    connLedSetup();
     hilApplyProfile(bleGamepadConfig);
     // begin() is called here, from setup(), exactly like the TestAll example.
     // Calling it later from loop() in response to a serial command reliably
@@ -467,4 +558,6 @@ void loop()
             line += ch;
         }
     }
+    ledService();
+    connLedService();
 }

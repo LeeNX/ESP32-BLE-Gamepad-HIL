@@ -7,6 +7,8 @@
 #   LIB_REF=some-branch builder/build.sh               # check the library out first
 #   builder/build.sh --boards "esp32dev" --profiles "default specials"
 #   PUSH=1 builder/build.sh                            # also rsync bundles to [tester].ssh_host
+#   HIL_LED_PIN_ESP32DEV=2 builder/build.sh             # activity LED for one board, no config edit
+#   HIL_CONN_LED_PIN_ESP32DEV=4 builder/build.sh        # connection LED, same idea
 #
 # SC2206: BOARDS / PROFILES are space-separated lists we deliberately word-split.
 # shellcheck disable=SC2206
@@ -72,15 +74,40 @@ if [[ -n "${LIB_REF:-}" ]]; then
 fi
 echo "== library at $(git -C "$LIB_DIR" describe --tags --always --dirty) ($(git -C "$LIB_DIR" rev-parse --abbrev-ref HEAD))"
 
+# Status LED GPIOs, per board (docs/rig-hardware.md, hil_config.toml
+# [board.*].led_pin/.conn_led_pin comments, README "Rig hardware TODO"):
+# $HIL_LED_PIN_<BOARD> / $HIL_CONN_LED_PIN_<BOARD> (uppercased, e.g.
+# HIL_LED_PIN_ESP32DEV) win over config -- lets a runner set them without
+# touching hil_config.local.toml. Unset -> no -D flag, firmware compiles that
+# LED's support out for that board.
+board_gpio() {  # <board> <config key> <env suffix>
+  local env_var v
+  env_var="HIL_${3}_$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')"
+  v="${!env_var:-}"
+  [[ -n "$v" ]] && { echo "$v"; return; }
+  cfg "board.$1.$2"
+}
+
 mkdir -p "$OUT_ROOT"
 for board in "${BOARDS[@]}"; do
   chip=$(board_chip "$board")
+  board_flags="${PLATFORMIO_BUILD_FLAGS:-}"
+  led_pin=$(board_gpio "$board" led_pin LED_PIN)
+  if [[ -n "$led_pin" ]]; then
+    board_flags="$board_flags -DHIL_LED_PIN=$led_pin"
+    echo "== $board activity LED: GPIO $led_pin"
+  fi
+  conn_led_pin=$(board_gpio "$board" conn_led_pin CONN_LED_PIN)
+  if [[ -n "$conn_led_pin" ]]; then
+    board_flags="$board_flags -DHIL_CONN_LED_PIN=$conn_led_pin"
+    echo "== $board connection LED: GPIO $conn_led_pin"
+  fi
   for profile in "${PROFILES[@]}"; do
     env="${board}$(profile_suffix "$profile")"
     echo "== build $env  (board=$board chip=$chip profile=$profile)"
-    "$PIO" run -e "$env" -d "$REPO/firmware"
+    PLATFORMIO_BUILD_FLAGS="$board_flags" "$PIO" run -e "$env" -d "$REPO/firmware"
     ide=$(mktemp)
-    "$PIO" run -e "$env" -d "$REPO/firmware" -t idedata > "$ide" 2>/dev/null
+    PLATFORMIO_BUILD_FLAGS="$board_flags" "$PIO" run -e "$env" -d "$REPO/firmware" -t idedata > "$ide" 2>/dev/null
     python3 builder/make_bundle.py \
       --build-dir "$REPO/firmware/.pio/build/$env" \
       --idedata "$ide" --env "$env" --profile "$profile" \

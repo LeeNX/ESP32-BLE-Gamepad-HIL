@@ -272,6 +272,15 @@ banner and any debug lines are skipped by the host.
 | `FEATURE SET <hex>` | `OK` — `setFeatureBuffer()` |
 | `OUTPUT?` | `OUTPUT recv=0\|1 <hex>` — `isOutputReceived()` + `getOutputBuffer()` |
 | `RESET` | `OK` — zero buttons, axes, hats |
+| `TEMP?` | `TEMP <celsius>` — on-die temp sensor via `temperatureRead()`, all 3 boards (the classic esp32 goes through an undocumented ROM function and reads uncalibrated/high — trend indicator, not a precise value) |
+| `LED ON\|OFF` | `OK` / `ERR unsupported` — explicit override of the activity LED; `ERR unsupported` until `HIL_LED_PIN` is wired + set for that board (see "Rig hardware TODO") |
+
+Every command also pulses the same LED for ~30ms as a received-activity
+indicator (non-blocking — see `ledPulse()`/`ledService()` in
+`hil_runner.cpp`), so a healthy board visibly flickers while a test run talks
+to it and goes dark if the link dies mid-run. A second, independent LED
+(`HIL_CONN_LED_PIN`, no serial command — it just mirrors `CONN?`) stays
+steady on while BLE-connected. Wiring guide for both: `docs/rig-hardware.md`.
 
 `begin()` runs in `setup()` (like `TestAll.ino`): calling it lazily from
 `loop()` on the BEGIN command wedged the NimBLE server task on the classic
@@ -488,6 +497,34 @@ just prints the last log's tail instead of blocking.
 flock releases automatically when the holder dies — there's no stale lockfile. If
 a holder wedged and `rig-status.sh` shows its pid `DEAD`, clear it with
 `rm ~/.cache/esp32-hil/rig.lock` (or `flock -u`).
+
+### Rig hardware TODO
+
+Ideas from the 2026-09-11 rig-crash investigation (see project memory
+`hil-rig-usb-bus-crash-sep11`), not yet built — the activity LED / `TEMP?`
+above are the software half; these are physical additions:
+
+- **Per-MCU status LEDs**: firmware support landed for both — activity
+  (`LED ON\|OFF` + the automatic pulse-on-command) and connection (steady on
+  while BLE-connected), see "Serial protocol" above. Still needs actually
+  wiring an LED+resistor per board/per LED — full parts list, resistor
+  sizing, a pluggable move-between-boards approach, and per-board GPIO
+  conflicts to avoid: **`docs/rig-hardware.md`**. Once wired, set
+  `[board.<name>].led_pin`/`.conn_led_pin` in `hil_config.local.toml`, or
+  export `$HIL_LED_PIN_<BOARD>`/`$HIL_CONN_LED_PIN_<BOARD>` before building
+  (wins, no config edit — handy from a CI runner). Picked up by both
+  `builder/build.sh` (the bundle path CI/the tester use) and `conftest.py`'s
+  direct-from-source build.
+- **Ambient box temperature/humidity sensor** (e.g. BME280/SHT31 on I2C to
+  the Pi): cheap, and drops straight into `tester/rig-lock.sh`'s
+  `health-timeline-*.csv` sampler as one more column.
+- **Clean power-off button**: `dtoverlay=gpio-shutdown` in the Pi's
+  `config.txt` + a momentary switch on GPIO3/GND — no code, built into
+  Raspberry Pi OS, does a proper clean shutdown.
+- **Hard reset/power-cycle button**: no native reset line on the Pi, so this
+  means a relay or smart-plug cutting 5V. Pair it with `gpio-shutdown` (press
+  = clean shutdown first) rather than a raw kill switch — cutting power to a
+  live system is the same risk as the crash that prompted this list.
 
 ### Which boards run
 
