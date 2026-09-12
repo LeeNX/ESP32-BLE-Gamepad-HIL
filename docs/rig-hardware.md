@@ -11,9 +11,35 @@ until you wire one up and set its GPIO. See `firmware/src/hil_runner.cpp`
 | Connection | `HIL_CONN_LED_PIN` | Steady on while bonded+connected over BLE, off otherwise (mirrors `CONN?`). No serial override — it's state-driven, so verify it by actually pairing. |
 
 Setting the GPIO for either one is a config/env change, not a firmware edit —
-see hil_config.toml `[board.*].led_pin` / `.conn_led_pin`, or `$HIL_LED_PIN_
-<BOARD>` / `$HIL_CONN_LED_PIN_<BOARD>` env vars (the latter win, no config
-edit needed — handy from a CI runner). Neither is set on any board today.
+see hil_config.toml `[board.*].led_pin` / `.conn_led_pin`, or an env var (the
+latter wins, no config edit needed — handy from a CI runner: a GitHub Actions
+repo Variable or Secret, forwarded into `builder/build.sh`'s environment by
+`.github/workflows/hil.yml`'s `build` job — add a line there per board/LED as
+they get wired). Neither is set on any board today.
+
+## Env var naming
+
+`builder/build.sh`'s `board_gpio()` builds the name as:
+
+```text
+HIL_<LED_PIN|CONN_LED_PIN>_<BOARD, uppercased>
+```
+
+`<BOARD>` is whatever key you used under `[board.<name>]` in
+`hil_config.toml` — `esp32dev` / `esp32c3` / `esp32s3` today. All 6
+combinations:
+
+| Board | Activity LED | Connection LED |
+|---|---|---|
+| `esp32dev` | `HIL_LED_PIN_ESP32DEV` | `HIL_CONN_LED_PIN_ESP32DEV` |
+| `esp32c3`  | `HIL_LED_PIN_ESP32C3`  | `HIL_CONN_LED_PIN_ESP32C3`  |
+| `esp32s3`  | `HIL_LED_PIN_ESP32S3`  | `HIL_CONN_LED_PIN_ESP32S3`  |
+
+This same env var, wherever it's set, is only read by whatever process runs
+`builder/build.sh` (CI's `build` job, or a local `builder/build.sh` invocation)
+— it's a *build-time* flag baked into the compiled firmware, so setting it on
+the tester/rig itself does nothing: the tester only flashes bundles it's
+already handed, it never builds (`tester/test.sh` / `tester/test-all.sh`).
 
 ## Shortcut: reuse the onboard LED (esp32dev)
 
