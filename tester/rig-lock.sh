@@ -29,7 +29,18 @@ rig_lock_acquire() {
       *) break ;;
     esac
   done
-  [ -n "${HIL_RIG_LOCK_HELD:-}" ] && return 0
+  if [ -n "${HIL_RIG_LOCK_HELD:-}" ]; then
+    # Re-entrant (nested test.sh in a batch, or CI's remote wrapper --
+    # hil.yml's "Flash + test on the tester" step takes its own raw flock and
+    # pre-exports this var before calling us). We don't own the actual lock
+    # here, but the health sampler is independent of that -- start it once
+    # regardless, or CI never gets a health-timeline CSV at all (only the
+    # per-test before/after snapshots), since CI never hits the fresh-acquire
+    # branch below.
+    _rl_health_start
+    trap '_rl_health_stop' EXIT
+    return 0
+  fi
 
   if ! command -v flock >/dev/null 2>&1; then
     # no util-linux (e.g. a macOS one-box dev run) -- can't serialise, carry on.
@@ -63,6 +74,11 @@ _rl_busy() {
 # (sysfs paths) -- silently a no-op elsewhere (e.g. a macOS one-box dev run).
 # See hil-rig-usb-bus-crash-sep11 memory for why this exists.
 _rl_health_start() {
+  # Guards against every --by-board lane (each a nested, re-entrant
+  # rig_lock_acquire) starting its own redundant sampler -- exported so
+  # child processes see it, not just this one.
+  [ -n "${HIL_HEALTH_STARTED:-}" ] && return 0
+  export HIL_HEALTH_STARTED=1
   [ -d /sys/class/thermal ] || return 0
   local out
   out="results/health-timeline-$(date +%Y%m%d-%H%M%S)-$$.csv"
