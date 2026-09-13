@@ -128,6 +128,12 @@ jobs:
           key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini') }}
 
       - name: Build firmware bundles
+        env:
+          # Status LED GPIOs (docs/rig-hardware.md) -- repo Variables or
+          # Secrets, either works (`||` skips an unset/empty one). Add one
+          # line per board/LED as they get wired; unset -> that LED compiles
+          # out only when the env var and board config are both unset.
+          HIL_LED_PIN_ESP32DEV: ${{ vars.HIL_LED_PIN_ESP32DEV || secrets.HIL_LED_PIN_ESP32DEV || '' }}
         run: |
           cat > hil_config.local.toml <<EOF
           [rig]
