@@ -105,7 +105,17 @@ _rl_health_start() {
 }
 
 _rl_health_stop() {
+  # Always return 0 -- this runs directly as an EXIT trap in the re-entrant
+  # branch below (`trap '_rl_health_stop' EXIT`, no caller-side `|| true`).
+  # Under `set -e`, a trap's own exit status replaces whatever `exit $rc`
+  # intended, so a bare `[ -n ... ] && kill ...` silently turns every nested
+  # test.sh call into a reported failure once there's nothing to kill (the
+  # normal case -- the sampler is shared, started once by the batch's outer
+  # holder, not per nested call). That corrupted every by-board/sequential
+  # retry decision into "always retry" while leaving the junit-based CI gate
+  # unaffected, which is how this stayed invisible for so long.
   [ -n "${_RL_HEALTH_PID:-}" ] && kill "$_RL_HEALTH_PID" 2>/dev/null
+  return 0
 }
 
 _rl_on_exit() {
