@@ -18,6 +18,55 @@ What a bump means:
 
 ## [Unreleased]
 
+### Added
+
+- **Rig health/USB/BT logging + firmware `TEMP?`/LED diagnostics** — prompted
+  by the 2026-09-11 rig crash investigation (dwc_otg USB bus timeouts during a
+  simultaneous 3-board reconnect). `tester/rig-lock.sh` now runs a background
+  sampler for the lock's whole lifetime (temp/freq/under-voltage/loadavg →
+  `results/health-timeline-*.csv`); every `tester/test.sh` run snapshots
+  sysinfo before/after and greps the journal for `dwc_otg`/`ftdi_sio`/
+  `bluetoothd` activity, not just `--bench` runs. Firmware gained `TEMP?`
+  (`temperatureRead()`, all 3 boards) and `LED ON|OFF` plus an automatic
+  activity pulse, opt-in behind `-D HIL_LED_PIN=<gpio>`.
+- **`HIL_CONN_LED_PIN`** — second opt-in status LED, steady on while
+  BLE-connected (mirrors `CONN?`), threaded through the same config/env
+  mechanism as `HIL_LED_PIN`. New `docs/rig-hardware.md`: parts list, resistor
+  sizing, wiring diagram, per-board GPIO conflicts to avoid.
+- **USB topology in every run's health snapshot** — `host/hil/sysinfo.py`
+  captures `lsusb -t` so hub power/negotiated-speed questions don't need
+  asking by hand when reviewing a CI run.
+- **SDL/GameController-layer reporting** (`host/hil/sdlreport.py` on the rig,
+  `desktop/sdlgamepad.py` gains `rumble()`) — prep for the SInput profile:
+  what SDL/games actually see, not just raw HID bytes. Verified against real
+  hardware on both testers; SDL on Linux inherits evdev's ceiling (22/64
+  buttons, 2/8 axes on the default profile), rumble unsupported on either
+  platform.
+- `pytest.ini` streams fixture progress instead of capturing it, so
+  long-running fixture setup is visible live under CI.
+
+### Fixed
+
+- **`tester/rig-lock.sh` exit trap silently overriding every nested
+  `test.sh` exit code** — a long-standing bug where a failing test under the
+  lock could still report success.
+- Health-timeline sampler never actually ran under CI: `hil.yml`'s own raw
+  `flock` pre-export of `HIL_RIG_LOCK_HELD` hit the re-entrant early-return
+  before starting the sampler. The re-entrant path now also starts it, guarded
+  so the 3 parallel `--by-board` lanes don't each spawn a redundant one.
+- CI never forwarded `HIL_LED_PIN_<BOARD>` / `HIL_CONN_LED_PIN_<BOARD>` into
+  the build job, so a repo Variable/Secret for either never reached
+  `builder/build.sh`.
+- `--by-board` lanes now serialize flash+pair+smoke across boards before
+  parallelizing the heavy tests, fixing mid-suite pairing failures caused by
+  simultaneous BLE pairing across lanes; a timed-out round barrier now fails
+  closed instead of silently continuing, `--by-board` without `flock`
+  available is now refused instead of silently skipping the phase-1 mutex,
+  and stale phase-1 junit files are cleared before either `test-all.sh` path
+  runs.
+- `sdl_report` now skips (instead of failing) when SDL can't see the device,
+  and the report is colorized.
+
 ## [0.2.2] — 2026-09-11
 
 ### Added
