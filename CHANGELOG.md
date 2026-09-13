@@ -18,6 +18,8 @@ What a bump means:
 
 ## [Unreleased]
 
+## [0.2.3] — 2026-09-13
+
 ### Added
 
 - **Rig health/USB/BT logging + firmware `TEMP?`/LED diagnostics** — prompted
@@ -337,7 +339,8 @@ descriptor + latency suite, and the Tailscale-based CI. Plus:
   `HIL_RIG_ENABLED=true` is set — so a fork with no tester wired gets a clean
   skipped run, not a failure on the missing Tailscale secret.
 
-[Unreleased]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.2.3
 [0.2.2]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.2.2
 [0.2.1]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.2.1
 [0.2.0]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.2.0
