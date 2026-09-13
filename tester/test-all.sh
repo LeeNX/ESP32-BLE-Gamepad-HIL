@@ -181,6 +181,17 @@ run_lane() {  # <board> <pytest-args...> ; loop its bundles. rc 1 on any failure
   return $lrc
 }
 
+# A prior --by-board run's temp phase-1 junit can outlive it (killed mid-run,
+# or a bundle whose phase1_turn never got as far as test.sh -- e.g. the
+# mutex itself timed out). run_lane's own rm -f only cleans up the bundle it
+# just finished, so a stale one can (a) get `cp -f`'d in as if it were this
+# run's result the next time that exact board/profile hits the same
+# never-ran-test.sh path, or (b) just pollute summarize_all's junit-*.xml
+# glob in ANY later run, by-board or sequential. Clear them unconditionally,
+# before branching, so neither path inherits the other's leftovers.
+mkdir -p results
+rm -f results/junit-*.phase1.xml
+
 if [ "$BY_BOARD" = 1 ]; then
   for a in "$@"; do
     [ "$a" != "--bench" ] || {
@@ -197,7 +208,6 @@ if [ "$BY_BOARD" = 1 ]; then
       "(none found) -- install it, or run sequentially without --by-board" >&2
     exit 2
   }
-  mkdir -p results
   rm -f "$PHASE1_ARRIVED".* "$PHASE1_LOCK"  # stale barrier state from a previous run
   mapfile -t boards < <(all_bundles | while IFS= read -r b; do bundle_board "$b"; done | sort -u)
   [ "${#boards[@]}" -gt 0 ] || { echo "no bundles in $BUNDLE_DIR" >&2; exit 0; }
