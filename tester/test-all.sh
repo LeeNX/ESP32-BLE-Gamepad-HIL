@@ -18,6 +18,18 @@
 # refuses --bench, which must stay sequential + solo. Lane output goes to
 # results/lane-<board>.log and is replayed in order at the end.
 #
+# Pairing is adapter-global (one BT radio on the rig), so a lane mid-pairing
+# can't share airtime with another lane's already-connected, actively-
+# transmitting link -- a flock around just the `pair` call (conftest.py's
+# pair.lock) isn't enough, since it doesn't stop an *already-paired* lane's
+# traffic from starving a *different* lane's fresh pairing attempt (seen
+# live: esp32s3 failed 51 tests mid-pair while esp32dev was mid-suite on the
+# same adapter). So each bundle now runs in two phases: phase1_turn() takes
+# the rig's BT radio one board at a time for flash+pair+test_connection.py
+# (the quick "is this board alive" smoke check), and no lane starts its
+# phase-2 (the rest of the suite, parallel as before) until every board has
+# finished phase 1 for that profile round.
+#
 # Takes the rig lock once for the whole batch (no-op if the caller -- CI, or
 # `tester/rig-lock.sh -- tester/test-all.sh` -- already holds it).
 set -uo pipefail
@@ -48,11 +60,13 @@ set -- ${rest[@]+"${rest[@]}"}
 kargs=()
 [ -n "${HIL_TEST_FILTER:-}" ] && kargs=(-k "$HIL_TEST_FILTER")
 trc=0
+PY=$(command -v python3 || echo "${HIL_VENV:-$HOME/.venvs/hil}/bin/python")
 
 ts() { date +%H:%M:%S; }
 
-# Bundle dirs are <board>-<profile>-<sha>; board names carry no dash.
+# Bundle dirs are <board>-<profile>-<sha>; board/profile names carry no dash.
 bundle_board() { basename "$1" | cut -d- -f1; }
+bundle_profile() { basename "$1" | cut -d- -f2; }
 
 all_bundles() {
   local b
@@ -71,9 +85,73 @@ test_bundle() {
 # into the job summary; locally it's the at-a-glance board x profile matrix)
 summarize_all() {
   ls results/junit-*.xml >/dev/null 2>&1 || return 0
-  local py; py=$(command -v python3 || echo "${HIL_VENV:-$HOME/.venvs/hil}/bin/python")
   echo
-  "$py" host/hil/summarize.py results/junit-*.xml --out results/summary.md 2>/dev/null || true
+  "$PY" host/hil/summarize.py results/junit-*.xml --out results/summary.md 2>/dev/null || true
+}
+
+# --- by-board phase1: flash+pair+smoke, one board at a time, rig-wide ------
+PHASE1_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/esp32-hil"
+PHASE1_LOCK="$PHASE1_CACHE/byboard-phase1.lock"
+PHASE1_ARRIVED="$PHASE1_CACHE/byboard-phase1-arrived"
+CONN_TEST="$(pwd)/host/tests/test_connection.py"
+HAVE_FLOCK=0
+command -v flock >/dev/null 2>&1 && HAVE_FLOCK=1
+
+# round_barrier <board> <key> -- record <board> as done with <key> (a
+# "<round>.phase1" or "<round>.phase2" checkpoint), then block until every
+# board in $boards has reached the *same* key (or a timeout elapses). Record
+# unconditionally -- a board this tester doesn't have wired (or one whose
+# phase failed outright) must still count as "done", or it'd stall every
+# other lane for the full timeout, every round.
+#
+# Both checkpoints matter: phase1's keeps any board from starting its heavy
+# phase2 while another is still pairing; phase2's keeps a fast board from
+# starting its *next* round's pairing while a slower board's phase2 is still
+# generating live GATT traffic on the shared adapter -- without it, round
+# N+1's phase1 could still overlap round N's phase2 on a different lane,
+# which is the exact contention this whole scheme exists to remove.
+#
+# No util-linux flock (e.g. a macOS one-box dev run, like rig-lock.sh's own
+# fallback): record-only, no cross-process wait -- nothing to serialize
+# against on a single-adapter dev box anyway.
+round_barrier() {
+  local board=$1 key=$2
+  local state="${PHASE1_ARRIVED}.${key}"
+  if [ "$HAVE_FLOCK" = 0 ]; then
+    printf '%s\n' "$board" >>"$state"
+    return 0
+  fi
+  ( flock -w 30 211 && printf '%s\n' "$board" >>"$state" ) 211>"${state}.lock" || true
+
+  local deadline=$((SECONDS + ${HIL_PHASE1_BARRIER_TIMEOUT:-180}))
+  while (( SECONDS < deadline )); do
+    [ "$(sort -u "$state" 2>/dev/null | wc -l | tr -d ' ')" -ge "${#boards[@]}" ] && return 0
+    sleep 1
+  done
+  echo "== [$(ts)] barrier for $key timed out -- proceeding anyway" >&2
+}
+
+# phase1_turn <board> <round> <bundle> -- flash+pair+test_connection.py for
+# <bundle>, one board at a time across the whole rig (a flock, not just the
+# conftest.py pair.lock -- see the --by-board header comment), one retry like
+# test_bundle. Deliberately ignores $kargs/-k -- this smoke check always runs
+# in full regardless of a focused run's filter.
+phase1_turn() {
+  local board=$1 round=$2 bundle=$3 rc=0
+  mkdir -p "$PHASE1_CACHE"
+  if [ "$HAVE_FLOCK" = 0 ]; then
+    HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 ./tester/test.sh "$bundle" \
+      || HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 ./tester/test.sh "$bundle"
+    rc=$?
+  else
+    (
+      flock -w "${HIL_PHASE1_MUTEX_TIMEOUT:-600}" 210 || exit 75
+      HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 ./tester/test.sh "$bundle" \
+        || HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 ./tester/test.sh "$bundle"
+    ) 210>"$PHASE1_LOCK" || rc=$?
+  fi
+  round_barrier "$board" "${round}.phase1"
+  return "$rc"
 }
 
 run_lane() {  # <board> <pytest-args...> ; loop its bundles. rc 1 on any failure.
@@ -81,7 +159,23 @@ run_lane() {  # <board> <pytest-args...> ; loop its bundles. rc 1 on any failure
   shift
   while IFS= read -r b; do
     [ "$(bundle_board "$b")" = "$board" ] || continue
-    test_bundle "$b" "$@" || lrc=1
+    local round; round=$(bundle_profile "$b")
+    local p1xml="results/junit-${board}-${round}.phase1.xml"
+    local outxml="results/junit-${board}-${round}.xml"
+    if phase1_turn "$board" "$round" "$b"; then
+      test_bundle "$b" --no-flash --no-pair "--ignore=$CONN_TEST" "$@" || lrc=1
+      "$PY" host/hil/junit_merge.py "$p1xml" "$outxml" "$outxml" 2>/dev/null || true
+    else
+      lrc=1
+      cp -f "$p1xml" "$outxml" 2>/dev/null || true
+    fi
+    # the temp phase1 report is now folded into $outxml (or copied over it) --
+    # drop it, or the junit-*.xml glob (summarize.py, dorny/test-reporter)
+    # double-counts its cases as a spurious extra "<profile>.phase1" bundle.
+    rm -f "$p1xml"
+    # don't start the *next* round's phase1 (pairing) until every board has
+    # also finished *this* round's phase2 -- see round_barrier's comment.
+    round_barrier "$board" "${round}.phase2"
   done < <(all_bundles)
   return $lrc
 }
@@ -94,6 +188,7 @@ if [ "$BY_BOARD" = 1 ]; then
     }
   done
   mkdir -p results
+  rm -f "$PHASE1_ARRIVED".* "$PHASE1_LOCK"  # stale barrier state from a previous run
   mapfile -t boards < <(all_bundles | while IFS= read -r b; do bundle_board "$b"; done | sort -u)
   [ "${#boards[@]}" -gt 0 ] || { echo "no bundles in $BUNDLE_DIR" >&2; exit 0; }
   echo "== [$(ts)] by-board: ${boards[*]}  (one parallel lane each)"

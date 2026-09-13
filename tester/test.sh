@@ -5,6 +5,11 @@
 #   tester/test.sh bundles/esp32dev-default-4410936/
 #   tester/test.sh <bundle> --no-flash -k buttons        # extra args pass to pytest
 #   tester/test.sh <bundle> --bench                       # + latency/throughput sweep
+#
+# $HIL_TEST_PATH / $HIL_JUNIT_TAG: internal knobs test-all.sh --by-board uses to
+# split one bundle into a serialized "phase 1" (flash+pair+test_connection.py)
+# and a parallel "phase 2" (everything else, --no-flash --no-pair) -- see its
+# phase1_turn(). Unset for a normal solo run; behavior is then unchanged.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO=$(pwd)
@@ -75,7 +80,7 @@ tag="${BOARD}-${PROFILE}-${STAMP}"
 # globs junit-*.xml, fail-on-error) sees one current result per profile, not a
 # stale failure from attempt 1. log/summary stay stamped -- history, and they
 # don't feed the reporter.
-xml="results/junit-${BOARD}-${PROFILE}.xml"
+xml="results/junit-${BOARD}-${PROFILE}${HIL_JUNIT_TAG:+.$HIL_JUNIT_TAG}.xml"
 log="results/log-${tag}.txt"
 rc=0
 
@@ -88,7 +93,7 @@ PYTHONPATH=host "$VENV/bin/python" -m hil.sysinfo \
 # Pin rootdir/ini: --bundle is an absolute path outside the repo and pytest's
 # first-pass arg parse treats it as a positional test path -> rootdir discovery
 # would never find this pytest.ini and conftest.py would not load.
-"$VENV/bin/pytest" -c "$REPO/pytest.ini" --rootdir "$REPO" "$REPO/host/tests" \
+"$VENV/bin/pytest" -c "$REPO/pytest.ini" --rootdir "$REPO" "${HIL_TEST_PATH:-$REPO/host/tests}" \
   --bundle "$BUNDLE" --board "$BOARD" --profile "$PROFILE" \
   --junit-xml="$xml" "${PYTEST_EXTRA[@]}" 2>&1 | tee "$log" || rc=$?
 elapsed=$(( $(date +%s) - start ))
