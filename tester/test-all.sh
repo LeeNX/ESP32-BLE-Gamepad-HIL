@@ -111,20 +111,12 @@ command -v flock >/dev/null 2>&1 && HAVE_FLOCK=1
 # N+1's phase1 could still overlap round N's phase2 on a different lane,
 # which is the exact contention this whole scheme exists to remove.
 #
-# No util-linux flock (e.g. a macOS one-box dev run, like rig-lock.sh's own
-# fallback): record-only, no cross-process wait -- nothing to serialize
-# against on a single-adapter dev box anyway.
-#
 # Returns 0 once everyone's arrived, 1 on timeout -- callers must fail closed
 # on 1 (skip phase 2 / stop the lane), not treat "gave up waiting" as "safe
 # to proceed"; whoever we were waiting on may just be slow, not gone.
 round_barrier() {
   local board=$1 key=$2
   local state="${PHASE1_ARRIVED}.${key}"
-  if [ "$HAVE_FLOCK" = 0 ]; then
-    printf '%s\n' "$board" >>"$state"
-    return 0
-  fi
   ( flock -w 30 211 && printf '%s\n' "$board" >>"$state" ) 211>"${state}.lock" || true
 
   local deadline=$((SECONDS + ${HIL_PHASE1_BARRIER_TIMEOUT:-180}))
@@ -148,17 +140,11 @@ round_barrier() {
 phase1_turn() {
   local board=$1 round=$2 bundle=$3 rc=0
   mkdir -p "$PHASE1_CACHE"
-  if [ "$HAVE_FLOCK" = 0 ]; then
+  (
+    flock -w "${HIL_PHASE1_MUTEX_TIMEOUT:-600}" 210 || exit 75
     HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 ./tester/test.sh "$bundle" \
       || HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 ./tester/test.sh "$bundle"
-    rc=$?
-  else
-    (
-      flock -w "${HIL_PHASE1_MUTEX_TIMEOUT:-600}" 210 || exit 75
-      HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 ./tester/test.sh "$bundle" \
-        || HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 ./tester/test.sh "$bundle"
-    ) 210>"$PHASE1_LOCK" || rc=$?
-  fi
+  ) 210>"$PHASE1_LOCK" || rc=$?
   round_barrier "$board" "${round}.phase1" || rc=1
   return "$rc"
 }
@@ -202,6 +188,15 @@ if [ "$BY_BOARD" = 1 ]; then
       exit 2
     }
   done
+  # Phase 1's one-board-at-a-time serialization (the whole point of this
+  # scheme -- see round_barrier's comment) is a flock mutex; with no flock,
+  # every lane would flash+pair concurrently, unprotected. Refuse rather than
+  # silently run --by-board's multi-board case without its safety mechanism.
+  [ "$HAVE_FLOCK" = 1 ] || {
+    echo "test-all.sh: --by-board needs util-linux flock to serialize phase 1" \
+      "(none found) -- install it, or run sequentially without --by-board" >&2
+    exit 2
+  }
   mkdir -p results
   rm -f "$PHASE1_ARRIVED".* "$PHASE1_LOCK"  # stale barrier state from a previous run
   mapfile -t boards < <(all_bundles | while IFS= read -r b; do bundle_board "$b"; done | sort -u)
