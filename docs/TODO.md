@@ -43,10 +43,6 @@ These ESP32-BLE-Gamepad features have **no firmware command and no test**:
   on each test; a script diffs the tag set against a canonical feature list and
   warns (or fails) on anything untested. Self-maintaining version of the list
   above.
-- [ ] **`--by-board` cold-start pairing warm-up.** The first bundle in each lane
-  almost always fails its first pairing attempt (the retry passes). A one-shot
-  warm-up pair per lane before the real run would make runs cleaner and shave a
-  retry.
 - [ ] **Bench trend history.** `--bench` numbers are only ever compared to the
   checked-in `docs/bench/` snapshot. A small time series (per board / profile,
   p50 / p99 / clean-rate) would catch slow drift, not just step regressions.

@@ -8,6 +8,8 @@ name tester/test.sh writes). The report has a bundle matrix, a feature-area
 rollup across every bundle, per-MCU test time, the failures inline, and only the
 skips that look like a real gap (missing golden, unreadable hidraw, absent dep)
 -- the routine "this profile has no rz axis" skips are counted, not listed.
+Failures and gap skips render as GitHub-flavored markdown alerts (colored,
+icon'd boxes in the job summary; a plain quoted block elsewhere).
 
 Times are the pytest phase from each junit `<testsuite time>` -- the flash and
 the first pair (in tester/test.sh, before pytest) are not in it.
@@ -158,18 +160,21 @@ def render(bundles, areas, failures, gap_skips):
         out.append(f"| {mark} {area} | {a['pass']} | {a['fail']} | {a['skip']} |")
     out.append("")
 
+    # GitHub-flavored markdown alerts -- render as a colored, icon'd box in
+    # the job summary (and a PR body, if this ever gets pasted there); a
+    # plain quoted block anywhere that doesn't know the `[!TAG]` convention.
     if failures:
-        out += ["### Failures", ""]
+        out += ["> [!CAUTION]", "> **Failures**", ">"]
         for board, profile, area, name, msg in failures:
-            out.append(f"- ❌ `{board}/{profile}` · `{area}::{name}`")
+            out.append(f"> - `{board}/{profile}` · `{area}::{name}`")
             if msg:
-                out.append(f"  > {msg}")
+                out.append(f">   {msg}")
         out.append("")
 
     if gap_skips:
-        out += ["### Skipped — worth a look", ""]
+        out += ["> [!WARNING]", "> **Skipped — worth a look**", ">"]
         for board, profile, area, name, reason in gap_skips:
-            out.append(f"- `{board}/{profile}` · `{area}::{name}` — {reason}")
+            out.append(f"> - `{board}/{profile}` · `{area}::{name}` — {reason}")
         out.append("")
 
     return "\n".join(out).rstrip() + "\n"
