@@ -70,6 +70,15 @@ def hats(j):
     return [j.get_hat(i) for i in range(j.get_numhats())]
 
 
+def rumble(j, low=1.0, high=1.0, ms=300):
+    """True if SDL accepted the rumble request. Expect False here: this HID
+    descriptor has no force-feedback usage, and SDL's rumble needs either that
+    or a hardcoded per-VID/PID driver this custom device doesn't have.
+    Confirmed False on both this (macOS) and the Linux rig -- see README
+    "What macOS/SDL does differently from the Linux rig"."""
+    return j.rumble(low, high, ms)
+
+
 def wait_until(read, want, timeout=2.0, poll=0.02):
     """Pump SDL until `read()` equals `want` (or a matcher returns True), or
     timeout. Returns the last value read -- assert on it so a failure shows what
