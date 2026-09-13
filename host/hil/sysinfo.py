@@ -66,6 +66,18 @@ def _adapter():
     }
 
 
+def _usb_topology():
+    """Raw `lsusb -t` -- what's plugged into what, and at what negotiated
+    speed. Grew out of the dwc_otg USB-bus crash investigation
+    (hil-rig-usb-bus-crash-sep11 memory): a hub's "Self Powered" descriptor
+    bit is self-reported (a hub can claim it without an adapter actually
+    plugged in), so this is supporting evidence for "is the board hub
+    powered", not independent proof -- `lsusb -v` on the hub-class devices
+    for the Self Powered / MaxPower fields is the fuller check, done by hand
+    when that question comes up rather than parsed here every run."""
+    return _cmd(["lsusb", "-t"]) or None
+
+
 @functools.lru_cache(maxsize=1)
 def static_env():
     return {
@@ -76,6 +88,7 @@ def static_env():
         "nproc": os.cpu_count(),
         "bluez": _bluez_version(),
         "adapter": _adapter(),
+        "usb_topology": _usb_topology(),
         "python": platform.python_version(),
         "pkgs": {p: _pkg(p) for p in ("pytest", "evdev", "dbus-fast", "pyserial")},
         "hostname": platform.node(),
