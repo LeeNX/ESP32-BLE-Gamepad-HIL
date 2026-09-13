@@ -114,6 +114,10 @@ command -v flock >/dev/null 2>&1 && HAVE_FLOCK=1
 # No util-linux flock (e.g. a macOS one-box dev run, like rig-lock.sh's own
 # fallback): record-only, no cross-process wait -- nothing to serialize
 # against on a single-adapter dev box anyway.
+#
+# Returns 0 once everyone's arrived, 1 on timeout -- callers must fail closed
+# on 1 (skip phase 2 / stop the lane), not treat "gave up waiting" as "safe
+# to proceed"; whoever we were waiting on may just be slow, not gone.
 round_barrier() {
   local board=$1 key=$2
   local state="${PHASE1_ARRIVED}.${key}"
@@ -128,7 +132,12 @@ round_barrier() {
     [ "$(sort -u "$state" 2>/dev/null | wc -l | tr -d ' ')" -ge "${#boards[@]}" ] && return 0
     sleep 1
   done
-  echo "== [$(ts)] barrier for $key timed out -- proceeding anyway" >&2
+  # Fail closed: a board that gave up waiting here must not be treated as
+  # "clear to proceed" -- whoever we were waiting on may just be slow, not
+  # gone, and could still be mid-pair (or mid-phase2 traffic) when the caller
+  # acts on a zero return. Callers fold this into their own failure path.
+  echo "== [$(ts)] barrier for $key timed out -- not clear to proceed" >&2
+  return 1
 }
 
 # phase1_turn <board> <round> <bundle> -- flash+pair+test_connection.py for
@@ -150,7 +159,7 @@ phase1_turn() {
         || HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 ./tester/test.sh "$bundle"
     ) 210>"$PHASE1_LOCK" || rc=$?
   fi
-  round_barrier "$board" "${round}.phase1"
+  round_barrier "$board" "${round}.phase1" || rc=1
   return "$rc"
 }
 
@@ -174,8 +183,14 @@ run_lane() {  # <board> <pytest-args...> ; loop its bundles. rc 1 on any failure
     # double-counts its cases as a spurious extra "<profile>.phase1" bundle.
     rm -f "$p1xml"
     # don't start the *next* round's phase1 (pairing) until every board has
-    # also finished *this* round's phase2 -- see round_barrier's comment.
-    round_barrier "$board" "${round}.phase2"
+    # also finished *this* round's phase2 -- see round_barrier's comment. A
+    # timeout here means we can't be sure everyone's done generating traffic,
+    # so stop this lane rather than risk this board's next pairing attempt
+    # overlapping someone else's still-running phase 2.
+    if ! round_barrier "$board" "${round}.phase2"; then
+      lrc=1
+      break
+    fi
   done < <(all_bundles)
   return $lrc
 }
