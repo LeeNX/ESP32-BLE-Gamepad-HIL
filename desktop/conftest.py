@@ -175,6 +175,40 @@ def hidgamepad(dut):
 
 
 @pytest.fixture(scope="session")
+def device_name(dut):
+    """`NAME?` -- the DUT's advertised BLE name, what `gatt.py` scans for."""
+    return dut.device_name()
+
+
+@pytest.fixture(scope="session")
+def gatt():
+    """The desktop gatt module (bleak), with bleak confirmed importable (skip
+    otherwise). Mirrors the rig's `gatt` fixture (../conftest.py), which wraps
+    hil.gatt (BlueZ/D-Bus) instead."""
+    pytest.importorskip("bleak", reason="pip install bleak")
+    import gatt as _gatt  # desktop/, on pythonpath
+
+    return _gatt
+
+
+@pytest.fixture(scope="session")
+def device_info(gatt, dut, device_name):
+    """DIS strings + PnP + battery + power-state, read over GATT (not HID).
+
+    Skips unless the board is bonded to this host (`pair-assist.py`) -- bleak
+    needs to see it advertising/connectable like any other GATT client.
+    """
+    try:
+        dut.wait_connected(timeout=25.0)  # opening the serial port reset the ESP32; wait for the BLE relink
+    except Exception:
+        pytest.skip("board not bonded/connected -- run  python pair-assist.py --port <port>  first")
+    try:
+        return gatt.read_all(device_name)
+    except TimeoutError as e:
+        pytest.skip(str(e))
+
+
+@pytest.fixture(scope="session")
 def sdlpad(dut):
     """The DUT as an SDL joystick (pygame) -- "what a game sees".
 

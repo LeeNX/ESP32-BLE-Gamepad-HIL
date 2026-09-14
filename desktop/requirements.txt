@@ -11,3 +11,9 @@ hidapi>=0.14
 # -m sdl: the DUT as an SDL joystick -- "what a game sees" (SDL's per-OS driver
 # does the HID parsing + control numbering). Bundles SDL2 in the wheel.
 pygame>=2.6
+
+# -m gatt: Device Information / PnP / Battery read straight off the DUT's GATT
+# side (gatt.py), independent of the HID stack -- CoreBluetooth on macOS,
+# WinRT on Windows. Does NOT reach the HID service itself (Feature Report
+# etc.); that's -m hid / hidapi. See gatt.py's docstring.
+bleak>=0.22
