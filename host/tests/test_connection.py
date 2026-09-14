@@ -65,7 +65,13 @@ def test_descriptor_within_buffer(connected_dut):
     assert 0 < sizes["report"] <= 63, f"unexpected input report size {sizes['report']}"
 
 
-def test_ble_connects(connected_dut):
+def test_ble_connects(connected_dut, bt_mac):
+    """bt_mac is the fixture that actually pairs/connects over bluetoothctl --
+    connected_dut alone only puts the firmware into advertising mode (BEGIN).
+    Depend on bt_mac explicitly so this test doesn't rely on some earlier test
+    in the session having pulled it in first (e.g. test_axes.py's gamepad
+    fixture); run this file in isolation and CONN? would otherwise time out
+    against a device nothing ever told to connect."""
     connected_dut.wait_connected(timeout=30)
     assert connected_dut.connected()
 
