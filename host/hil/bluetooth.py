@@ -47,12 +47,25 @@ def is_connected(mac):
     return "Connected: yes" in info(mac)
 
 
+def _device_path(mac):
+    return "/org/bluez/hci0/dev_" + mac.replace(":", "_")
+
+
 def is_services_resolved(mac):
     """GATT service discovery is asynchronous and happens *after* the link
     comes up -- BlueZ's HID input plugin (which bridges the HID service into
     the kernel as /dev/input + /dev/hidraw) and the DIS/Battery GATT reads in
-    gatt.py both depend on it having finished, not just on Connected: yes."""
-    return "ServicesResolved: yes" in info(mac)
+    gatt.py both depend on it having finished, not just on Connected: yes.
+
+    Go straight to the org.bluez.Device1 D-Bus property rather than
+    `bluetoothctl info`: on bluez 5.82 `info` never prints a ServicesResolved
+    line at all (checked live against a fully-resolved device), even though
+    the property itself -- what `[CHG] ... ServicesResolved: yes` in an
+    interactive session is sourced from -- is right there and correct."""
+    r = _run(
+        ["busctl", "get-property", "org.bluez", _device_path(mac), "org.bluez.Device1", "ServicesResolved"]
+    )
+    return r.returncode == 0 and "true" in r.stdout
 
 
 def wait_services_resolved(mac, timeout=20):
