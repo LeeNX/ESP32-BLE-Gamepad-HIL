@@ -60,6 +60,18 @@ if "$RFKILL" list bluetooth 2>/dev/null | grep -q 'Soft blocked: yes'; then
   echo "   WARNING: bluetooth still soft-blocked -- pairing will not work"
 fi
 
+echo "== passwordless bluetooth restart for $TARGET_USER"
+# hil.bluetooth.restart_adapter() recovers a wedged BlueZ/HCI stack (the
+# "le-connection-abort-by-local" / stuck-pairing class of rig flake, see
+# hil-rig-ble-flake-sep09) by restarting the service mid-test-run. Scoped to
+# exactly this one command -- not a blanket NOPASSWD -- so a compromised CI
+# job can bounce bluetoothd and nothing else.
+SUDOERS_FILE=/etc/sudoers.d/hil-bluetooth-restart
+echo "$TARGET_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart bluetooth" > "$SUDOERS_FILE.tmp"
+visudo -cf "$SUDOERS_FILE.tmp" >/dev/null
+chmod 0440 "$SUDOERS_FILE.tmp"
+mv "$SUDOERS_FILE.tmp" "$SUDOERS_FILE"
+
 echo "== groups for $TARGET_USER (serial / input / hidraw)"
 # 'input' is the one people miss: without it evdev.list_devices() returns [] for
 # this user and every test times out finding the gamepad node.
