@@ -311,9 +311,30 @@ def bt_mac(rigcfg, connected_dut, pytestconfig):
             with bluetooth.BtCtl() as btctl:
                 mac = bluetooth.ensure_paired(btctl, name, known_mac=None, want_fresh=True)
                 connected_dut.wait_connected()
+
+    # GATT ServicesResolved (bluetooth.ensure_paired) is necessary but not
+    # sufficient: BlueZ's HID input plugin bridges the HID service into the
+    # kernel (creating /dev/input/event* + /dev/hidraw*) on its own schedule,
+    # measurably after GATT itself resolves. --no-pair (phase 2 of a --by-board
+    # run, see tester/test-all.sh) trusts this fixture's state.json record with
+    # no wait of its own, so block here until the node genuinely exists --
+    # otherwise it's only ever phase 1 (here) racing it, not phase 2 too.
+    find_gamepad(name, timeout=30).close()
     _merge_state(name, {"mac": mac, "profile": rigcfg["profile"]})
     print(f"[bt] {name} -> {mac}")
     yield mac
+
+    # HIL_KEEP_LINK=1 (set by tester/test-all.sh's phase1_turn) means phase 2
+    # -- a *separate* pytest process, --no-pair, trusting state.json with no
+    # reconnect of its own -- starts the moment this session ends. Tearing
+    # the link down here would just hand phase 2 a disconnected device with
+    # nothing left to reconnect it (that's the evdev-node race this fixture's
+    # own find_gamepad wait above can't fix by itself -- it only guarantees
+    # the node exists at the *end* of phase 1, not that it stays up for
+    # phase 2). Leave the link exactly as phase 1 left it and let whichever
+    # session runs last for this device do the real teardown.
+    if os.environ.get("HIL_KEEP_LINK") == "1":
+        return
 
     # Leave the system neutral for the next run: drop the live link but keep
     # the bond, so next time gets a fast reconnect instead of a full re-pair
