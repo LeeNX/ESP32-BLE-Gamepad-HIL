@@ -47,6 +47,23 @@ def is_connected(mac):
     return "Connected: yes" in info(mac)
 
 
+def is_services_resolved(mac):
+    """GATT service discovery is asynchronous and happens *after* the link
+    comes up -- BlueZ's HID input plugin (which bridges the HID service into
+    the kernel as /dev/input + /dev/hidraw) and the DIS/Battery GATT reads in
+    gatt.py both depend on it having finished, not just on Connected: yes."""
+    return "ServicesResolved: yes" in info(mac)
+
+
+def wait_services_resolved(mac, timeout=20):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if is_services_resolved(mac):
+            return True
+        time.sleep(0.5)
+    return False
+
+
 def known_devices():
     devs = {}
     for line in _run(["bluetoothctl", "devices"]).stdout.splitlines():
@@ -322,6 +339,12 @@ def ensure_paired(btctl, name_contains, known_mac=None, want_fresh=False):
             # and recreate the evdev/js node right after cleanup.
             # _recover_link's mid-run auto-reconnect needs Trusted back.
             btctl.send(f"trust {mac}")
+            if not wait_services_resolved(mac):
+                raise RuntimeError(
+                    f"{mac} reconnected but GATT services never resolved -- "
+                    "the kernel HID node (evdev/hidraw) and GATT reads "
+                    "(battery/DIS) all depend on this"
+                )
             return mac
 
     if mac is None:
@@ -369,6 +392,12 @@ def ensure_paired(btctl, name_contains, known_mac=None, want_fresh=False):
 
     for _ in range(12):
         if is_connected(mac):
+            if not wait_services_resolved(mac):
+                raise RuntimeError(
+                    f"{mac} connected but GATT services never resolved -- "
+                    "the kernel HID node (evdev/hidraw) and GATT reads "
+                    "(battery/DIS) all depend on this"
+                )
             return mac
         btctl.connect(mac)
         time.sleep(1)
