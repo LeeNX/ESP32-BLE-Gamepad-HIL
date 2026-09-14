@@ -285,18 +285,52 @@ def bt_mac(rigcfg, connected_dut, pytestconfig):
     )
 
     if pytestconfig.getoption("no_pair") and prev.get("mac") and not want_fresh:
-        return prev["mac"]  # no BtCtl at all -- lets --by-board lanes stay independent
+        yield prev["mac"]  # no BtCtl at all -- lets --by-board lanes stay independent
+        return  # didn't touch the link this session -- not ours to disconnect
 
     # One board pairs at a time: `remove`/`pair` and BlueZ discovery are
     # adapter-global, and a second bluetoothctl agent confuses bluetoothd
     # (org.bluez.Error.InProgress). So the BtCtl session lives *entirely* inside
     # the lock -- only one agent exists at any moment across parallel lanes.
-    with _flock("pair.lock"), bluetooth.BtCtl() as btctl:
-        mac = bluetooth.ensure_paired(btctl, name, known_mac=prev.get("mac"), want_fresh=want_fresh)
-        connected_dut.wait_connected()
+    with _flock("pair.lock"):
+        try:
+            with bluetooth.BtCtl() as btctl:
+                mac = bluetooth.ensure_paired(
+                    btctl, name, known_mac=prev.get("mac"), want_fresh=want_fresh
+                )
+                connected_dut.wait_connected()
+        except RuntimeError as e:
+            # PoC: the rig's recurring BLE flake (org.bluez.Error.Failed
+            # le-connection-abort-by-local, pairing that never bonds -- see
+            # hil-rig-ble-flake-sep09) has so far only cleared with a full rig
+            # reboot or a manual `systemctl restart bluetooth`. Try the latter
+            # automatically, once, before failing the run -- ignore whatever
+            # bond state we had going in, it's suspect after a wedged adapter.
+            print(f"[bt] pairing failed ({e}); restarting the bluetooth adapter and retrying once")
+            bluetooth.restart_adapter()
+            with bluetooth.BtCtl() as btctl:
+                mac = bluetooth.ensure_paired(btctl, name, known_mac=None, want_fresh=True)
+                connected_dut.wait_connected()
     _merge_state(name, {"mac": mac, "profile": rigcfg["profile"]})
     print(f"[bt] {name} -> {mac}")
-    return mac
+    yield mac
+
+    # Leave the system neutral for the next run: drop the live link but keep
+    # the bond, so next time gets a fast reconnect instead of a full re-pair
+    # (want_fresh already forces a re-pair on a profile change, regardless).
+    # Untrust first -- Trusted is what makes BlueZ auto-reconnect a bonded
+    # device in the background (see _recover_link), which would otherwise
+    # silently undo the disconnect below and recreate /dev/input/js*.
+    # ensure_paired() re-trusts on its next connect, so this doesn't cost
+    # anything at the start of the next run. Best-effort -- a teardown
+    # failure here shouldn't mask the real test results.
+    try:
+        with _flock("pair.lock"):
+            bluetooth.untrust(mac)
+            bluetooth.disconnect(mac)
+        print(f"[bt] disconnected {mac} (bond kept, untrusted)")
+    except Exception as e:  # noqa: BLE001
+        print(f"[bt] WARNING: failed to disconnect {mac} after the run: {e}")
 
 
 # --- evdev node ---------------------------------------------------------
