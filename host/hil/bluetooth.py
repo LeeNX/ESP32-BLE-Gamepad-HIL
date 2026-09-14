@@ -63,7 +63,14 @@ def is_services_resolved(mac):
     the property itself -- what `[CHG] ... ServicesResolved: yes` in an
     interactive session is sourced from -- is right there and correct."""
     r = _run(
-        ["busctl", "get-property", "org.bluez", _device_path(mac), "org.bluez.Device1", "ServicesResolved"]
+        [
+            "busctl",
+            "get-property",
+            "org.bluez",
+            _device_path(mac),
+            "org.bluez.Device1",
+            "ServicesResolved",
+        ]
     )
     return r.returncode == 0 and "true" in r.stdout
 
