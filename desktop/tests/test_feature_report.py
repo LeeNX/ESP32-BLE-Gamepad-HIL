@@ -13,8 +13,18 @@ already a dependency for -m hid -- standing in for the rig's Linux-only
 import pytest
 
 from hil.hidraw import HIL_PID, HIL_VID
+from hil.serialdev import ConnectionTimeoutError
 
 pytestmark = pytest.mark.hid
+
+
+def _get_feature(h, rid, length):
+    """hidapi's get_feature_report(report_num, max_length) fills the buffer
+    with the report ID first (max_length counts it), so only max_length - 1
+    bytes of it is payload -- request one more than we want and strip the ID."""
+    got = bytes(h.get_feature_report(rid, length + 1))
+    assert got[0] == rid, f"report id {got[0]:#x} vs {rid:#x}"
+    return got[1:]
 
 
 @pytest.fixture(scope="module")
@@ -26,7 +36,7 @@ def feat(dut):
         dut.wait_connected(
             timeout=25.0
         )  # opening the serial port reset the ESP32; wait for the BLE relink
-    except Exception:
+    except ConnectionTimeoutError:
         pytest.skip("board not bonded/connected -- run  python pair-assist.py --port <port>  first")
     rid = int(cfg["_raw"].split("reportId=")[1].split(" ")[0])
 
@@ -52,7 +62,7 @@ def test_feature_device_to_host(dut, feat):
     h, length, rid = feat
     payload = bytes((0xA0 + i) & 0xFF for i in range(length))
     dut.set_feature_report(payload)
-    got = bytes(h.get_feature_report(rid, length))
+    got = _get_feature(h, rid, length)
     assert got == payload, f"{got.hex()} vs {payload.hex()}"
 
 
@@ -69,7 +79,7 @@ def test_feature_roundtrip_both_ways(dut, feat):
     h, length, rid = feat
     a = bytes([0x5A] * length)
     dut.set_feature_report(a)
-    assert bytes(h.get_feature_report(rid, length)) == a
+    assert _get_feature(h, rid, length) == a
     b = bytes([0xC3] * length)
     h.send_feature_report(bytes([rid]) + b)
     recv, data = dut.feature_report()
@@ -83,4 +93,4 @@ def test_feature_full_length_roundtrips(dut, feat):
     h, length, rid = feat
     payload = bytes((0x30 + i) & 0xFF for i in range(length))
     dut.set_feature_report(payload)
-    assert bytes(h.get_feature_report(rid, length)) == payload
+    assert _get_feature(h, rid, length) == payload

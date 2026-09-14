@@ -33,6 +33,13 @@ class SerialError(RuntimeError):
     pass
 
 
+class ConnectionTimeoutError(SerialError):
+    """wait_connected() gave up without ever seeing CONN 1 -- distinct from
+    the other SerialErrors it can propagate (dropped port, protocol error),
+    which a caller skipping on "not paired yet" should let through instead of
+    swallowing."""
+
+
 class SerialDev:
     def __init__(self, port, baud=115200, boot_wait=2.0):
         self.port = port
@@ -225,7 +232,7 @@ class SerialDev:
             if self.connected():
                 return
             time.sleep(0.5)
-        raise SerialError("device did not report CONN 1")
+        raise ConnectionTimeoutError("device did not report CONN 1")
 
     def press(self, n):
         self.ok(f"PRESS {n}")

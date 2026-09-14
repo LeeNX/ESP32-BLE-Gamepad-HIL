@@ -27,7 +27,7 @@ sys.path.insert(0, str(REPO / "host"))
 from hidgamepad import drain, read_after  # noqa: E402  -- desktop/, on pythonpath
 
 from hil.hidraw import HIL_PID, HIL_VID  # noqa: E402
-from hil.serialdev import SerialDev  # noqa: E402
+from hil.serialdev import ConnectionTimeoutError, SerialDev  # noqa: E402
 
 GOLDEN_DIR = REPO / "firmware" / "golden"
 FLASH_PY = REPO / "tester" / "flash.py"
@@ -202,7 +202,7 @@ def device_info(gatt, dut, device_name):
         dut.wait_connected(
             timeout=25.0
         )  # opening the serial port reset the ESP32; wait for the BLE relink
-    except Exception:
+    except ConnectionTimeoutError:
         pytest.skip("board not bonded/connected -- run  python pair-assist.py --port <port>  first")
     try:
         return gatt.read_all(device_name)
