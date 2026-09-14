@@ -56,6 +56,26 @@ def known_devices():
     return devs
 
 
+def disconnect(mac):
+    """One-shot: drop the live link but keep the bond, so the next session
+    gets a fast reconnect instead of a full re-pair."""
+    return _run(["bluetoothctl", "disconnect", mac], timeout=20).stdout
+
+
+def trust(mac):
+    return _run(["bluetoothctl", "trust", mac], timeout=10).stdout
+
+
+def untrust(mac):
+    """Stop BlueZ auto-reconnecting this bond in the background. Trusted is
+    what makes `_recover_link`'s "BlueZ auto-reconnects a trusted bond" work
+    mid-run -- but that same auto-reconnect will silently undo an end-of-run
+    disconnect() (and recreate the /dev/input/js* node) unless untrusted
+    first. A plain `connect()` at the start of the next run doesn't need
+    Trusted, so this is safe to leave off until ensure_paired() re-trusts."""
+    return _run(["bluetoothctl", "untrust", mac], timeout=10).stdout
+
+
 def connected_devices():
     """MACs with a live link on the adapter right now (BlueZ >= 5.65's
     `devices Connected`) -- lets a bench sweep record how many gamepads were
@@ -66,6 +86,49 @@ def connected_devices():
     except Exception:
         return []
     return re.findall(r"Device ([0-9A-F:]{17})", out)
+
+
+def restart_adapter(timeout=30):
+    """Restart bluetoothd (`systemctl restart bluetooth`) and wait for the
+    adapter to come back powered.
+
+    Last-resort recovery for a wedged BlueZ/HCI stack that a bluetoothctl-level
+    retry can't clear (org.bluez.Error.Failed le-connection-abort-by-local,
+    pairing that never bonds -- see hil-rig-ble-flake-sep09). Any BtCtl session
+    open across this call is dead afterwards -- bluetoothd restarting drops its
+    D-Bus connection -- so callers must open a fresh BtCtl once this returns.
+
+    Requires a NOPASSWD sudoers rule for exactly this command (installed by
+    tester/bootstrap-host.sh); raises RuntimeError with a pointer to that if
+    it's missing, instead of hanging on a password prompt.
+    """
+    try:
+        subprocess.run(
+            ["sudo", "-n", "systemctl", "restart", "bluetooth"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(
+            "sudo systemctl restart bluetooth failed -- needs the NOPASSWD "
+            "sudoers rule from tester/bootstrap-host.sh on this tester. "
+            f"stderr: {e.stderr.strip()}"
+        ) from e
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError("sudo systemctl restart bluetooth timed out") from e
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        active = _run(["systemctl", "is-active", "bluetooth"], timeout=5).stdout.strip()
+        if (
+            active == "active"
+            and "Powered: yes" in _run(["bluetoothctl", "show"], timeout=5).stdout
+        ):
+            return
+        time.sleep(1)
+    raise RuntimeError("bluetooth service restarted but the adapter did not come back up in time")
 
 
 class BtCtl:
@@ -253,6 +316,12 @@ def ensure_paired(btctl, name_contains, known_mac=None, want_fresh=False):
         if not is_connected(mac):
             btctl.connect(mac)
         if is_connected(mac):
+            # Re-trust on the reconnect path too, not just fresh pair()s --
+            # the previous session's teardown untrusts before disconnecting
+            # (see conftest.py bt_mac) so BlueZ doesn't silently reconnect it
+            # and recreate the evdev/js node right after cleanup.
+            # _recover_link's mid-run auto-reconnect needs Trusted back.
+            btctl.send(f"trust {mac}")
             return mac
 
     if mac is None:
