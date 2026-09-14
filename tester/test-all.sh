@@ -142,8 +142,13 @@ phase1_turn() {
   mkdir -p "$PHASE1_CACHE"
   (
     flock -w "${HIL_PHASE1_MUTEX_TIMEOUT:-600}" 210 || exit 75
-    HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 ./tester/test.sh "$bundle" \
-      || HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 ./tester/test.sh "$bundle"
+    # HIL_KEEP_LINK=1 -- phase 2 runs --no-pair (no BtCtl of its own, see the
+    # --by-board header comment) and starts the moment this session ends, so
+    # conftest.py's bt_mac must leave the link connected+trusted instead of
+    # its normal end-of-session disconnect+untrust -- otherwise phase 2
+    # inherits a dead link with nothing left to reconnect it.
+    HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 HIL_KEEP_LINK=1 ./tester/test.sh "$bundle" \
+      || HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 HIL_KEEP_LINK=1 ./tester/test.sh "$bundle"
   ) 210>"$PHASE1_LOCK" || rc=$?
   round_barrier "$board" "${round}.phase1" || rc=1
   return "$rc"
