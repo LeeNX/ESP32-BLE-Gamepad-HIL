@@ -20,6 +20,7 @@ directly. One repo, one source of truth for the protocol and the goldens.
 | Behavioural — buttons / axes / hats (`-m sdl`, SDL joystick, + `-m hid` raw for buttons) | ✅ `test_buttons.py` / `test_axes.py` / `test_hats.py` / `test_hid_reports.py`; board bonded here |
 | Press-to-host latency (`-m latency`) | ✅ `test_latency.py`; hidapi timestamps (rig-comparable only loosely — see below) |
 | Force-feedback / rumble (`-m sdl`) | ✅ `test_rumble.py` — documents unsupported, see below |
+| Feature Report round-trip (`-m hid`) | ✅ `test_feature_report.py` — ported from `../host/tests/test_feature_report.py`, `hidapi` get/send_feature_report standing in for the rig's hidraw ioctls. **Finding**: the rig's strict-xfail last-byte truncation does *not* reproduce here — full length round-trips clean on macOS's native HID stack, so that one is a Linux/hidraw (or BlueZ) transport quirk, not a firmware bug. `specials` profile only (no Feature Report on `local`) — advertises as `HILpad <board>`, so build it with `--name` to avoid clashing with the reference rig, same as any non-`local` profile. |
 | GATT reads (Device Info / PnP / Battery over CoreBluetooth / WinRT) | 🔴 later step |
 | Remote drive (SSH / CI runner) | 🔴 later — for now, run it by hand (below) |
 
