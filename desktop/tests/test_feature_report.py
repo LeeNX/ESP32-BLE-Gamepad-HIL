@@ -23,7 +23,9 @@ def feat(dut):
     if not cfg.get("feat"):
         pytest.skip("profile has no Feature Report (use --profile specials)")
     try:
-        dut.wait_connected(timeout=25.0)  # opening the serial port reset the ESP32; wait for the BLE relink
+        dut.wait_connected(
+            timeout=25.0
+        )  # opening the serial port reset the ESP32; wait for the BLE relink
     except Exception:
         pytest.skip("board not bonded/connected -- run  python pair-assist.py --port <port>  first")
     rid = int(cfg["_raw"].split("reportId=")[1].split(" ")[0])

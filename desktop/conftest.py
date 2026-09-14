@@ -199,7 +199,9 @@ def device_info(gatt, dut, device_name):
     needs to see it advertising/connectable like any other GATT client.
     """
     try:
-        dut.wait_connected(timeout=25.0)  # opening the serial port reset the ESP32; wait for the BLE relink
+        dut.wait_connected(
+            timeout=25.0
+        )  # opening the serial port reset the ESP32; wait for the BLE relink
     except Exception:
         pytest.skip("board not bonded/connected -- run  python pair-assist.py --port <port>  first")
     try:
