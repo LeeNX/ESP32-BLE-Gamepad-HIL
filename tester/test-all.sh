@@ -99,10 +99,15 @@ command -v flock >/dev/null 2>&1 && HAVE_FLOCK=1
 
 # round_barrier <board> <key> -- record <board> as done with <key> (a
 # "<round>.phase1" or "<round>.phase2" checkpoint), then block until every
-# board in $boards has reached the *same* key (or a timeout elapses). Record
-# unconditionally -- a board this tester doesn't have wired (or one whose
-# phase failed outright) must still count as "done", or it'd stall every
-# other lane for the full timeout, every round.
+# board in $sync_boards has reached the *same* key (or a timeout elapses).
+# Record unconditionally, even from a board this tester doesn't have wired
+# (its lane SKIPs every bundle instantly) -- but $sync_boards (unlike $boards)
+# excludes those, so an unwired board's own barrier calls never have to
+# out-wait real hardware; it just records and moves on. Without that split, a
+# CHANGE-ME lane finishes phase1 near-instantly, sits waiting on the wired
+# boards' real flash+pair, and gives up first -- failing the whole run on a
+# timeout despite doing no actual test work (seen live: esp32c3 unwired,
+# esp32dev/esp32s3's phase1 ran ~238s under the old 180s default).
 #
 # Both checkpoints matter: phase1's keeps any board from starting its heavy
 # phase2 while another is still pairing; phase2's keeps a fast board from
@@ -111,17 +116,18 @@ command -v flock >/dev/null 2>&1 && HAVE_FLOCK=1
 # N+1's phase1 could still overlap round N's phase2 on a different lane,
 # which is the exact contention this whole scheme exists to remove.
 #
-# Returns 0 once everyone's arrived, 1 on timeout -- callers must fail closed
-# on 1 (skip phase 2 / stop the lane), not treat "gave up waiting" as "safe
-# to proceed"; whoever we were waiting on may just be slow, not gone.
+# Returns 0 once every synced board has arrived, 1 on timeout -- callers must
+# fail closed on 1 (skip phase 2 / stop the lane), not treat "gave up
+# waiting" as "safe to proceed"; whoever we were waiting on may just be slow,
+# not gone.
 round_barrier() {
   local board=$1 key=$2
   local state="${PHASE1_ARRIVED}.${key}"
   ( flock -w 30 211 && printf '%s\n' "$board" >>"$state" ) 211>"${state}.lock" || true
 
-  local deadline=$((SECONDS + ${HIL_PHASE1_BARRIER_TIMEOUT:-180}))
+  local deadline=$((SECONDS + ${HIL_PHASE1_BARRIER_TIMEOUT:-300}))
   while (( SECONDS < deadline )); do
-    [ "$(sort -u "$state" 2>/dev/null | wc -l | tr -d ' ')" -ge "${#boards[@]}" ] && return 0
+    [ "$(sort -u "$state" 2>/dev/null | wc -l | tr -d ' ')" -ge "${#sync_boards[@]}" ] && return 0
     sleep 1
   done
   # Fail closed: a board that gave up waiting here must not be treated as
@@ -216,7 +222,13 @@ if [ "$BY_BOARD" = 1 ]; then
   rm -f "$PHASE1_ARRIVED".* "$PHASE1_LOCK"  # stale barrier state from a previous run
   mapfile -t boards < <(all_bundles | while IFS= read -r b; do bundle_board "$b"; done | sort -u)
   [ "${#boards[@]}" -gt 0 ] || { echo "no bundles in $BUNDLE_DIR" >&2; exit 0; }
-  echo "== [$(ts)] by-board: ${boards[*]}  (one parallel lane each)"
+  # sync_boards: boards that are both bundled AND actually wired here -- the
+  # set round_barrier waits for. A board with no port configured (CHANGE-ME)
+  # still gets a lane (so its bundles report SKIP), but never makes the real
+  # lanes wait on it, and never waits on them itself -- see round_barrier.
+  mapfile -t present < <(PYTHONPATH=host "$PY" -m hil.detect --present | tr ' ' '\n')
+  mapfile -t sync_boards < <(comm -12 <(printf '%s\n' "${boards[@]}" | sort -u) <(printf '%s\n' "${present[@]}" | sort -u))
+  echo "== [$(ts)] by-board: ${boards[*]}  (one parallel lane each; syncing on: ${sync_boards[*]:-none})"
   pids=()
   for board in "${boards[@]}"; do
     run_lane "$board" "$@" > "results/lane-$board.log" 2>&1 &
