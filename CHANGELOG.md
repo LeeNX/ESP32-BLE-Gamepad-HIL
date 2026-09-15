@@ -18,6 +18,19 @@ What a bump means:
 
 ## [Unreleased]
 
+### Fixed
+
+- **`--by-board` false failure when a board has no port configured** — an
+  unwired (`CHANGE-ME`) board's lane finishes its phase-1 SKIP almost
+  instantly, then sat waiting at `round_barrier` for the real boards' actual
+  flash+pair+smoke test; that wait used the same `HIL_PHASE1_BARRIER_TIMEOUT`
+  (180s default) that real hardware can now legitimately exceed since the
+  BLE pairing robustness fixes added real wall-clock time. The unwired
+  board's lane would give up first and fail the whole run's exit code even
+  when every wired board passed everything. `round_barrier` now waits only
+  on boards that are actually present (`hil.detect --present`), and the
+  default timeout is raised to 300s for headroom.
+
 ## [0.2.4] — 2026-09-15
 
 ### Added
