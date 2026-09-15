@@ -28,7 +28,10 @@ GitHub Release, and two attached tarballs:
 
    (or take the most recent Monday `schedule` run if `main` hasn't moved — it
    builds all 4 + bench). Confirm it's green, then regenerate
-   `docs/bench/bench-table.md` + SVGs from its `results/` if the numbers moved.
+   `docs/bench/bench-table.md` + SVGs from its `results/` if the numbers moved
+   (see [`docs/bench/README.md`](docs/bench/README.md)) and commit them —
+   `release.yml` inlines whatever's committed at the tag straight into the
+   release notes (table + charts), so a stale snapshot ships stale numbers.
 3. From a clean `main`:
 
    ```bash

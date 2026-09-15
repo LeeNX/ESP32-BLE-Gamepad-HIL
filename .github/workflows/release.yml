@@ -98,18 +98,44 @@ jobs:
       - name: Assemble release artifacts
         run: scripts/make-release-artifacts.sh "$TAG"
 
+      - name: Assemble bench notes
+        id: bench
+        run: |
+          if [ -s docs/bench/bench-table.md ]; then
+            base="https://raw.githubusercontent.com/${{ github.repository }}/$TAG/docs/bench"
+            {
+              echo "## HIL benchmark"
+              echo
+              echo "Latency/throughput snapshot from the rig's \`--bench\` sweep (button e2e, polling rate, connection interval)." \
+                   "Full commentary in [\`docs/bench/\`](https://github.com/${{ github.repository }}/tree/$TAG/docs/bench)."
+              echo
+              tail -n +2 docs/bench/bench-table.md  # drop its own "# HIL benchmark" H1, we have our own
+              echo
+              echo "![button latency distribution]($base/latency-distribution.svg)"
+              echo "![latency vs report size]($base/latency-vs-reportsize.svg)"
+              echo "![polling rate]($base/polling-rate.svg)"
+              echo
+            } > dist/bench-notes.md
+            echo "has_bench=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::no docs/bench/bench-table.md -- release notes will skip the bench section"
+            echo "has_bench=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           flag=""
           [ "${{ steps.v.outputs.prerelease }}" = "true" ] && flag="--prerelease"
+          notes_flag=()
+          [ "${{ steps.bench.outputs.has_bench }}" = "true" ] && notes_flag=(--notes-file dist/bench-notes.md)
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/*.tar.gz dist/SHA256SUMS --clobber
           else
             # shellcheck disable=SC2086
             gh release create "$TAG" --title "$TAG" --generate-notes $flag \
-              dist/*.tar.gz dist/SHA256SUMS
+              "${notes_flag[@]}" dist/*.tar.gz dist/SHA256SUMS
           fi
 
       - uses: actions/upload-artifact@v6
