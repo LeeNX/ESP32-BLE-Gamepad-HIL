@@ -18,6 +18,33 @@ What a bump means:
 
 ## [Unreleased]
 
+## [0.2.4] — 2026-09-15
+
+### Added
+
+- **Desktop GATT reads via bleak** (`desktop/sdlgamepad.py` now reads Device Info,
+  PnP ID, and Battery status from the gamepad's GATT characteristics via bleak,
+  independent of HID Feature Reports; `desktop/tests/ -m hid` exercises both paths).
+
+### Fixed
+
+- **Recover from BLE pairing flakes** — `tester/test.sh` now disconnects and
+  untrusts the device after each run to clear stale pairing state that can cause
+  mid-suite reconnect failures.
+- **BLE link stability between by-board phases** — phase-1 (flash+pair+smoke)
+  was tearing down the BLE connection before phase-2 heavy tests; the link now
+  stays up across the phase barrier on platforms that support re-connection
+  without re-pairing.
+- **ServicesResolved readiness** — `bluetooth.ensure_paired()` now waits for
+  the D-Bus `ServicesResolved` flag (not just GATT characteristics available)
+  before returning, blocking race where service discovery was incomplete.
+- **test_ble_connects dependency chain** — test now depends on `bt_mac` fixture
+  in addition to `connected_dut` to ensure BLE discovery completes before
+  connection attempts.
+- **CI cache handling for releases** — `hil.yml` now zeros the PlatformIO build
+  cache on release runs to guarantee fresh builds, while preserving it on dev
+  runs for faster iteration.
+
 ## [0.2.3] — 2026-09-13
 
 ### Added
