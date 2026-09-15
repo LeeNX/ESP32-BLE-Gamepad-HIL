@@ -18,8 +18,6 @@ What a bump means:
 
 ## [Unreleased]
 
-## [0.2.4] — 2026-09-15
-
 ### Added
 
 - **Desktop GATT reads via bleak** (`desktop/sdlgamepad.py` now reads Device Info,
