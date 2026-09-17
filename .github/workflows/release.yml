@@ -111,9 +111,15 @@ jobs:
               echo
               tail -n +2 docs/bench/bench-table.md  # drop its own "# HIL benchmark" H1, we have our own
               echo
-              echo "![button latency distribution]($base/latency-distribution.svg)"
-              echo "![latency vs report size]($base/latency-vs-reportsize.svg)"
-              echo "![polling rate]($base/polling-rate.svg)"
+              # host/hil/charts.py writes each SVG independently of bench-table.md
+              # (main() skips a chart with no data for it -- `if svg:` before the
+              # write), so a valid table can coexist with one missing SVG. Link
+              # only the ones that actually exist, or a snapshot missing just one
+              # chart would publish a broken image link instead of the other two
+              # charts still rendering.
+              [ -s docs/bench/latency-distribution.svg ] && echo "![button latency distribution]($base/latency-distribution.svg)"
+              [ -s docs/bench/latency-vs-reportsize.svg ] && echo "![latency vs report size]($base/latency-vs-reportsize.svg)"
+              [ -s docs/bench/polling-rate.svg ] && echo "![polling rate]($base/polling-rate.svg)"
               echo
             } > dist/bench-notes.md
             echo "has_bench=true" >> "$GITHUB_OUTPUT"
