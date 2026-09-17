@@ -31,6 +31,19 @@ What a bump means:
   on boards that are actually present (`hil.detect --present`), and the
   default timeout is raised to 300s for headroom.
 
+- **`--by-board` false failure from a flat barrier timeout on a multi-board
+  rig** — phase1 (flash+pair+smoke) is a one-board-at-a-time global mutex,
+  so the time a fast board waits at `round_barrier` for the round to clear
+  scales with fleet size, and `phase1_turn`'s own built-in retry can double
+  one board's turn on top of that. The 300s flat default above was only
+  headroom for ~1-2 boards' worth of turns. Seen live on the 3-board rig:
+  esp32c3 (first to arrive) timed out at 300s just 5s before esp32dev's
+  retried phase1 (~180s vs ~85s normal) finished, failing the whole
+  `--by-board` run's exit code despite 349 passed / 0 failed across every
+  board. `round_barrier`'s default timeout now scales as 150s per synced
+  board (300s floor), so a 3-board rig gets 450s of headroom; override with
+  `HIL_PHASE1_BARRIER_TIMEOUT` still works as before.
+
 ## [0.2.4] — 2026-09-15
 
 ### Added

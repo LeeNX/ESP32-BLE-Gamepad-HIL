@@ -120,12 +120,24 @@ command -v flock >/dev/null 2>&1 && HAVE_FLOCK=1
 # fail closed on 1 (skip phase 2 / stop the lane), not treat "gave up
 # waiting" as "safe to proceed"; whoever we were waiting on may just be slow,
 # not gone.
+#
+# The default timeout scales with ${#sync_boards[@]}, not a flat constant --
+# phase1 is a one-board-at-a-time global mutex (see phase1_turn), so the
+# longest any board waits for the round to clear grows with fleet size, and
+# phase1_turn's own built-in retry can double one board's turn on top of
+# that. A flat 300s (this scheme's previous default) is only headroom for
+# ~1-2 boards' worth of turns; seen live on a 3-board rig: esp32c3 (first to
+# arrive) timed out at 300s just 5s before esp32dev's retried phase1 (~180s
+# vs ~85s normal for the other boards) finished, failing the whole
+# --by-board run despite 0 actual test failures across every board.
 round_barrier() {
   local board=$1 key=$2
   local state="${PHASE1_ARRIVED}.${key}"
   ( flock -w 30 211 && printf '%s\n' "$board" >>"$state" ) 211>"${state}.lock" || true
 
-  local deadline=$((SECONDS + ${HIL_PHASE1_BARRIER_TIMEOUT:-300}))
+  local default_timeout=$(( 150 * ${#sync_boards[@]} ))
+  [ "$default_timeout" -lt 300 ] && default_timeout=300
+  local deadline=$((SECONDS + ${HIL_PHASE1_BARRIER_TIMEOUT:-$default_timeout}))
   while (( SECONDS < deadline )); do
     [ "$(sort -u "$state" 2>/dev/null | wc -l | tr -d ' ')" -ge "${#sync_boards[@]}" ] && return 0
     sleep 1
