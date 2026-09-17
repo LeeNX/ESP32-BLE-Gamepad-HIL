@@ -64,9 +64,21 @@ PY=$(command -v python3 || echo "${HIL_VENV:-$HOME/.venvs/hil}/bin/python")
 
 ts() { date +%H:%M:%S; }
 
-# Bundle dirs are <board>-<profile>-<sha>; board/profile names carry no dash.
+# Bundle dirs are <board>-<profile>-<sha>; board names carry no dash (all
+# current ones: esp32c3/esp32dev/esp32s3), but profile names might (see
+# summarize.py's _bundle(), which already accounts for a "signed-axes"-style
+# profile) -- so bundle_profile strips the leading "<board>-" and the
+# trailing "-<sha>" (a git short hash, itself always dash-free) rather than
+# just taking the 2nd dash-separated field, which would silently truncate a
+# dashed profile (and every consumer of $round below, junit filenames
+# included) to its first component.
 bundle_board() { basename "$1" | cut -d- -f1; }
-bundle_profile() { basename "$1" | cut -d- -f2; }
+bundle_profile() {
+  local name
+  name=$(basename "$1")
+  name=${name#*-}
+  printf '%s\n' "${name%-*}"
+}
 
 all_bundles() {
   local b
