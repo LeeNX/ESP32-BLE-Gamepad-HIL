@@ -92,9 +92,10 @@ needed, see `host/hil/sysinfo.py`) from a real 3-board run.
 
 - **1GB RAM is a genuine floor, not a comfort margin.** No OOM kills observed,
   but free memory sits at a few hundred MB under load, with swap already
-  partially in use. A board with more headroom (2GB+, e.g. a Pi 4 or Zero
-  2W-class board) would give real margin, especially before adding a 4th+
-  board — this rig hasn't been tested with more than 3.
+  partially in use. A board with more headroom (2GB+ — a Pi 4 or Pi 5, in
+  their 2GB-or-larger variants; **not** the Zero 2 W, which has only 512MB)
+  would give real margin, especially before adding a 4th+ board — this rig
+  hasn't been tested with more than 3.
 - **CPU headroom is generous.** Even a Pi 3B+'s 4 cores are barely troubled
   running 3 boards' phase-2 in parallel. Don't over-spec for CPU here.
 - **Budget USB ports per board, not per rig.** Most boards need one; the
