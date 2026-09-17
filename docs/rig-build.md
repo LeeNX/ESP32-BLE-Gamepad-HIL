@@ -17,19 +17,45 @@ it needs a second USB port beyond the board's own native USB.
 *(More photos welcome — drop additional files in `docs/rig-build/` and add
 them here the same way.)*
 
+## Bill of materials
+
+What's actually in the photo above, plus the parts that make it reliable
+rather than merely working:
+
+| Part | Notes |
+|---|---|
+| Raspberry Pi 3B+ (or better) | the tester itself — see "Minimum specs" below for what its RAM/CPU/USB budget actually needs to cover |
+| microSD card, 8GB minimum | this rig's card is 14.8GB with 4.1G (31%) actually used — 8GB is workable but tight once you add OS + repo + a few bundles/results; go bigger if you'll keep much history around |
+| Official/adequate Raspberry Pi PSU | undervoltage is the classic source of Pi flakiness under USB load — don't reuse a random phone charger |
+| Powered USB hub | **MCU boards plug into the hub, not the Pi's own ports** — flashing draws real current, and the Pi's onboard ports share a tight power budget with the board itself (see "USB" in the specs table below) |
+| FTDI/USB-serial bridge(s) → **directly** into the Pi | unlike the MCU boards, plug the UART bridge(s) (e.g. the ESP32-C3's, see README "ESP32-C3 serial bridge") straight into the Pi rather than through the hub — it's a low-current signal path, and one fewer hop for it to glitch |
+| Short, well-shielded USB cables | a long or cheap cable is the usual cause of a "board that only works if you jiggle it" — voltage drop and signal integrity both suffer over length |
+| A few transparent containers (the "so it looks cool" tax) | keeps bare header pins from shorting against a neighbor or the case (see the photo above) — food-storage tubs work fine; expect your household's resident Significant Other to have opinions about which ones went missing from the kitchen |
+
+### More blinking LEDs
+
+For visual feedback without wiring the firmware's own activity/connection
+LEDs (`docs/rig-hardware.md`), pick FTDI/USB-serial bridge boards that
+already have power/TX/RX LEDs built in — most do, and it's free signal for
+"is this board even talking right now." USB-C ones also make swapping boards
+in and out less fiddly than micro-USB when you're juggling three of them in
+a crowded hub. The red board in the photo above is one of these.
+
 ## Minimum specs to run multiple MCUs concurrently
 
 Reference rig: **Raspberry Pi 3B+** — 4× Cortex-A53, 1GB RAM, Debian 13
 (trixie), kernel 6.18. It runs all three boards today via `tester/test-all.sh
 --by-board` (one parallel lane per board — see that script's header comment
 for why phase 1 is still serialized). Numbers below are pulled from the live
-rig, not estimated: `vcgencmd`, `free`, and a `results/health-timeline-*.csv`
-sample (`tester/rig-lock.sh`'s sampler) from a real 3-board run.
+rig, not estimated: `free`, and a `results/health-timeline-*.csv` sample
+(`tester/rig-lock.sh`'s sampler — kernel thermal-zone temp, cpufreq, and the
+`rpi_volt` hwmon undervoltage alarm; no `sudo`/`vcgencmd` group access
+needed, see `host/hil/sysinfo.py`) from a real 3-board run.
 
 | Resource | Observed | Verdict |
 |---|---|---|
 | CPU | load average peaked at 0.95 (of 4 cores) across the whole 3-board run | not the bottleneck, even with 3 concurrent phase-2 pytest+bleak+evdev processes |
-| Temp / throttling | 42–44°C at full 1400MHz turbo; `vcgencmd get_throttled` clean (no undervoltage, no throttling) | comfortable |
+| Temp / power | 42–44°C, cpufreq scaling between 700MHz (idle) and the full 1400MHz turbo; `rpi_volt`'s undervoltage alarm never fired | comfortable, no brownout under load |
 | RAM | 905MiB total (1GB board, GPU split); ~150–600MiB free during/after a run; zram swap partially in use | the actual constraint — proven, but thin |
 | Storage | 14.8GB SD card, 4.1G used (31%) | modest — bundles + results/logs only; PlatformIO's own build cache lives on the **builder**, not this tester |
 | USB | 2 built-in hub chips already in use by the Pi's own ports, chained through 2 external hubs to reach all 3 boards | a powered USB hub is effectively required past 1–2 boards |
