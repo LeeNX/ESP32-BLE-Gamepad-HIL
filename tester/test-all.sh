@@ -75,10 +75,30 @@ all_bundles() {
   done
 }
 
+# record_retry <bundle> <n> -- note that <bundle> needed <n> extra attempt(s)
+# this run, in results/retries-<board>-<profile>.txt (read by summarize.py's
+# "retries" column). A board that's slower than its neighbors is often just a
+# board that had to retry -- a flaky pairing or a dropped byte on the C3/S3
+# UART bridge (README "Rig note") -- and that's invisible in the final junit
+# (a retry's failed first attempt isn't in it) unless something records it
+# separately. Accumulates across phase1 and phase2 within one run; callers
+# don't need to know the other phase's count.
+record_retry() {
+  local bundle=$1 n=$2
+  [ "$n" -gt 0 ] || return 0
+  local file
+  file="results/retries-$(bundle_board "$bundle")-$(bundle_profile "$bundle").txt"
+  local cur=0
+  [ -f "$file" ] && cur=$(cat "$file" 2>/dev/null || echo 0)
+  mkdir -p results
+  echo $(( cur + n )) > "$file"
+}
+
 # one bundle, one retry; returns non-zero on a second failure
 test_bundle() {
-  ./tester/test.sh "$1" "${@:2}" "${kargs[@]}" \
-    || ./tester/test.sh "$1" "${@:2}" "${kargs[@]}"
+  ./tester/test.sh "$1" "${@:2}" "${kargs[@]}" && return 0
+  record_retry "$1" 1
+  ./tester/test.sh "$1" "${@:2}" "${kargs[@]}"
 }
 
 # roll every bundle's junit into results/summary.md and echo it (CI lifts this
@@ -165,8 +185,9 @@ phase1_turn() {
     # conftest.py's bt_mac must leave the link connected+trusted instead of
     # its normal end-of-session disconnect+untrust -- otherwise phase 2
     # inherits a dead link with nothing left to reconnect it.
-    HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 HIL_KEEP_LINK=1 ./tester/test.sh "$bundle" \
-      || HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 HIL_KEEP_LINK=1 ./tester/test.sh "$bundle"
+    HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 HIL_KEEP_LINK=1 ./tester/test.sh "$bundle" && exit 0
+    record_retry "$bundle" 1
+    HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 HIL_KEEP_LINK=1 ./tester/test.sh "$bundle"
   ) 210>"$PHASE1_LOCK" || rc=$?
   round_barrier "$board" "${round}.phase1" || rc=1
   return "$rc"
@@ -211,9 +232,11 @@ run_lane() {  # <board> <pytest-args...> ; loop its bundles. rc 1 on any failure
 # run's result the next time that exact board/profile hits the same
 # never-ran-test.sh path, or (b) just pollute summarize_all's junit-*.xml
 # glob in ANY later run, by-board or sequential. Clear them unconditionally,
-# before branching, so neither path inherits the other's leftovers.
+# before branching, so neither path inherits the other's leftovers. Same
+# reasoning for the retries-*.txt sidecars record_retry writes -- a stale one
+# would make this run's report claim a retry that actually happened last time.
 mkdir -p results
-rm -f results/junit-*.phase1.xml
+rm -f results/junit-*.phase1.xml results/retries-*.txt
 
 if [ "$BY_BOARD" = 1 ]; then
   for a in "$@"; do

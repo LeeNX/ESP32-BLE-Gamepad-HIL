@@ -18,6 +18,17 @@ What a bump means:
 
 ## [Unreleased]
 
+### Added
+
+- **Retry count in the report** — `tester/test-all.sh` now records how many
+  extra attempts (beyond the first) each board/profile needed this run, in a
+  `results/retries-<board>-<profile>.txt` sidecar (`record_retry()`), and
+  `summarize.py`'s bundle matrix has a new `retries` column reading it. A
+  retry's failed first attempt isn't in the final junit at all, so without
+  this a board that ran noticeably longer than its neighbors gave no hint
+  why — a flaky pairing or a dropped byte on the C3/S3 UART bridge (README
+  "Rig note") looked identical to "just slower" in the report.
+
 ### Fixed
 
 - **`--by-board` false failure when a board has no port configured** — an
