@@ -11,6 +11,13 @@ skips that look like a real gap (missing golden, unreadable hidraw, absent dep)
 Failures and gap skips render as GitHub-flavored markdown alerts (colored,
 icon'd boxes in the job summary; a plain quoted block elsewhere).
 
+The bundle matrix also has a "retries" column: how many extra attempts (beyond
+the first) that board/profile needed this run, read from a sidecar
+`retries-<board>-<profile>.txt` (tester/test-all.sh's record_retry(), written
+next to the junit files) if one exists next to the junit file, else 0. This is
+often the actual reason one board took longer than its neighbors -- a retry's
+failed first attempt isn't itself in the final junit.
+
 Times are the pytest phase from each junit `<testsuite time>` -- the flash and
 the first pair (in tester/test.sh, before pytest) are not in it.
 
@@ -90,6 +97,14 @@ def _classify(case):
     return "pass", ""
 
 
+def _retries(path, board, profile):
+    sidecar = Path(path).parent / f"retries-{board}-{profile}.txt"
+    try:
+        return int(sidecar.read_text().strip())
+    except (OSError, ValueError):
+        return 0
+
+
 def collect(paths):
     bundles = {}  # (board, profile) -> counts
     areas = defaultdict(lambda: {"pass": 0, "fail": 0, "skip": 0})
@@ -99,8 +114,10 @@ def collect(paths):
     for p in sorted(paths):
         board, profile = _bundle(p)
         b = bundles.setdefault(
-            (board, profile), {"pass": 0, "fail": 0, "skip": 0, "xfail": 0, "time": 0.0}
+            (board, profile),
+            {"pass": 0, "fail": 0, "skip": 0, "xfail": 0, "time": 0.0, "retries": 0},
         )
+        b["retries"] = _retries(p, board, profile)
         try:
             root = ET.parse(p).getroot()
         except (ET.ParseError, OSError) as e:
@@ -131,14 +148,15 @@ def render(bundles, areas, failures, gap_skips):
     out = [f"## HIL — {n} bundle{'' if n == 1 else 's'} · {head}", ""]
 
     out += [
-        "| board / profile | pass | fail | skip | xfail | test time |",
-        "|---|---:|---:|---:|---:|---:|",
+        "| board / profile | pass | fail | skip | xfail | retries | test time |",
+        "|---|---:|---:|---:|---:|---:|---:|",
     ]
     for (board, profile), b in sorted(bundles.items()):
         mark = "" if b["fail"] == 0 else "❌ "
+        retries = f"↻ {b['retries']}" if b["retries"] else "0"
         out.append(
             f"| {mark}{board} / {profile} | {b['pass']} | {b['fail']} | {b['skip']} | "
-            f"{b['xfail']} | {_dur(b['time'])} |"
+            f"{b['xfail']} | {retries} | {_dur(b['time'])} |"
         )
     out.append("")
 

@@ -64,9 +64,21 @@ PY=$(command -v python3 || echo "${HIL_VENV:-$HOME/.venvs/hil}/bin/python")
 
 ts() { date +%H:%M:%S; }
 
-# Bundle dirs are <board>-<profile>-<sha>; board/profile names carry no dash.
+# Bundle dirs are <board>-<profile>-<sha>; board names carry no dash (all
+# current ones: esp32c3/esp32dev/esp32s3), but profile names might (see
+# summarize.py's _bundle(), which already accounts for a "signed-axes"-style
+# profile) -- so bundle_profile strips the leading "<board>-" and the
+# trailing "-<sha>" (a git short hash, itself always dash-free) rather than
+# just taking the 2nd dash-separated field, which would silently truncate a
+# dashed profile (and every consumer of $round below, junit filenames
+# included) to its first component.
 bundle_board() { basename "$1" | cut -d- -f1; }
-bundle_profile() { basename "$1" | cut -d- -f2; }
+bundle_profile() {
+  local name
+  name=$(basename "$1")
+  name=${name#*-}
+  printf '%s\n' "${name%-*}"
+}
 
 all_bundles() {
   local b
@@ -75,10 +87,30 @@ all_bundles() {
   done
 }
 
+# record_retry <bundle> <n> -- note that <bundle> needed <n> extra attempt(s)
+# this run, in results/retries-<board>-<profile>.txt (read by summarize.py's
+# "retries" column). A board that's slower than its neighbors is often just a
+# board that had to retry -- a flaky pairing or a dropped byte on the C3/S3
+# UART bridge (README "Rig note") -- and that's invisible in the final junit
+# (a retry's failed first attempt isn't in it) unless something records it
+# separately. Accumulates across phase1 and phase2 within one run; callers
+# don't need to know the other phase's count.
+record_retry() {
+  local bundle=$1 n=$2
+  [ "$n" -gt 0 ] || return 0
+  local file
+  file="results/retries-$(bundle_board "$bundle")-$(bundle_profile "$bundle").txt"
+  local cur=0
+  [ -f "$file" ] && cur=$(cat "$file" 2>/dev/null || echo 0)
+  mkdir -p results
+  echo $(( cur + n )) > "$file"
+}
+
 # one bundle, one retry; returns non-zero on a second failure
 test_bundle() {
-  ./tester/test.sh "$1" "${@:2}" "${kargs[@]}" \
-    || ./tester/test.sh "$1" "${@:2}" "${kargs[@]}"
+  ./tester/test.sh "$1" "${@:2}" "${kargs[@]}" && return 0
+  record_retry "$1" 1
+  ./tester/test.sh "$1" "${@:2}" "${kargs[@]}"
 }
 
 # roll every bundle's junit into results/summary.md and echo it (CI lifts this
@@ -120,12 +152,24 @@ command -v flock >/dev/null 2>&1 && HAVE_FLOCK=1
 # fail closed on 1 (skip phase 2 / stop the lane), not treat "gave up
 # waiting" as "safe to proceed"; whoever we were waiting on may just be slow,
 # not gone.
+#
+# The default timeout scales with ${#sync_boards[@]}, not a flat constant --
+# phase1 is a one-board-at-a-time global mutex (see phase1_turn), so the
+# longest any board waits for the round to clear grows with fleet size, and
+# phase1_turn's own built-in retry can double one board's turn on top of
+# that. A flat 300s (this scheme's previous default) is only headroom for
+# ~1-2 boards' worth of turns; seen live on a 3-board rig: esp32c3 (first to
+# arrive) timed out at 300s just 5s before esp32dev's retried phase1 (~180s
+# vs ~85s normal for the other boards) finished, failing the whole
+# --by-board run despite 0 actual test failures across every board.
 round_barrier() {
   local board=$1 key=$2
   local state="${PHASE1_ARRIVED}.${key}"
   ( flock -w 30 211 && printf '%s\n' "$board" >>"$state" ) 211>"${state}.lock" || true
 
-  local deadline=$((SECONDS + ${HIL_PHASE1_BARRIER_TIMEOUT:-300}))
+  local default_timeout=$(( 150 * ${#sync_boards[@]} ))
+  [ "$default_timeout" -lt 300 ] && default_timeout=300
+  local deadline=$((SECONDS + ${HIL_PHASE1_BARRIER_TIMEOUT:-$default_timeout}))
   while (( SECONDS < deadline )); do
     [ "$(sort -u "$state" 2>/dev/null | wc -l | tr -d ' ')" -ge "${#sync_boards[@]}" ] && return 0
     sleep 1
@@ -153,8 +197,9 @@ phase1_turn() {
     # conftest.py's bt_mac must leave the link connected+trusted instead of
     # its normal end-of-session disconnect+untrust -- otherwise phase 2
     # inherits a dead link with nothing left to reconnect it.
-    HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 HIL_KEEP_LINK=1 ./tester/test.sh "$bundle" \
-      || HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 HIL_KEEP_LINK=1 ./tester/test.sh "$bundle"
+    HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 HIL_KEEP_LINK=1 ./tester/test.sh "$bundle" && exit 0
+    record_retry "$bundle" 1
+    HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 HIL_KEEP_LINK=1 ./tester/test.sh "$bundle"
   ) 210>"$PHASE1_LOCK" || rc=$?
   round_barrier "$board" "${round}.phase1" || rc=1
   return "$rc"
@@ -199,9 +244,11 @@ run_lane() {  # <board> <pytest-args...> ; loop its bundles. rc 1 on any failure
 # run's result the next time that exact board/profile hits the same
 # never-ran-test.sh path, or (b) just pollute summarize_all's junit-*.xml
 # glob in ANY later run, by-board or sequential. Clear them unconditionally,
-# before branching, so neither path inherits the other's leftovers.
+# before branching, so neither path inherits the other's leftovers. Same
+# reasoning for the retries-*.txt sidecars record_retry writes -- a stale one
+# would make this run's report claim a retry that actually happened last time.
 mkdir -p results
-rm -f results/junit-*.phase1.xml
+rm -f results/junit-*.phase1.xml results/retries-*.txt
 
 if [ "$BY_BOARD" = 1 ]; then
   for a in "$@"; do
