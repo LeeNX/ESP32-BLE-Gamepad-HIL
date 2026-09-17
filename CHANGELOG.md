@@ -22,8 +22,11 @@ What a bump means:
 
 - **`docs/rig-build.md`** — photos of the reference rig and minimum specs to
   run multiple MCUs concurrently, measured on the live 3-board Raspberry Pi
-  3B+ tester (CPU/RAM/temp/USB, via `vcgencmd`, `free`, and a
-  `health-timeline-*.csv` sample from a real `--by-board` run).
+  3B+ tester (CPU/RAM/temp/USB, via `free` and a `health-timeline-*.csv`
+  sample from a real `--by-board` run — kernel thermal-zone temp, cpufreq,
+  and the `rpi_volt` hwmon undervoltage alarm, not `vcgencmd`, which needs
+  `sudo`/group access this tester user doesn't have; see
+  `host/hil/sysinfo.py`).
 
 - **Retry count in the report** — `tester/test-all.sh` now records how many
   extra attempts (beyond the first) each board/profile needed this run, in a
