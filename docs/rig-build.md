@@ -41,6 +41,33 @@ already have power/TX/RX LEDs built in — most do, and it's free signal for
 in and out less fiddly than micro-USB when you're juggling three of them in
 a crowded hub. The red board in the photo above is one of these.
 
+## What not to do: USB-attached storage (HDD/SSD)
+
+Don't add a USB-SATA (or USB-NVMe/M.2) bridge — HDD or SSD — anywhere on
+this rig, root filesystem included. It looks like a cheap capacity/speed
+upgrade over just buying a bigger SD card; on a Pi 3B+ it isn't.
+
+**Why:** every USB port *and* the onboard Ethernet ride through a single
+`dwc_otg` host controller on this SoC — there's no isolation between "the
+drive" and "the board bridges/hub," and they share the same 5V power
+budget. Lived this on 2026-09-11: root fs was on an external USB HDD via a
+USB-SATA enclosure, riding that same controller as the board hub/bridges. A
+burst of `dwc_otg_hcd_urb_dequeue` timeouts during a simultaneous 3-board
+BLE reconnect wedged the *entire* USB subsystem — Ethernet included — hard
+enough to need a manual power cycle, not a self-recovering hang. Root fs is
+back on the SD card now (see the BOM above), and that particular crash
+hasn't recurred.
+
+An SSD behind a USB-SATA bridge shares the identical failure mode — same
+single controller, same shared power rail — and in practice it costs you
+more capacity than it adds: instead of 3 reliable MCU lanes, you end up
+babying random breakage down to 2, which erases whatever you saved by not
+buying a bigger card. If you outgrow the SD card, size up the card. Anything
+extra sharing the boards' one USB controller is a rig-wide single point of
+failure, not just that device's own problem — the same "keep unrelated USB
+load off the boards' path" reasoning behind putting the FTDI/serial bridges
+straight into the Pi and the MCU boards on the powered hub, above.
+
 ## Minimum specs to run multiple MCUs concurrently
 
 Reference rig: **Raspberry Pi 3B+** — 4× Cortex-A53, 1GB RAM, Debian 13
