@@ -20,6 +20,11 @@ What a bump means:
 
 ### Added
 
+- **`docs/rig-build.md`** — photos of the reference rig and minimum specs to
+  run multiple MCUs concurrently, measured on the live 3-board Raspberry Pi
+  3B+ tester (CPU/RAM/temp/USB, via `vcgencmd`, `free`, and a
+  `health-timeline-*.csv` sample from a real `--by-board` run).
+
 - **Retry count in the report** — `tester/test-all.sh` now records how many
   extra attempts (beyond the first) each board/profile needed this run, in a
   `results/retries-<board>-<profile>.txt` sidecar (`record_retry()`), and

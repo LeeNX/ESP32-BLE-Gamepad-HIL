@@ -538,7 +538,8 @@ not a failure. So `esp32c3` and `esp32s3` ship with their ports still
 see [ESP32-C3 serial bridge](#esp32-c3-serial-bridge) /
 [ESP32-S3 dual-USB-C setup](#esp32-s3-dual-usb-c-setup)), and a newly-wired
 board starts running with no CI change. All three are verified green on the
-reference rig (Raspberry Pi 3B+).
+reference rig (Raspberry Pi 3B+ — photos and what it takes to run all three
+concurrently: `docs/rig-build.md`).
 
 ```bash
 PYTHONPATH=host python3 -m hil.detect            # table of present / absent + why
