@@ -37,6 +37,18 @@ What a bump means:
   why — a flaky pairing or a dropped byte on the C3/S3 UART bridge (README
   "Rig note") looked identical to "just slower" in the report.
 
+- **Inline benchmark charts + table into release notes** — `release.yml`'s
+  release body now prepends the committed `docs/bench/` snapshot (table + up
+  to 3 SVGs) via `gh release create --notes-file`, images embedded via
+  `raw.githubusercontent.com` pinned to the release tag so they match
+  exactly what was committed at that point. Falls back to a plain
+  `--generate-notes` body if `docs/bench/bench-table.md` is missing/empty
+  (e.g. the very first release). Each chart is linked only if that specific
+  SVG actually exists — `host/hil/charts.py` can skip an individual chart
+  when it has no data for it that sweep, independent of the table, so a
+  snapshot missing one chart no longer ships a broken image link for the
+  whole release.
+
 ### Fixed
 
 - **`--by-board` false failure when a board has no port configured** — an
@@ -62,6 +74,13 @@ What a bump means:
   board. `round_barrier`'s default timeout now scales as 150s per synced
   board (300s floor), so a 3-board rig gets 450s of headroom; override with
   `HIL_PHASE1_BARRIER_TIMEOUT` still works as before.
+
+- **CI build cache never actually hit** — the `.pio/build` cache step added
+  for releases (0.2.4) cached the repo-root `.pio/build`, but
+  `builder/build.sh` invokes PlatformIO with `-d firmware/`, so build
+  artifacts land in `firmware/.pio/build` instead — the cache had never
+  actually saved or restored anything since it was added (confirmed via a
+  "Path Validation Error... no cache is being saved" in the Actions log).
 
 ## [0.2.4] — 2026-09-15
 
