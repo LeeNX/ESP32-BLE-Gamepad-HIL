@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # TESTER role: flash + test every bundle in $HIL_BUNDLE_DIR (default ~/hil-bundles),
-# one retry each. Args here pass to tester/test.sh; $HIL_TEST_FILTER (if set) is
-# added as a single `pytest -k <expr>` for a focused run.
+# retrying a failed bundle up to $HIL_RETRY_COUNT times (default 3; override
+# with e.g. HIL_RETRY_COUNT=1). Each retry waits $HIL_RETRY_PAUSE seconds
+# (default 15; override with e.g. HIL_RETRY_PAUSE=5) before trying again, and
+# that pause doubles after every retry (15s, 30s, 60s, ... by default). Args
+# here pass to tester/test.sh; $HIL_TEST_FILTER (if set) is added as a single
+# `pytest -k <expr>` for a focused run.
 #
 #   tester/test-all.sh --bench
 #   HIL_BUNDLE_DIR=/tmp/bundles tester/test-all.sh -k buttons
 #   HIL_TEST_FILTER='battery or descriptor' tester/test-all.sh --bench   # focused (what CI does)
 #   tester/test-all.sh --by-board          # one lane per board, in parallel (functional only)
+#   HIL_RETRY_COUNT=0 tester/test-all.sh   # no retries -- fail on the first bad attempt
 #
 # $HIL_BUNDLE_STAGE: a dir the caller rsync'd bundles into. It is swapped into
 # $HIL_BUNDLE_DIR *under the rig lock* -- an unlocked `rsync --delete` straight
@@ -62,6 +67,11 @@ kargs=()
 trc=0
 PY=$(command -v python3 || echo "${HIL_VENV:-$HOME/.venvs/hil}/bin/python")
 
+# retry knobs, fixed for the whole run -- see the header comment for the
+# defaults and how to override them.
+HIL_RETRY_COUNT=${HIL_RETRY_COUNT:-3}
+HIL_RETRY_PAUSE=${HIL_RETRY_PAUSE:-15}
+
 ts() { date +%H:%M:%S; }
 
 # Bundle dirs are <board>-<profile>-<sha>; board names carry no dash (all
@@ -106,11 +116,66 @@ record_retry() {
   echo $(( cur + n )) > "$file"
 }
 
-# one bundle, one retry; returns non-zero on a second failure
+# strip_stale_fail_verdicts <bundle> -- drop this run's own earlier FAIL
+# line(s) for <bundle>'s board/profile from results/run-verdicts.md. Called
+# once a retry finally passes: test.sh (unlike its junit, which it overwrites
+# on purpose -- see test.sh's "junit is keyed by board/profile only" comment)
+# always *appends* its one-line verdict, so a bundle that failed once and
+# then passed on retry would otherwise leave both a FAIL and a PASS line in
+# the report CI prints (.github/workflows/hil.yml cats run-verdicts.md
+# verbatim) -- a human skimming it sees "FAIL" and assumes the run is red
+# even though the final state, and the exit code, say it passed. Safe to
+# unconditionally drop every matching FAIL line here: by the time a retry of
+# *this* bundle can succeed, any earlier FAIL line with the same board/profile
+# in this run's file can only be this bundle's own prior attempt(s) -- phase1
+# must have already passed before phase2 (test_bundle) ever runs for it, and
+# phase1 itself only reaches its own retry-success path the same way.
+strip_stale_fail_verdicts() {
+  local bundle=$1 f=results/run-verdicts.md
+  [ -f "$f" ] || return 0
+  local key rc
+  key="- FAIL  $(bundle_board "$bundle")/$(bundle_profile "$bundle")  "
+  # -e, not a bare "$key": the pattern itself starts with "-" (the markdown
+  # bullet), which some greps -- ugrep among them -- parse as an option
+  # rather than a literal pattern without -e, erroring out (rc 2) rather than
+  # matching. Only mv the filtered copy over the original on rc 0/1 (normal
+  # "removed some/no lines"); on any other rc, grep errored, so leave the
+  # real file untouched rather than risk clobbering it with a bad/empty tmp.
+  grep -vF -e "$key" "$f" > "$f.tmp" 2>/dev/null
+  rc=$?
+  [ "$rc" -le 1 ] && mv "$f.tmp" "$f" 2>/dev/null
+  rm -f "$f.tmp" 2>/dev/null
+  return 0
+}
+
+# retry_run <bundle> <cmd...> -- run <cmd...> (a test.sh invocation), retrying
+# up to $HIL_RETRY_COUNT times (pausing $HIL_RETRY_PAUSE seconds, doubling
+# each time) if it fails. Records each extra attempt via record_retry, and on
+# an eventual pass, cleans up the stale FAIL verdict(s) it left behind.
+# Returns non-zero only once every attempt (the first, plus all retries) has
+# failed.
+retry_run() {
+  local bundle=$1; shift
+  "$@" && return 0
+  local max=$HIL_RETRY_COUNT pause=$HIL_RETRY_PAUSE n=0
+  while [ "$n" -lt "$max" ]; do
+    n=$((n + 1))
+    record_retry "$bundle" 1
+    echo "== [$(ts)] $(basename "$bundle") failed -- retry $n/$max in ${pause}s" >&2
+    sleep "$pause"
+    if "$@"; then
+      strip_stale_fail_verdicts "$bundle"
+      return 0
+    fi
+    pause=$((pause * 2))
+  done
+  return 1
+}
+
+# one bundle, up to $HIL_RETRY_COUNT retries; returns non-zero once every
+# attempt has failed
 test_bundle() {
-  ./tester/test.sh "$1" "${@:2}" "${kargs[@]}" && return 0
-  record_retry "$1" 1
-  ./tester/test.sh "$1" "${@:2}" "${kargs[@]}"
+  retry_run "$1" ./tester/test.sh "$1" "${@:2}" "${kargs[@]}"
 }
 
 # roll every bundle's junit into results/summary.md and echo it (CI lifts this
@@ -156,18 +221,25 @@ command -v flock >/dev/null 2>&1 && HAVE_FLOCK=1
 # The default timeout scales with ${#sync_boards[@]}, not a flat constant --
 # phase1 is a one-board-at-a-time global mutex (see phase1_turn), so the
 # longest any board waits for the round to clear grows with fleet size, and
-# phase1_turn's own built-in retry can double one board's turn on top of
-# that. A flat 300s (this scheme's previous default) is only headroom for
-# ~1-2 boards' worth of turns; seen live on a 3-board rig: esp32c3 (first to
-# arrive) timed out at 300s just 5s before esp32dev's retried phase1 (~180s
-# vs ~85s normal for the other boards) finished, failing the whole
-# --by-board run despite 0 actual test failures across every board.
+# phase1_turn's own retries (retry_run: up to $HIL_RETRY_COUNT extra
+# attempts, default 3, with a doubling $HIL_RETRY_PAUSE-second pause between
+# them, default 15s) can push one board's turn well past a single normal
+# attempt. A flat 300s (this scheme's original default) is only headroom for
+# ~1-2 boards' worth of turns; seen live on a 3-board rig, back when a failed
+# attempt got exactly one retry: esp32c3 (first to arrive) timed out at 300s
+# just 5s before esp32dev's retried phase1 (~180s vs ~85s normal for the
+# other boards) finished, failing the whole --by-board run despite 0 actual
+# test failures across every board. So the per-board budget below folds in
+# the worst case for *all* of this run's retries, not just one.
 round_barrier() {
   local board=$1 key=$2
   local state="${PHASE1_ARRIVED}.${key}"
   ( flock -w 30 211 && printf '%s\n' "$board" >>"$state" ) 211>"${state}.lock" || true
 
-  local default_timeout=$(( 150 * ${#sync_boards[@]} ))
+  local rn=$HIL_RETRY_COUNT rp=$HIL_RETRY_PAUSE rsum=0
+  while [ "$rn" -gt 0 ]; do rsum=$((rsum + rp)); rp=$((rp * 2)); rn=$((rn - 1)); done
+  local per_board=$(( 90 * (1 + HIL_RETRY_COUNT) + rsum ))
+  local default_timeout=$(( per_board * ${#sync_boards[@]} ))
   [ "$default_timeout" -lt 300 ] && default_timeout=300
   local deadline=$((SECONDS + ${HIL_PHASE1_BARRIER_TIMEOUT:-$default_timeout}))
   while (( SECONDS < deadline )); do
@@ -184,22 +256,26 @@ round_barrier() {
 
 # phase1_turn <board> <round> <bundle> -- flash+pair+test_connection.py for
 # <bundle>, one board at a time across the whole rig (a flock, not just the
-# conftest.py pair.lock -- see the --by-board header comment), one retry like
-# test_bundle. Deliberately ignores $kargs/-k -- this smoke check always runs
-# in full regardless of a focused run's filter.
+# conftest.py pair.lock -- see the --by-board header comment), retried like
+# test_bundle (retry_run). Deliberately ignores $kargs/-k -- this smoke check
+# always runs in full regardless of a focused run's filter. Note this sits
+# inside the flock below, so its retries (pauses included) count against
+# $HIL_PHASE1_MUTEX_TIMEOUT, not just $HIL_PHASE1_BARRIER_TIMEOUT -- the 1800s
+# default has headroom for the default 3 retries (worst case seen: ~180s/
+# attempt x 4 attempts + 105s of doubling pauses =~ 825s); raise it further
+# if you raise $HIL_RETRY_COUNT/$HIL_RETRY_PAUSE a lot.
 phase1_turn() {
   local board=$1 round=$2 bundle=$3 rc=0
   mkdir -p "$PHASE1_CACHE"
   (
-    flock -w "${HIL_PHASE1_MUTEX_TIMEOUT:-600}" 210 || exit 75
+    flock -w "${HIL_PHASE1_MUTEX_TIMEOUT:-1800}" 210 || exit 75
     # HIL_KEEP_LINK=1 -- phase 2 runs --no-pair (no BtCtl of its own, see the
     # --by-board header comment) and starts the moment this session ends, so
     # conftest.py's bt_mac must leave the link connected+trusted instead of
     # its normal end-of-session disconnect+untrust -- otherwise phase 2
     # inherits a dead link with nothing left to reconnect it.
-    HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 HIL_KEEP_LINK=1 ./tester/test.sh "$bundle" && exit 0
-    record_retry "$bundle" 1
-    HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 HIL_KEEP_LINK=1 ./tester/test.sh "$bundle"
+    retry_run "$bundle" env HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 \
+      HIL_KEEP_LINK=1 ./tester/test.sh "$bundle"
   ) 210>"$PHASE1_LOCK" || rc=$?
   round_barrier "$board" "${round}.phase1" || rc=1
   return "$rc"
@@ -294,8 +370,8 @@ if [ "$BY_BOARD" = 1 ]; then
 fi
 
 while IFS= read -r b; do
-  # one retry: the C3/S3 external UART bridges drop a byte under load now and
-  # then (README "Benchmarking / Rig note").
+  # retried up to $HIL_RETRY_COUNT times: the C3/S3 external UART bridges drop
+  # a byte under load now and then (README "Benchmarking / Rig note").
   test_bundle "$b" "$@" || trc=$?
 done < <(all_bundles)
 summarize_all

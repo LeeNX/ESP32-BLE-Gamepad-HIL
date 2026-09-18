@@ -18,6 +18,27 @@ What a bump means:
 
 ## [Unreleased]
 
+### Changed
+
+- **Configurable retry count + backoff** — `tester/test-all.sh` retried a
+  failed bundle exactly once, with no pause. It now retries up to
+  `$HIL_RETRY_COUNT` times (default 3, e.g. `HIL_RETRY_COUNT=0` for none),
+  pausing `$HIL_RETRY_PAUSE` seconds before each attempt (default 15,
+  doubling after every retry — 15s, 30s, 60s, ...); both are overridable and
+  apply to phase 1 (`--by-board`'s flash+pair+smoke step) as well as the main
+  suite. `--by-board`'s barrier/mutex timeout defaults
+  (`$HIL_PHASE1_BARRIER_TIMEOUT`, `$HIL_PHASE1_MUTEX_TIMEOUT`) now scale with
+  these knobs instead of assuming a single retry.
+
+### Fixed
+
+- **Stale FAIL in the run report after a passing retry** — `results/run-verdicts.md`
+  (what CI prints in the job summary) is append-only, so a bundle that failed
+  its first attempt and then passed on retry left both a `FAIL` and a `PASS`
+  line in the report — a real run with zero net failures still read as red at
+  a glance. `test-all.sh` now drops the stale `FAIL` line(s) for a bundle once
+  a retry of it succeeds.
+
 ## [0.2.5] — 2026-09-17
 
 ### Added
