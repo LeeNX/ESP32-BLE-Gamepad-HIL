@@ -46,6 +46,14 @@ What a bump means:
   (`$HIL_PHASE1_BARRIER_TIMEOUT`, `$HIL_PHASE1_MUTEX_TIMEOUT`) now scale with
   these knobs instead of assuming a single retry.
 
+- **Live `--by-board` output** — each lane's output went only to
+  `results/lane-<board>.log`, replayed in full after every lane finished; a
+  caller streaming `test-all.sh`'s stdout (CI's "Flash + test on the tester"
+  step, over ssh) sat silent for the whole ~12 min run. `test-all.sh` now
+  also tails every lane file live as it runs (GNU tail's own `==> file <==`
+  headers mark which lane a line came from), on top of — not instead of —
+  the full per-lane replay at the end.
+
 - **BT adapter restart on retry** — a solo/sequential `test-all.sh` retry
   (including `--bench`) now restarts BlueZ (`host/hil/bluetooth.py
   restart_adapter()`, now also reachable as `python -m hil.bluetooth
