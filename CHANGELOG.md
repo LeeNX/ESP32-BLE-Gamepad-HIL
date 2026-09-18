@@ -54,6 +54,13 @@ What a bump means:
   headers mark which lane a line came from), on top of — not instead of —
   the full per-lane replay at the end.
 
+- **`rig-status.sh` shows how long the last run took** — the idle readout
+  (`host/hil/riglock.py`) already tracked a finished run's `started`/
+  `finished` timestamps but never showed the gap between them. It now prints
+  a `took:` line (e.g. `took:    11m32s`, reusing the same `h/m/s` formatting
+  as the busy-state elapsed time) — a quick reference for whether a run in
+  progress is tracking normal or running long.
+
 - **BT adapter restart on retry** — a solo/sequential `test-all.sh` retry
   (including `--bench`) now restarts BlueZ (`host/hil/bluetooth.py
   restart_adapter()`, now also reachable as `python -m hil.bluetooth
