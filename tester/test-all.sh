@@ -21,7 +21,9 @@
 # --by-board runs the boards concurrently -- each lane loops its own profiles
 # sequentially -- for ~3x on a 3-board rig. Timing-insensitive checks only: it
 # refuses --bench, which must stay sequential + solo. Lane output goes to
-# results/lane-<board>.log and is replayed in order at the end.
+# results/lane-<board>.log, tailed live (headered by file as lanes interleave)
+# so a caller streaming this script's stdout (e.g. CI over ssh) isn't silent
+# for the whole run, and replayed in full, in order, at the end.
 #
 # Pairing is adapter-global (one BT radio on the rig), so a lane mid-pairing
 # can't share airtime with another lane's already-connected, actively-
@@ -457,13 +459,44 @@ if [ "$BY_BOARD" = 1 ]; then
   mapfile -t sync_boards < <(comm -12 <(printf '%s\n' "${boards[@]}" | sort -u) <(printf '%s\n' "${present[@]}" | sort -u))
   echo "== [$(ts)] by-board: ${boards[*]}  (one parallel lane each; syncing on: ${sync_boards[*]:-none})"
   pids=()
+  lanefiles=()
   for board in "${boards[@]}"; do
-    run_lane "$board" "$@" > "results/lane-$board.log" 2>&1 &
+    : > "results/lane-$board.log"  # exists before `tail -f` attaches below -- no race
+    lanefiles+=("results/lane-$board.log")
+  done
+  # live-stream every lane as it runs -- otherwise a caller piping this
+  # script's stdout straight through (CI over ssh) sees nothing for the whole
+  # ~12 min run, only the final per-lane replay below. One `tail` watching
+  # every lane file, not one `tail | sed` pipe per lane tagging its board:
+  # tried that first, but a background pipeline's $! is only its *last*
+  # stage, while bash still tracks the whole pipeline as a single job -- so
+  # `wait`/`kill` on that PID blocks on (or leaves running) every other
+  # stage too, and killing just `sed` left orphaned `tail -f`s running
+  # forever. A single plain process sidesteps that; GNU tail already prints
+  # a "==> file <==" header whenever it switches source, so lanes stay
+  # distinguishable without sed.
+  tail -n +1 -f "${lanefiles[@]}" 2>/dev/null &
+  tailpid=$!
+  # stop_lane_tail also has to run on an interrupted run (Ctrl-C locally, or
+  # CI canceling the job), not just the normal post-wait cleanup below --
+  # rig-lock.sh's EXIT trap (already installed by rig_lock_acquire, top of
+  # this script) releases the rig lock and writes idle/rc status, but it
+  # doesn't know about $tailpid, so an INT/TERM before we get there would
+  # otherwise leave `tail -f` running as an orphan. `exit` at the end of
+  # each handler below still runs that EXIT trap afterward, so lock cleanup
+  # is unaffected.
+  stop_lane_tail() { kill "$tailpid" 2>/dev/null || true; wait "$tailpid" 2>/dev/null || true; }
+  trap 'stop_lane_tail; exit 130' INT
+  trap 'stop_lane_tail; exit 143' TERM
+  for board in "${boards[@]}"; do
+    run_lane "$board" "$@" >> "results/lane-$board.log" 2>&1 &
     pids+=("$!")
   done
   for p in "${pids[@]}"; do
     wait "$p" || trc=1
   done
+  # lanes are done -- nothing left to stream.
+  stop_lane_tail
   for board in "${boards[@]}"; do
     echo "========== lane: $board =========="
     cat "results/lane-$board.log" 2>/dev/null || true

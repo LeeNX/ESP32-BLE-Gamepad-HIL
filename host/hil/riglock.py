@@ -106,6 +106,16 @@ def _dur(seconds):
     return f"{s}s"
 
 
+def _run_duration(run):
+    """Wall-clock time a *finished* run took, or None (still running / no data
+    to compute from -- e.g. a status file from before this field existed)."""
+    started = _parse(run.get("started", ""))
+    finished = _parse(run.get("finished", ""))
+    if not started or not finished:
+        return None
+    return _dur((finished - started).total_seconds())
+
+
 def _pid_alive(run):
     if run.get("host") and run["host"] != socket.gethostname():
         return None  # can't tell from here
@@ -126,6 +136,9 @@ def _fmt_run(run):
         out.append(f"  commit:  {run['commit']}")
     if run.get("url"):
         out.append(f"  url:     {run['url']}")
+    dur = _run_duration(run)
+    if dur is not None:
+        out.append(f"  took:    {dur}")
     return out
 
 
