@@ -477,6 +477,17 @@ if [ "$BY_BOARD" = 1 ]; then
   # distinguishable without sed.
   tail -n +1 -f "${lanefiles[@]}" 2>/dev/null &
   tailpid=$!
+  # stop_lane_tail also has to run on an interrupted run (Ctrl-C locally, or
+  # CI canceling the job), not just the normal post-wait cleanup below --
+  # rig-lock.sh's EXIT trap (already installed by rig_lock_acquire, top of
+  # this script) releases the rig lock and writes idle/rc status, but it
+  # doesn't know about $tailpid, so an INT/TERM before we get there would
+  # otherwise leave `tail -f` running as an orphan. `exit` at the end of
+  # each handler below still runs that EXIT trap afterward, so lock cleanup
+  # is unaffected.
+  stop_lane_tail() { kill "$tailpid" 2>/dev/null || true; wait "$tailpid" 2>/dev/null || true; }
+  trap 'stop_lane_tail; exit 130' INT
+  trap 'stop_lane_tail; exit 143' TERM
   for board in "${boards[@]}"; do
     run_lane "$board" "$@" >> "results/lane-$board.log" 2>&1 &
     pids+=("$!")
@@ -484,10 +495,8 @@ if [ "$BY_BOARD" = 1 ]; then
   for p in "${pids[@]}"; do
     wait "$p" || trc=1
   done
-  # lanes are done -- nothing left to stream. Kill quietly: this is our own
-  # background tail, not something a reader needs a status for.
-  kill "$tailpid" 2>/dev/null || true
-  wait "$tailpid" 2>/dev/null || true
+  # lanes are done -- nothing left to stream.
+  stop_lane_tail
   for board in "${boards[@]}"; do
     echo "========== lane: $board =========="
     cat "results/lane-$board.log" 2>/dev/null || true
