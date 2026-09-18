@@ -45,7 +45,7 @@ push to the tester, run, pull results). One box can be both roles
 | `tester/bootstrap-host.sh` (root) `tester/bootstrap.sh` (user) | tester provisioning, split: privileged half (apt / bluetooth / groups / udev) vs unprivileged half (venv / config / health check) |
 | `tester/flash.py` `tester/test.sh` | flash a bundle with esptool, run the suite + benchmark, write `results/`; SKIPs a board the tester doesn't have |
 | `tester/test-all.sh` | loop `tester/test.sh` over every bundle in `~/hil-bundles`, retrying a failed bundle up to `$HIL_RETRY_COUNT` times (default 3, doubling `$HIL_RETRY_PAUSE`-second pause between each, default 15s — both overridable); a solo/sequential retry (including `--bench`) also restarts the BT adapter first (unsafe during `--by-board`'s parallel phase 2, so that path skips it — see `recover_adapter` in the script); `--by-board` runs the boards as parallel lanes (functional only, what CI runs by default); `--bench` is the sequential sweep (weekly + at release) |
-| `tester/rig-lock.sh` `tester/rig-status.sh` `host/hil/riglock.py` | one-rig `flock` + run-status file — serialise CI and local runs; `rig-status.sh` shows who/what is running (see [CI](#rig-lock--status)) |
+| `tester/rig-lock.sh` `tester/rig-status.sh` `tester/rig-kill.sh` `host/hil/riglock.py` | one-rig `flock` + run-status file — serialise CI and local runs; `rig-status.sh` shows who/what is running, `rig-kill.sh` aborts it (see [CI](#rig-lock--status)) |
 | `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite. Helpers: `serialdev`, `evdev_utils`, `bluetooth`, `gatt` (DIS/PnP/battery over BlueZ D-Bus), `hidraw` (Feature/Output reports + descriptor), `latency`+`bench`, `sysinfo`, `detect` (present boards), `charts`, `summarize` |
 | `hil_config.toml` (+ gitignored `hil_config.local.toml`) | per-machine ports, ssh host, builder board/profile matrix, per-board `enabled` |
 | `run.sh` | one-box: build all bundles then flash+test each |
@@ -485,6 +485,8 @@ the tester checkout is the real hazard).
 ```sh
 ssh <tester> ESP32-BLE-Gamepad-HIL/tester/rig-status.sh      # who/what is running now
 ssh <tester> ESP32-BLE-Gamepad-HIL/tester/rig-status.sh -f   # + the live log (blocks; Ctrl-C to stop)
+ssh <tester> ESP32-BLE-Gamepad-HIL/tester/rig-kill.sh        # abort whatever's running (asks first)
+ssh <tester> ESP32-BLE-Gamepad-HIL/tester/rig-kill.sh -y     # same, no prompt (scripts)
 tester/test.sh <bundle> --no-wait                          # fail immediately if busy
 tester/test.sh <bundle> --wait 300                         # give up after 5 min
 ```
@@ -494,9 +496,18 @@ together under `--by-board`, or the one stamped `results/log-<board>-<profile>-
 <stamp>.txt` for a lone `tester/test.sh` run. Rig idle — no run in progress —
 just prints the last log's tail instead of blocking.
 
+`rig-kill.sh` sends `SIGTERM` to the *whole process group* of the recorded
+`HIL_RUN_PID` (falling back to `SIGKILL` after 15s) — non-interactive shells
+run with job control off, so every `&` background job test-all.sh spawns
+(`--by-board` lanes, the live tail, pytest, esptool) shares that one process
+group rather than getting its own, so one signal reaches all of it. It also
+folds the killed run into `rig-status.json`'s `last` (`rc=143`/`137`) so a
+follow-up `rig-status.sh` reads clean instead of a stale `BUSY`/`DEAD`.
+
 flock releases automatically when the holder dies — there's no stale lockfile. If
-a holder wedged and `rig-status.sh` shows its pid `DEAD`, clear it with
-`rm ~/.cache/esp32-hil/rig.lock` (or `flock -u`).
+a holder wedged and `rig-status.sh` shows its pid `DEAD` (already dead, no live
+process to signal), `rig-kill.sh` detects that and just clears the status; or
+clear the lock directly with `rm ~/.cache/esp32-hil/rig.lock` (or `flock -u`).
 
 ### Rig hardware TODO
 

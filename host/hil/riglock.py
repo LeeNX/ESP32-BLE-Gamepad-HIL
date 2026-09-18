@@ -8,6 +8,7 @@ with no venv and no PYTHONPATH, and the rig has no `jq`.
     python3 host/hil/riglock.py write busy       # metadata from HIL_RUN_* env
     python3 host/hil/riglock.py write idle 0      # fold the run into `last`, rc=0
     python3 host/hil/riglock.py status            # human readout (rig-status.sh)
+    python3 host/hil/riglock.py pid               # current holder's pid, or exit 1 if idle
 
 State file: $XDG_CACHE_HOME/esp32-hil/rig-status.json (default ~/.cache/...).
 """
@@ -175,12 +176,28 @@ def render():
     return 0
 
 
+def pid():
+    """Current busy holder's pid on this host, for a caller that wants to
+    signal it directly (tester/rig-kill.sh) -- no text-status parsing."""
+    data = _load()
+    if data.get("state") != "busy" or not data.get("run"):
+        return 1
+    run = data["run"]
+    if run.get("host") and run["host"] != socket.gethostname():
+        print(f"busy holder is on a different host ({run['host']})", file=sys.stderr)
+        return 1
+    print(run["pid"])
+    return 0
+
+
 def main(argv):
     if not argv:
         return render()
     cmd = argv[0]
     if cmd == "status":
         return render()
+    if cmd == "pid":
+        return pid()
     if cmd == "write" and len(argv) >= 2:
         write(argv[1], argv[2] if len(argv) > 2 else None)
         return 0
