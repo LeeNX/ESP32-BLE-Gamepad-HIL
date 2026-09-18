@@ -82,6 +82,14 @@ What a bump means:
   `--by-board` lane's cleanup can't clobber a sibling lane's concurrently
   appended verdict line.
 
+- **Orphaned `tail -f` on an interrupted `--by-board` run** — the live lane
+  tail (above) was only stopped on the normal post-wait path; Ctrl-C locally
+  or CI canceling the job skipped straight to `rig-lock.sh`'s `EXIT` trap,
+  which releases the rig lock but doesn't know about the tail's pid, leaving
+  it running as an orphan. `test-all.sh` now traps `INT`/`TERM` to stop the
+  tail before exiting (the `EXIT` trap still runs afterward, so lock cleanup
+  is unaffected).
+
 ## [0.2.5] — 2026-09-17
 
 ### Added
