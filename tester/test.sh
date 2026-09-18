@@ -83,12 +83,20 @@ what="test.sh $BOARD/$PROFILE"; [[ $BENCH == 1 ]] && what="$what --bench"
 export HIL_RUN_WHAT="${HIL_RUN_WHAT:-$what}"
 rig_lock_acquire "${LOCK_ARGS[@]}" || exit $?
 
+mkdir -p results
+flash_elapsed=0
 if [[ $FLASH == 1 ]]; then
   say "flash (esptool)"
+  flash_start=$(date +%s)
   "$VENV/bin/python" tester/flash.py "$BUNDLE" --port "$FLASH_PORT"
+  flash_elapsed=$(( $(date +%s) - flash_start ))
 fi
+# Overwritten every attempt -- test-all.sh's retry_run reads these right after
+# each attempt (this one and any retry) to fold flash + wasted-attempt pytest
+# time into results/overhead-<board>-<profile>.txt, since neither ever lands
+# in the final junit (summarize.py's "wall time" column; see its docstring).
+echo "$flash_elapsed" > "results/flash-seconds-${BOARD}-${PROFILE}.txt"
 
-mkdir -p results
 STAMP=$(date +%Y%m%d-%H%M%S)
 tag="${BOARD}-${PROFILE}-${STAMP}"
 # junit is keyed by board/profile only (no stamp): a retry of the same bundle
@@ -113,6 +121,7 @@ PYTHONPATH=host "$VENV/bin/python" -m hil.sysinfo \
   --bundle "$BUNDLE" --board "$BOARD" --profile "$PROFILE" \
   --junit-xml="$xml" "${PYTEST_EXTRA[@]}" 2>&1 | tee "$log" || rc=$?
 elapsed=$(( $(date +%s) - start ))
+echo "$elapsed" > "results/pytest-seconds-${BOARD}-${PROFILE}.txt"
 PYTHONPATH=host "$VENV/bin/python" -m hil.sysinfo --dynamic-only \
   > "results/health-after-${tag}.json" 2>/dev/null || true
 # best-effort: needs persistent journald storage + a readable journal (see

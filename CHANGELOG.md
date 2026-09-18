@@ -71,6 +71,21 @@ What a bump means:
   and restarting bluetoothd there would drop all of them (the contention bug
   PR #34 fixed); phase 1 is globally serialized, so it's safe there too.
 
+- **Report shows wall time, not just test time** — `summarize.py`'s per-bundle
+  time was pytest's own `<testsuite time>` only; flashing (runs before pytest
+  even starts) and a retried attempt's wasted run (overwritten by the eventual
+  pass, never in the final junit) were invisible, so a slow board's report row
+  didn't explain where the extra time went. `test.sh` now times its own flash
+  step and drops it (plus its pytest phase time) to a per-attempt sidecar on
+  every attempt; `test-all.sh`'s `retry_run` folds those, and each retry's
+  backoff sleep, into a `results/overhead-<board>-<profile>.txt` running total
+  (`record_overhead`, alongside the existing `record_retry`). The bundle
+  matrix gained a **wall time** column (test time + that overhead), "Test time
+  per MCU" gained a matching wall-time column, and `test-all.sh` now passes
+  its own batch wall clock to `summarize.py --run-seconds` for a footer
+  comparing the two — a sanity check, not an identity: `--by-board`'s parallel
+  lanes mean the bundle sum legitimately runs ahead of the batch total there.
+
 ### Fixed
 
 - **Stale FAIL in the run report after a passing retry** — `results/run-verdicts.md`
@@ -81,6 +96,14 @@ What a bump means:
   a retry of it succeeds, under a lock shared with `test.sh`'s own append so a
   `--by-board` lane's cleanup can't clobber a sibling lane's concurrently
   appended verdict line.
+
+- **Orphaned `tail -f` on an interrupted `--by-board` run** — the live lane
+  tail (above) was only stopped on the normal post-wait path; Ctrl-C locally
+  or CI canceling the job skipped straight to `rig-lock.sh`'s `EXIT` trap,
+  which releases the rig lock but doesn't know about the tail's pid, leaving
+  it running as an orphan. `test-all.sh` now traps `INT`/`TERM` to stop the
+  tail before exiting (the `EXIT` trap still runs afterward, so lock cleanup
+  is unaffected).
 
 ## [0.2.5] — 2026-09-17
 

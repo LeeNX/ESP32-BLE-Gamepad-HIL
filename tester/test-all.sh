@@ -44,6 +44,7 @@ cd "$(dirname "$0")/.." || exit 1
 # shellcheck source=tester/rig-lock.sh
 source tester/rig-lock.sh
 rig_lock_acquire || exit $?
+BATCH_START=$(date +%s)  # summarize_all() below turns this into results/run-seconds.txt
 
 # swap staged bundles into place, now that we hold the lock
 BUNDLE_DIR=${HIL_BUNDLE_DIR:-$HOME/hil-bundles}
@@ -159,6 +160,33 @@ record_retry() {
   echo $(( cur + n )) > "$file"
 }
 
+# record_overhead <bundle> <seconds> -- add <seconds> of rig time that will
+# never show up in <bundle>'s final junit (flash, a failed attempt's pytest
+# run, or a retry's backoff sleep) to results/overhead-<board>-<profile>.txt,
+# read by summarize.py's "wall time" column (test time + this). Same
+# accumulate-across-the-run shape as record_retry, and for the same reason:
+# a bundle can pick up overhead from both phase1 and phase2 (--by-board) or
+# multiple retries within one run, and callers don't track a running total.
+record_overhead() {
+  local bundle=$1 secs=${2:-0}
+  case "$secs" in ''|*[!0-9]*) return 0 ;; esac
+  [ "$secs" -gt 0 ] || return 0
+  local file
+  file="results/overhead-$(bundle_board "$bundle")-$(bundle_profile "$bundle").txt"
+  local cur=0
+  [ -f "$file" ] && cur=$(cat "$file" 2>/dev/null || echo 0)
+  mkdir -p results
+  echo $(( cur + secs )) > "$file"
+}
+
+# _attempt_seconds <file> -- read a just-written per-attempt sidecar
+# (results/flash-seconds-*.txt / pytest-seconds-*.txt, written fresh by
+# test.sh on every attempt) or print 0 if it's missing/unreadable (e.g. the
+# attempt never got far enough to write one).
+_attempt_seconds() {
+  cat "$1" 2>/dev/null || echo 0
+}
+
 # strip_stale_fail_verdicts <bundle> -- drop this run's own earlier FAIL
 # line(s) for <bundle>'s board/profile from results/run-verdicts.md. Called
 # once a retry finally passes: test.sh (unlike its junit, which it overwrites
@@ -242,9 +270,19 @@ retry_run() {
   local bundle=$1; shift
   local recover=0
   if [ "${1:-}" = "--recover" ]; then recover=1; shift; fi
+  # Sidecars test.sh overwrites fresh on every attempt -- read right after
+  # each "$@" call below to fold that attempt's flash time (never in any
+  # junit) and, for a failed attempt, its pytest time (only a *passing*
+  # attempt's pytest time survives into the final junit) into this bundle's
+  # overhead total. See record_overhead / test.sh's own comment.
+  local flash_file pytest_file
+  flash_file="results/flash-seconds-$(bundle_board "$bundle")-$(bundle_profile "$bundle").txt"
+  pytest_file="results/pytest-seconds-$(bundle_board "$bundle")-$(bundle_profile "$bundle").txt"
   local rc=0
   "$@" || rc=$?
+  record_overhead "$bundle" "$(_attempt_seconds "$flash_file")"
   [ "$rc" = 0 ] && return 0
+  record_overhead "$bundle" "$(_attempt_seconds "$pytest_file")"
   if [ "$rc" = "$HIL_MISMATCH_RC" ]; then
     echo "== [$(ts)] $(basename "$bundle") firmware/bundle MISMATCH -- not retrying" >&2
     return "$rc"
@@ -256,12 +294,15 @@ retry_run() {
     echo "== [$(ts)] $(basename "$bundle") failed -- retry $n/$max in ${pause}s" >&2
     [ "$recover" = 1 ] && recover_adapter
     sleep "$pause"
+    record_overhead "$bundle" "$pause"
     rc=0
     "$@" || rc=$?
+    record_overhead "$bundle" "$(_attempt_seconds "$flash_file")"
     if [ "$rc" = 0 ]; then
       strip_stale_fail_verdicts "$bundle"
       return 0
     fi
+    record_overhead "$bundle" "$(_attempt_seconds "$pytest_file")"
     if [ "$rc" = "$HIL_MISMATCH_RC" ]; then
       echo "== [$(ts)] $(basename "$bundle") firmware/bundle MISMATCH on retry -- not retrying further" >&2
       return "$rc"
@@ -286,11 +327,19 @@ test_bundle_recoverable() {
 }
 
 # roll every bundle's junit into results/summary.md and echo it (CI lifts this
-# into the job summary; locally it's the at-a-glance board x profile matrix)
+# into the job summary; locally it's the at-a-glance board x profile matrix).
+# Also drops results/run-seconds.txt -- this whole batch's own wall clock,
+# from right after the rig lock to here -- so summarize.py can print it next
+# to the bundles' own summed wall time (test + flash + retry overhead) as a
+# sanity check. They won't match exactly: --by-board runs boards in parallel
+# lanes, so the sum legitimately exceeds this batch total (see the flag
+# summarize.py prints when it does); sequential mode should track closely.
 summarize_all() {
   ls results/junit-*.xml >/dev/null 2>&1 || return 0
+  echo $(( $(date +%s) - BATCH_START )) > results/run-seconds.txt
   echo
-  "$PY" host/hil/summarize.py results/junit-*.xml --out results/summary.md 2>/dev/null || true
+  "$PY" host/hil/summarize.py results/junit-*.xml --out results/summary.md \
+    --run-seconds "$(cat results/run-seconds.txt)" 2>/dev/null || true
 }
 
 # --- by-board phase1: flash+pair+smoke, one board at a time, rig-wide ------
@@ -430,7 +479,8 @@ run_lane() {  # <board> <pytest-args...> ; loop its bundles. rc 1 on any failure
 # reasoning for the retries-*.txt sidecars record_retry writes -- a stale one
 # would make this run's report claim a retry that actually happened last time.
 mkdir -p results
-rm -f results/junit-*.phase1.xml results/retries-*.txt
+rm -f results/junit-*.phase1.xml results/retries-*.txt \
+      results/flash-seconds-*.txt results/pytest-seconds-*.txt results/overhead-*.txt
 
 if [ "$BY_BOARD" = 1 ]; then
   for a in "$@"; do
