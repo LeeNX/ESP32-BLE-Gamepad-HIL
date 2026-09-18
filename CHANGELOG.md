@@ -18,6 +18,8 @@ What a bump means:
 
 ## [Unreleased]
 
+## [0.2.6] — 2026-09-18
+
 ### Added
 
 - **`tester/rig-kill.sh`** — a single command to abort whatever's running on
@@ -533,7 +535,8 @@ descriptor + latency suite, and the Tailscale-based CI. Plus:
   `HIL_RIG_ENABLED=true` is set — so a fork with no tester wired gets a clean
   skipped run, not a failure on the missing Tailscale secret.
 
-[Unreleased]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.2.6
 [0.2.5]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.2.5
 [0.2.4]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.2.4
 [0.2.3]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.2.3
