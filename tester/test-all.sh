@@ -275,8 +275,9 @@ retry_run() {
   # junit) and, for a failed attempt, its pytest time (only a *passing*
   # attempt's pytest time survives into the final junit) into this bundle's
   # overhead total. See record_overhead / test.sh's own comment.
-  local flash_file="results/flash-seconds-$(bundle_board "$bundle")-$(bundle_profile "$bundle").txt"
-  local pytest_file="results/pytest-seconds-$(bundle_board "$bundle")-$(bundle_profile "$bundle").txt"
+  local flash_file pytest_file
+  flash_file="results/flash-seconds-$(bundle_board "$bundle")-$(bundle_profile "$bundle").txt"
+  pytest_file="results/pytest-seconds-$(bundle_board "$bundle")-$(bundle_profile "$bundle").txt"
   local rc=0
   "$@" || rc=$?
   record_overhead "$bundle" "$(_attempt_seconds "$flash_file")"

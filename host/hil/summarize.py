@@ -136,7 +136,15 @@ def collect(paths):
         board, profile = _bundle(p)
         b = bundles.setdefault(
             (board, profile),
-            {"pass": 0, "fail": 0, "skip": 0, "xfail": 0, "time": 0.0, "retries": 0, "overhead": 0.0},
+            {
+                "pass": 0,
+                "fail": 0,
+                "skip": 0,
+                "xfail": 0,
+                "time": 0.0,
+                "retries": 0,
+                "overhead": 0.0,
+            },
         )
         b["retries"] = _retries(p, board, profile)
         b["overhead"] = _overhead(p, board, profile)
