@@ -74,6 +74,18 @@ if [[ -n "${LIB_REF:-}" ]]; then
 fi
 echo "== library at $(git -C "$LIB_DIR" describe --tags --always --dirty) ($(git -C "$LIB_DIR" rev-parse --abbrev-ref HEAD))"
 
+# Embed the library commit in the firmware itself (CONFIG?'s libsha= field,
+# firmware/include/hil_profile.h) -- 8 chars, matching manifest.json's lib_sha
+# truncation (make_bundle.py) and the bundle dirname convention. Lets the host
+# catch a stale/wrong flash (conftest.py's dut fixture): same board, same
+# profile, same layout, but not actually today's library build.
+# --short=8 is a *minimum* (git lengthens it to stay unique on a collision),
+# so force exactly 8 -- conftest.py's dut fixture compares against manifest
+# lib_sha truncated the same way, and a longer value here would never match.
+LIB_SHA_SHORT=$(git -C "$LIB_DIR" rev-parse --short=8 HEAD 2>/dev/null || echo unknown)
+LIB_SHA_SHORT=${LIB_SHA_SHORT:0:8}
+export PLATFORMIO_BUILD_FLAGS="${PLATFORMIO_BUILD_FLAGS:-} -DHIL_LIB_SHA='\"${LIB_SHA_SHORT}\"'"
+
 # Status LED GPIOs, per board (docs/rig-hardware.md, hil_config.toml
 # [board.*].led_pin/.conn_led_pin comments, README "Rig hardware TODO"):
 # $HIL_LED_PIN_<BOARD> / $HIL_CONN_LED_PIN_<BOARD> (uppercased, e.g.

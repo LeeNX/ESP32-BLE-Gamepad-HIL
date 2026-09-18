@@ -221,13 +221,13 @@ static void handle(const String &cmd)
         printAxesCsv(axes, sizeof(axes));
         Serial.printf("CONFIG buttons=%d hats=%d axes=%s special=%s "
                       "axesMin=%d axesMax=%d vid=%04X pid=%04X ver=%04X "
-                      "reportId=%d feat=%d out=%d profile=%s\n",
+                      "reportId=%d feat=%d out=%d profile=%s libsha=%s\n",
                       HIL_BUTTON_COUNT, HIL_HAT_COUNT, axes,
                       HIL_SPECIALS ? "start,select,menu,home,back,volinc,voldec,volmute" : "none",
                       (int)bleGamepadConfig.getAxesMin(), (int)bleGamepadConfig.getAxesMax(),
                       HIL_VID, HIL_PID, HIL_GUID_VERSION,
                       bleGamepadConfig.getHidReportId(),
-                      HIL_FEATURE_REPORT_LEN, HIL_OUTPUT_REPORT_LEN, HIL_PROFILE_NAME);
+                      HIL_FEATURE_REPORT_LEN, HIL_OUTPUT_REPORT_LEN, HIL_PROFILE_NAME, HIL_LIB_SHA);
         return;
     }
 

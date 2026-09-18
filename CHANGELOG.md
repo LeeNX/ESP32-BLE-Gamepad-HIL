@@ -18,6 +18,55 @@ What a bump means:
 
 ## [Unreleased]
 
+### Added
+
+- **Firmware/bundle mismatch detection** — `CONFIG?` gained a `libsha=` field
+  (the ESP32-BLE-Gamepad commit the firmware was built against, `-D
+  HIL_LIB_SHA` set by `builder/build.sh`). `conftest.py`'s `dut` fixture now
+  requires an exact match against the flashed bundle's `manifest.json`
+  `lib_sha`: same board, same profile, same layout can still be the *wrong
+  build* (a flash that silently didn't take, or the wrong board wired to a
+  port) — nothing previously caught that, so CI just kept retrying a bundle
+  that could never pass. `--bench` runs (the weekly regression watch and
+  RELEASE.md's pre-tag validation) fail fast with an unambiguous `MISMATCH`
+  diagnostic and a dedicated exit code that tells `test-all.sh` not to retry
+  at all (a reflash can't fix testing the wrong build); other runs
+  (`--by-board`, everyday push/PR) log a `[dut] WARNING` and continue, since a
+  transient bad flash there can still be fixed by the next retry's reflash.
+
+### Changed
+
+- **Configurable retry count + backoff** — `tester/test-all.sh` retried a
+  failed bundle exactly once, with no pause. It now retries up to
+  `$HIL_RETRY_COUNT` times (default 3, e.g. `HIL_RETRY_COUNT=0` for none),
+  pausing `$HIL_RETRY_PAUSE` seconds before each attempt (default 15,
+  doubling after every retry — 15s, 30s, 60s, ...); both are overridable and
+  apply to phase 1 (`--by-board`'s flash+pair+smoke step) as well as the main
+  suite. `--by-board`'s barrier/mutex timeout defaults
+  (`$HIL_PHASE1_BARRIER_TIMEOUT`, `$HIL_PHASE1_MUTEX_TIMEOUT`) now scale with
+  these knobs instead of assuming a single retry.
+
+- **BT adapter restart on retry** — a solo/sequential `test-all.sh` retry
+  (including `--bench`) now restarts BlueZ (`host/hil/bluetooth.py
+  restart_adapter()`, now also reachable as `python -m hil.bluetooth
+  restart-adapter`) before trying again, on top of the MCU reset a retry
+  already gets for free (every retried bundle reflashes, and esptool resets
+  the chip as part of that). `--by-board`'s parallel phase 2 deliberately
+  skips this — it shares the one BT radio with other lanes' live connections,
+  and restarting bluetoothd there would drop all of them (the contention bug
+  PR #34 fixed); phase 1 is globally serialized, so it's safe there too.
+
+### Fixed
+
+- **Stale FAIL in the run report after a passing retry** — `results/run-verdicts.md`
+  (what CI prints in the job summary) is append-only, so a bundle that failed
+  its first attempt and then passed on retry left both a `FAIL` and a `PASS`
+  line in the report — a real run with zero net failures still read as red at
+  a glance. `test-all.sh` now drops the stale `FAIL` line(s) for a bundle once
+  a retry of it succeeds, under a lock shared with `test.sh`'s own append so a
+  `--by-board` lane's cleanup can't clobber a sibling lane's concurrently
+  appended verdict line.
+
 ## [0.2.5] — 2026-09-17
 
 ### Added

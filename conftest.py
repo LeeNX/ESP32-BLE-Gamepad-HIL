@@ -25,6 +25,14 @@ from hil.serialdev import SerialDev  # noqa: E402
 
 STATE = pathlib.Path.home() / ".cache" / "esp32-hil" / "state.json"
 
+# pytest.exit() returncode for a firmware/bundle libsha MISMATCH (dut fixture,
+# --bench only). A value distinct from pytest's own exit codes (0-5) and
+# rig-lock.sh's (2, 75) -- tester/test-all.sh's retry_run checks for exactly
+# this to stop immediately instead of burning retries a reflash can't fix
+# (the mismatch means we're testing the wrong build, not that this attempt
+# was flaky). Keep the two in sync if this changes.
+HIL_MISMATCH_EXIT = 90
+
 
 def pytest_addoption(parser):
     parser.addoption("--board", default=os.environ.get("HIL_BOARD", "esp32dev"))
@@ -210,7 +218,7 @@ def manifest(pytestconfig):
 
 # --- serial DUT -----------------------------------------------------------
 @pytest.fixture(scope="session")
-def dut(rigcfg, firmware):
+def dut(rigcfg, firmware, manifest, pytestconfig):
     d = SerialDev(rigcfg["port"])
     d.wait_ready()
     fid = d.firmware_id()
@@ -224,6 +232,37 @@ def dut(rigcfg, firmware):
             f"firmware profile {cfg.get('profile')!r} != expected {want!r} "
             f"(flash the right env or fix hil_config.toml)"
         )
+    # libsha= (firmware/include/hil_profile.h HIL_LIB_SHA, set at build time by
+    # builder/build.sh) vs manifest.json's lib_sha (builder/make_bundle.py):
+    # same board, same profile, same layout can still be the *wrong build* --
+    # a flash that silently didn't take, or the wrong port wired to this board
+    # -- which nothing else here would catch. Only meaningful on the TESTER
+    # (--bundle) path; a from-source dev build has no manifest, so want_sha is
+    # blank and this is skipped rather than false-alarming. Once want_sha *is*
+    # set, require an exact match -- an empty or "unknown" have_sha is itself
+    # the mismatch (firmware built before HIL_LIB_SHA existed, or from a
+    # from-source build flashed under a bundle's identity), not a pass.
+    want_sha = (manifest.get("lib_sha") or "")[:8]
+    have_sha = cfg.get("libsha", "")
+    if want_sha and have_sha != want_sha:
+        msg = (
+            f"flashed firmware reports library sha {have_sha!r}, but the bundle "
+            f"manifest says {want_sha!r} -- this board is running a different "
+            f"library build than the one this run is testing (stale/failed "
+            f"flash, or the wrong board wired to this port)"
+        )
+        if pytestconfig.getoption("bench"):
+            # --bench is the weekly regression watch and RELEASE.md's pre-tag
+            # validation run -- a genuinely mismatched flash can't produce a
+            # meaningful result, so stop with an unambiguous diagnostic rather
+            # than let the suite run against it. HIL_MISMATCH_EXIT (not
+            # pytest's default) tells test-all.sh's retry_run to stop right
+            # away too -- a reflash retry can't fix "we're testing the wrong
+            # build", so retrying would just burn the full backoff budget for
+            # nothing.
+            d.close()
+            pytest.exit(f"[dut] MISMATCH: {msg}", returncode=HIL_MISMATCH_EXIT)
+        print(f"[dut] WARNING: {msg}")
     yield d
     d.close()
 

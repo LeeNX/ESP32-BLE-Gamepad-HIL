@@ -57,6 +57,18 @@
 #define HIL_BOARD_NAME "esp32"
 #endif
 
+// The ESP32-BLE-Gamepad library commit this firmware was built against
+// (builder/build.sh passes -D HIL_LIB_SHA="<8-char sha>" via
+// PLATFORMIO_BUILD_FLAGS, sourced from `git rev-parse` on $HIL_LIB_DIR).
+// Reported over serial (`CONFIG?`'s libsha= field) so the host can catch a
+// stale/wrong flash -- a board still answering with last week's library sha
+// looks identical to a fresh one in every other respect (same board, same
+// profile, same layout) until something checks this. Unset for a from-source
+// dev build (conftest.py's `firmware` fixture, no builder involved).
+#ifndef HIL_LIB_SHA
+#define HIL_LIB_SHA "unknown"
+#endif
+
 // The advertised BLE name. hil_runner also reports it over serial (`NAME?`).
 // Keep it <= 18 chars: it shares the 31-byte legacy advertising packet with
 // flags + appearance + the HID service UUID, and NimBLE drops the service UUID

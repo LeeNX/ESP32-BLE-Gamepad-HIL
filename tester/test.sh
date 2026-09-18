@@ -32,16 +32,32 @@ ts() { date +%H:%M:%S; }
 say() { echo "== [$(ts)] $*"; }
 load_now() { cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || echo "?"; }
 
+# append_verdict <line> -- append to results/run-verdicts.md under a flock.
+# --by-board runs multiple lanes (multiple test.sh processes) concurrently,
+# all appending here; on its own that's fine (O_APPEND is atomic per write),
+# but tester/test-all.sh's strip_stale_fail_verdicts does a read-filter-
+# rewrite of the whole file on a passing retry, which is NOT safe against a
+# concurrent append landing between its read and its write -- that append
+# would be silently lost when the rewrite's stale copy overwrites it. Share
+# this same lock with that function so the two can never interleave.
+# Best-effort: a stuck lock still appends (falls back to plain >>) rather
+# than hanging or (under this script's `set -e`) aborting the run.
+append_verdict() {
+  mkdir -p results
+  ( flock -w 10 209 || true
+    printf '%s\n' "- $1" >> results/run-verdicts.md
+  ) 209>results/run-verdicts.md.lock
+}
+
 say "tester board=$BOARD profile=$PROFILE port=$PORT flash_port=$FLASH_PORT  load $(load_now)"
 say "bundle $(basename "$BUNDLE")"
 
 # Skip (not fail) a board this tester doesn't have wired / has disabled -- lets
 # CI build the full matrix but run only what's attached. See host/hil/detect.py.
 if ! why=$(PYTHONPATH=host python3 -m hil.detect --check "$BOARD" 2>&1); then
-  mkdir -p results
   line="SKIP  $BOARD/$PROFILE  ($why)"
   say "$line"
-  printf '%s\n' "- $line" >> results/run-verdicts.md
+  append_verdict "$line"
   exit 0
 fi
 
@@ -118,6 +134,6 @@ verdict=$(grep -oE '[0-9]+ (passed|failed|error|xfailed|skipped)[^,]*' "$log" | 
 mark=$([[ $rc == 0 ]] && echo "PASS" || echo "FAIL")
 line="$mark  $BOARD/$PROFILE  ${verdict:-no summary}  (${elapsed}s, load $(load_now))"
 say "$line"
-printf '%s\n' "- $line" >> results/run-verdicts.md
+append_verdict "$line"
 
 exit $rc
