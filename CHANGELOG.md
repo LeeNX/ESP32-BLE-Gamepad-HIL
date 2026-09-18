@@ -20,6 +20,20 @@ What a bump means:
 
 ### Added
 
+- **`tester/rig-kill.sh`** — a single command to abort whatever's running on
+  the rig, instead of hunting down a wedged `test-all.sh`/`ssh` tree by hand.
+  It sends `SIGTERM` to the whole process group of the recorded
+  `HIL_RUN_PID` (falling back to `SIGKILL` after 15s) — non-interactive
+  shells run with job control off, so every `&` background job `test-all.sh`
+  spawns (`--by-board` lanes, the live tail, pytest, esptool) shares that one
+  process group rather than getting its own, so one signal reaches all of
+  it. Also folds the killed run into `rig-status.json`'s `last` (`rc=143`/
+  `137`) so a follow-up `rig-status.sh` reads clean instead of a stale
+  `BUSY`/`DEAD`, and self-clears an already-dead holder's stale status
+  without sending any signal. `host/hil/riglock.py` gained a `pid` command
+  (the current busy holder's pid, or exit 1) so the shell side never has to
+  parse `status`'s human-readable text.
+
 - **Firmware/bundle mismatch detection** — `CONFIG?` gained a `libsha=` field
   (the ESP32-BLE-Gamepad commit the firmware was built against, `-D
   HIL_LIB_SHA` set by `builder/build.sh`). `conftest.py`'s `dut` fixture now
