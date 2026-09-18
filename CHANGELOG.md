@@ -71,6 +71,21 @@ What a bump means:
   and restarting bluetoothd there would drop all of them (the contention bug
   PR #34 fixed); phase 1 is globally serialized, so it's safe there too.
 
+- **Report shows wall time, not just test time** — `summarize.py`'s per-bundle
+  time was pytest's own `<testsuite time>` only; flashing (runs before pytest
+  even starts) and a retried attempt's wasted run (overwritten by the eventual
+  pass, never in the final junit) were invisible, so a slow board's report row
+  didn't explain where the extra time went. `test.sh` now times its own flash
+  step and drops it (plus its pytest phase time) to a per-attempt sidecar on
+  every attempt; `test-all.sh`'s `retry_run` folds those, and each retry's
+  backoff sleep, into a `results/overhead-<board>-<profile>.txt` running total
+  (`record_overhead`, alongside the existing `record_retry`). The bundle
+  matrix gained a **wall time** column (test time + that overhead), "Test time
+  per MCU" gained a matching wall-time column, and `test-all.sh` now passes
+  its own batch wall clock to `summarize.py --run-seconds` for a footer
+  comparing the two — a sanity check, not an identity: `--by-board`'s parallel
+  lanes mean the bundle sum legitimately runs ahead of the batch total there.
+
 ### Fixed
 
 - **Stale FAIL in the run report after a passing retry** — `results/run-verdicts.md`

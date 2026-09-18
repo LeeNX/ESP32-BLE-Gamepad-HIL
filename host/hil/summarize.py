@@ -18,8 +18,21 @@ next to the junit files) if one exists next to the junit file, else 0. This is
 often the actual reason one board took longer than its neighbors -- a retry's
 failed first attempt isn't itself in the final junit.
 
-Times are the pytest phase from each junit `<testsuite time>` -- the flash and
-the first pair (in tester/test.sh, before pytest) are not in it.
+"test time" is the pytest phase from each junit `<testsuite time>` -- pairing
+happens inside that (a session fixture in conftest.py, so its ~20s setup cost
+is attributed to whichever test triggers it), but flashing and any failed
+retry attempt are not: esptool runs before pytest even starts, and a retry's
+failed attempt is overwritten by the eventual pass, not merged into the junit.
+"wall time" adds that missing time back in, read from a sidecar
+`overhead-<board>-<profile>.txt` (tester/test-all.sh's record_overhead(),
+accumulated across every attempt this run) if one exists, else it just equals
+test time.
+
+Pass --run-seconds <n> (tester/test-all.sh does, from its own start-of-batch
+timer) to also print a footer comparing that wall-clock total against the sum
+of every bundle's wall time -- a sanity check, not an identity: --by-board
+runs boards in parallel lanes, so the sum legitimately runs ahead of the
+batch's own wall clock there.
 
 Exit status is 1 if any test failed, else 0.
 """
@@ -105,6 +118,14 @@ def _retries(path, board, profile):
         return 0
 
 
+def _overhead(path, board, profile):
+    sidecar = Path(path).parent / f"overhead-{board}-{profile}.txt"
+    try:
+        return float(sidecar.read_text().strip())
+    except (OSError, ValueError):
+        return 0.0
+
+
 def collect(paths):
     bundles = {}  # (board, profile) -> counts
     areas = defaultdict(lambda: {"pass": 0, "fail": 0, "skip": 0})
@@ -115,9 +136,10 @@ def collect(paths):
         board, profile = _bundle(p)
         b = bundles.setdefault(
             (board, profile),
-            {"pass": 0, "fail": 0, "skip": 0, "xfail": 0, "time": 0.0, "retries": 0},
+            {"pass": 0, "fail": 0, "skip": 0, "xfail": 0, "time": 0.0, "retries": 0, "overhead": 0.0},
         )
         b["retries"] = _retries(p, board, profile)
+        b["overhead"] = _overhead(p, board, profile)
         try:
             root = ET.parse(p).getroot()
         except (ET.ParseError, OSError) as e:
@@ -139,7 +161,7 @@ def collect(paths):
     return bundles, areas, failures, gap_skips
 
 
-def render(bundles, areas, failures, gap_skips):
+def render(bundles, areas, failures, gap_skips, run_seconds=None):
     tot = {k: sum(b[k] for b in bundles.values()) for k in ("pass", "fail", "skip", "xfail")}
     head = f"{tot['pass']} passed · {tot['fail']} failed · {tot['skip']} skipped"
     if tot["xfail"]:
@@ -148,28 +170,48 @@ def render(bundles, areas, failures, gap_skips):
     out = [f"## HIL — {n} bundle{'' if n == 1 else 's'} · {head}", ""]
 
     out += [
-        "| board / profile | pass | fail | skip | xfail | retries | test time |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        "| board / profile | pass | fail | skip | xfail | retries | test time | wall time |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
+    wall_total = 0.0
     for (board, profile), b in sorted(bundles.items()):
         mark = "" if b["fail"] == 0 else "❌ "
         retries = f"↻ {b['retries']}" if b["retries"] else "0"
+        wall = b["time"] + b["overhead"]
+        wall_total += wall
         out.append(
             f"| {mark}{board} / {profile} | {b['pass']} | {b['fail']} | {b['skip']} | "
-            f"{b['xfail']} | {retries} | {_dur(b['time'])} |"
+            f"{b['xfail']} | {retries} | {_dur(b['time'])} | {_dur(wall)} |"
         )
     out.append("")
 
-    by_board = defaultdict(lambda: {"n": 0, "time": 0.0})
+    by_board = defaultdict(lambda: {"n": 0, "time": 0.0, "wall": 0.0})
     for (board, _profile), b in bundles.items():
         by_board[board]["n"] += 1
         by_board[board]["time"] += b["time"]
+        by_board[board]["wall"] += b["time"] + b["overhead"]
     if len(by_board) > 1 or next(iter(by_board.values()))["n"] > 1:
-        out += ["### Test time per MCU", "", "| MCU | bundles | test time |", "|---|---:|---:|"]
+        out += [
+            "### Test time per MCU",
+            "",
+            "| MCU | bundles | test time | wall time |",
+            "|---|---:|---:|---:|",
+        ]
         for board in sorted(by_board):
             v = by_board[board]
-            out.append(f"| {board} | {v['n']} | {_dur(v['time'])} |")
+            out.append(f"| {board} | {v['n']} | {_dur(v['time'])} | {_dur(v['wall'])} |")
         out.append("")
+
+    if run_seconds is not None:
+        # a sanity check, not an identity -- see the module docstring on why
+        # --by-board's sum legitimately runs ahead of the batch wall clock.
+        note = (
+            f"Bundles' own wall time sums to **{_dur(wall_total)}**; "
+            f"this batch took **{_dur(run_seconds)}**."
+        )
+        if wall_total > run_seconds * 1.15:
+            note += " (sum > batch total -- boards likely ran in parallel lanes.)"
+        out += [note, ""]
 
     out += ["### By feature area", "", "| area | pass | fail | skip |", "|---|---:|---:|---:|"]
     for area in sorted(areas):
@@ -199,22 +241,37 @@ def render(bundles, areas, failures, gap_skips):
 
 
 def main(argv):
-    args = [a for a in argv if a != "--out"]
+    args = list(argv)
     out_file = None
-    if "--out" in argv:
-        i = argv.index("--out")
-        if i + 1 >= len(argv):
+    if "--out" in args:
+        i = args.index("--out")
+        if i + 1 >= len(args):
             print("summarize.py: --out needs a file path", file=sys.stderr)
             return 2
-        out_file = argv[i + 1]
-        args = argv[:i] + argv[i + 2 :]
+        out_file = args[i + 1]
+        args = args[:i] + args[i + 2 :]
+    run_seconds = None
+    if "--run-seconds" in args:
+        i = args.index("--run-seconds")
+        if i + 1 >= len(args):
+            print("summarize.py: --run-seconds needs a number", file=sys.stderr)
+            return 2
+        try:
+            run_seconds = float(args[i + 1])
+        except ValueError:
+            print("summarize.py: --run-seconds needs a number", file=sys.stderr)
+            return 2
+        args = args[:i] + args[i + 2 :]
     paths = [a for a in args if not a.startswith("-")]
     if not paths:
-        print("usage: summarize.py <junit.xml>... [--out FILE]", file=sys.stderr)
+        print(
+            "usage: summarize.py <junit.xml>... [--out FILE] [--run-seconds N]",
+            file=sys.stderr,
+        )
         return 2
 
     bundles, areas, failures, gap_skips = collect(paths)
-    report = render(bundles, areas, failures, gap_skips)
+    report = render(bundles, areas, failures, gap_skips, run_seconds=run_seconds)
     sys.stdout.write(report)
     if out_file:
         Path(out_file).write_text(report)
