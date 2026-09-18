@@ -23,15 +23,16 @@ What a bump means:
 - **Firmware/bundle mismatch detection** — `CONFIG?` gained a `libsha=` field
   (the ESP32-BLE-Gamepad commit the firmware was built against, `-D
   HIL_LIB_SHA` set by `builder/build.sh`). `conftest.py`'s `dut` fixture now
-  compares it against the flashed bundle's `manifest.json` `lib_sha`: same
-  board, same profile, same layout can still be the *wrong build* (a flash
-  that silently didn't take, or the wrong board wired to a port) — nothing
-  previously caught that, so CI just kept retrying a bundle that could never
-  pass. `--bench` runs (the weekly regression watch and RELEASE.md's pre-tag
-  validation) fail fast with an unambiguous `MISMATCH` diagnostic on a
-  mismatch; other runs (`--by-board`, everyday push/PR) log a `[dut] WARNING`
-  and continue, since a transient bad flash there can still be fixed by the
-  next retry's reflash.
+  requires an exact match against the flashed bundle's `manifest.json`
+  `lib_sha`: same board, same profile, same layout can still be the *wrong
+  build* (a flash that silently didn't take, or the wrong board wired to a
+  port) — nothing previously caught that, so CI just kept retrying a bundle
+  that could never pass. `--bench` runs (the weekly regression watch and
+  RELEASE.md's pre-tag validation) fail fast with an unambiguous `MISMATCH`
+  diagnostic and a dedicated exit code that tells `test-all.sh` not to retry
+  at all (a reflash can't fix testing the wrong build); other runs
+  (`--by-board`, everyday push/PR) log a `[dut] WARNING` and continue, since a
+  transient bad flash there can still be fixed by the next retry's reflash.
 
 ### Changed
 
@@ -62,7 +63,9 @@ What a bump means:
   its first attempt and then passed on retry left both a `FAIL` and a `PASS`
   line in the report — a real run with zero net failures still read as red at
   a glance. `test-all.sh` now drops the stale `FAIL` line(s) for a bundle once
-  a retry of it succeeds.
+  a retry of it succeeds, under a lock shared with `test.sh`'s own append so a
+  `--by-board` lane's cleanup can't clobber a sibling lane's concurrently
+  appended verdict line.
 
 ## [0.2.5] — 2026-09-17
 

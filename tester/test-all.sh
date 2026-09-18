@@ -68,9 +68,50 @@ trc=0
 PY=$(command -v python3 || echo "${HIL_VENV:-$HOME/.venvs/hil}/bin/python")
 
 # retry knobs, fixed for the whole run -- see the header comment for the
-# defaults and how to override them.
+# defaults and how to override them. Validated as non-negative integers: a
+# bad override (negative, empty, non-numeric) would otherwise reach `sleep`,
+# `[ -lt ]`, or arithmetic below and fail confusingly (or, for a negative
+# count, silently behave like 0 retries instead of erroring).
 HIL_RETRY_COUNT=${HIL_RETRY_COUNT:-3}
 HIL_RETRY_PAUSE=${HIL_RETRY_PAUSE:-15}
+for _v in HIL_RETRY_COUNT HIL_RETRY_PAUSE; do
+  case "${!_v}" in
+    ''|*[!0-9]*)
+      echo "test-all.sh: \$$_v must be a non-negative integer (got '${!_v}')" >&2
+      exit 2
+      ;;
+  esac
+done
+unset _v
+
+# pytest.exit()'s returncode for a firmware/bundle libsha MISMATCH (conftest.py
+# dut fixture, --bench only) -- keep in sync with conftest.py's
+# HIL_MISMATCH_EXIT. retry_run below checks for exactly this to stop
+# immediately: a reflash retry can't fix "we're testing the wrong build", so
+# retrying would just burn the full backoff budget for nothing.
+HIL_MISMATCH_RC=90
+
+# Total seconds retry_run will sleep across all of $HIL_RETRY_COUNT retries
+# (the doubling-pause series: pause, pause*2, pause*4, ...) -- used below to
+# budget --by-board's phase-1 barrier/mutex timeouts so they scale with these
+# knobs instead of assuming a fixed retry count/pause.
+HIL_RETRY_PAUSE_SUM=0
+_p=$HIL_RETRY_PAUSE
+_n=$HIL_RETRY_COUNT
+while [ "$_n" -gt 0 ]; do
+  HIL_RETRY_PAUSE_SUM=$((HIL_RETRY_PAUSE_SUM + _p))
+  _p=$((_p * 2))
+  _n=$((_n - 1))
+done
+unset _p _n
+
+# Seconds one board's worst case (the initial attempt plus every retry) can
+# take -- phase1_turn's per-board mutex-hold budget, as opposed to
+# round_barrier's fleet-wide one below (which multiplies this by board
+# count). 180s/attempt, not the ~85s a normal attempt takes: round_barrier's
+# comment documents a *retried* phase1 attempt taking ~180s live, and every
+# attempt but the first here is a retry.
+HIL_RETRY_ATTEMPT_BUDGET=$(( 180 * (1 + HIL_RETRY_COUNT) + HIL_RETRY_PAUSE_SUM ))
 
 ts() { date +%H:%M:%S; }
 
@@ -135,16 +176,27 @@ strip_stale_fail_verdicts() {
   [ -f "$f" ] || return 0
   local key rc
   key="- FAIL  $(bundle_board "$bundle")/$(bundle_profile "$bundle")  "
-  # -e, not a bare "$key": the pattern itself starts with "-" (the markdown
-  # bullet), which some greps -- ugrep among them -- parse as an option
-  # rather than a literal pattern without -e, erroring out (rc 2) rather than
-  # matching. Only mv the filtered copy over the original on rc 0/1 (normal
-  # "removed some/no lines"); on any other rc, grep errored, so leave the
-  # real file untouched rather than risk clobbering it with a bad/empty tmp.
-  grep -vF -e "$key" "$f" > "$f.tmp" 2>/dev/null
-  rc=$?
-  [ "$rc" -le 1 ] && mv "$f.tmp" "$f" 2>/dev/null
-  rm -f "$f.tmp" 2>/dev/null
+  # Locked (same lock file as tester/test.sh's append_verdict): this is a
+  # read-the-whole-file-then-replace-it operation, not an append, so without
+  # the lock it can race a concurrent --by-board lane's test.sh appending its
+  # own verdict here -- this read a snapshot before that append landed, so
+  # the mv below would silently overwrite (lose) that sibling lane's line.
+  # -w 30, not indefinite: a stuck lock should degrade to "left the stale
+  # FAIL in place" (still correct, just noisier), never hang the retry.
+  (
+    flock -w 30 209 || exit 0
+    # -e, not a bare "$key": the pattern itself starts with "-" (the
+    # markdown bullet), which some greps -- ugrep among them -- parse as an
+    # option rather than a literal pattern without -e, erroring out (rc 2)
+    # rather than matching. Only mv the filtered copy over the original on
+    # rc 0/1 (normal "removed some/no lines"); on any other rc, grep
+    # errored, so leave the real file untouched rather than risk clobbering
+    # it with a bad/empty tmp.
+    grep -vF -e "$key" "$f" > "$f.tmp" 2>/dev/null
+    rc=$?
+    [ "$rc" -le 1 ] && mv "$f.tmp" "$f" 2>/dev/null
+    rm -f "$f.tmp" 2>/dev/null
+  ) 209>"$f.lock"
   return 0
 }
 
@@ -174,13 +226,27 @@ recover_adapter() {
 # so is safe (see recover_adapter's comment). A fresh MCU reboot on retry
 # needs no separate step here: every <cmd...> this is ever called with
 # reflashes (test.sh's default), and esptool resets the chip as part of that.
-# Returns non-zero only once every attempt (the first, plus all retries) has
-# failed.
+#
+# $HIL_MISMATCH_RC (conftest.py's dut fixture, --bench only) short-circuits
+# this immediately, before recording a retry, restarting the adapter, or
+# sleeping: a libsha mismatch means this attempt tested the wrong firmware
+# build, which a reflash-and-retry can't fix, so retrying would just burn the
+# full backoff budget (up to $HIL_RETRY_PAUSE_SUM seconds of sleeping alone)
+# for a result that was never going to change.
+#
+# Returns non-zero once every attempt (the first, plus all retries) has
+# failed, or immediately on $HIL_MISMATCH_RC.
 retry_run() {
   local bundle=$1; shift
   local recover=0
   if [ "${1:-}" = "--recover" ]; then recover=1; shift; fi
-  "$@" && return 0
+  local rc=0
+  "$@" || rc=$?
+  [ "$rc" = 0 ] && return 0
+  if [ "$rc" = "$HIL_MISMATCH_RC" ]; then
+    echo "== [$(ts)] $(basename "$bundle") firmware/bundle MISMATCH -- not retrying" >&2
+    return "$rc"
+  fi
   local max=$HIL_RETRY_COUNT pause=$HIL_RETRY_PAUSE n=0
   while [ "$n" -lt "$max" ]; do
     n=$((n + 1))
@@ -188,9 +254,15 @@ retry_run() {
     echo "== [$(ts)] $(basename "$bundle") failed -- retry $n/$max in ${pause}s" >&2
     [ "$recover" = 1 ] && recover_adapter
     sleep "$pause"
-    if "$@"; then
+    rc=0
+    "$@" || rc=$?
+    if [ "$rc" = 0 ]; then
       strip_stale_fail_verdicts "$bundle"
       return 0
+    fi
+    if [ "$rc" = "$HIL_MISMATCH_RC" ]; then
+      echo "== [$(ts)] $(basename "$bundle") firmware/bundle MISMATCH on retry -- not retrying further" >&2
+      return "$rc"
     fi
     pause=$((pause * 2))
   done
@@ -269,10 +341,7 @@ round_barrier() {
   local state="${PHASE1_ARRIVED}.${key}"
   ( flock -w 30 211 && printf '%s\n' "$board" >>"$state" ) 211>"${state}.lock" || true
 
-  local rn=$HIL_RETRY_COUNT rp=$HIL_RETRY_PAUSE rsum=0
-  while [ "$rn" -gt 0 ]; do rsum=$((rsum + rp)); rp=$((rp * 2)); rn=$((rn - 1)); done
-  local per_board=$(( 90 * (1 + HIL_RETRY_COUNT) + rsum ))
-  local default_timeout=$(( per_board * ${#sync_boards[@]} ))
+  local default_timeout=$(( HIL_RETRY_ATTEMPT_BUDGET * ${#sync_boards[@]} ))
   [ "$default_timeout" -lt 300 ] && default_timeout=300
   local deadline=$((SECONDS + ${HIL_PHASE1_BARRIER_TIMEOUT:-$default_timeout}))
   while (( SECONDS < deadline )); do
@@ -293,15 +362,17 @@ round_barrier() {
 # test_bundle (retry_run). Deliberately ignores $kargs/-k -- this smoke check
 # always runs in full regardless of a focused run's filter. Note this sits
 # inside the flock below, so its retries (pauses included) count against
-# $HIL_PHASE1_MUTEX_TIMEOUT, not just $HIL_PHASE1_BARRIER_TIMEOUT -- the 1800s
-# default has headroom for the default 3 retries (worst case seen: ~180s/
-# attempt x 4 attempts + 105s of doubling pauses =~ 825s); raise it further
-# if you raise $HIL_RETRY_COUNT/$HIL_RETRY_PAUSE a lot.
+# $HIL_PHASE1_MUTEX_TIMEOUT, not just $HIL_PHASE1_BARRIER_TIMEOUT -- its
+# default is derived from $HIL_RETRY_COUNT/$HIL_RETRY_PAUSE
+# ($HIL_RETRY_ATTEMPT_BUDGET, same per-board budget round_barrier uses) rather
+# than a fixed number, so raising those doesn't silently make this timeout too
+# small again -- see round_barrier's comment for the "seen live" failure this
+# guards against.
 phase1_turn() {
   local board=$1 round=$2 bundle=$3 rc=0
   mkdir -p "$PHASE1_CACHE"
   (
-    flock -w "${HIL_PHASE1_MUTEX_TIMEOUT:-1800}" 210 || exit 75
+    flock -w "${HIL_PHASE1_MUTEX_TIMEOUT:-$HIL_RETRY_ATTEMPT_BUDGET}" 210 || exit 75
     # HIL_KEEP_LINK=1 -- phase 2 runs --no-pair (no BtCtl of its own, see the
     # --by-board header comment) and starts the moment this session ends, so
     # conftest.py's bt_mac must leave the link connected+trusted instead of
