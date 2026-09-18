@@ -210,7 +210,7 @@ def manifest(pytestconfig):
 
 # --- serial DUT -----------------------------------------------------------
 @pytest.fixture(scope="session")
-def dut(rigcfg, firmware):
+def dut(rigcfg, firmware, manifest, pytestconfig):
     d = SerialDev(rigcfg["port"])
     d.wait_ready()
     fid = d.firmware_id()
@@ -224,6 +224,31 @@ def dut(rigcfg, firmware):
             f"firmware profile {cfg.get('profile')!r} != expected {want!r} "
             f"(flash the right env or fix hil_config.toml)"
         )
+    # libsha= (firmware/include/hil_profile.h HIL_LIB_SHA, set at build time by
+    # builder/build.sh) vs manifest.json's lib_sha (builder/make_bundle.py):
+    # same board, same profile, same layout can still be the *wrong build* --
+    # a flash that silently didn't take, or the wrong port wired to this board
+    # -- which nothing else here would catch. Only meaningful on the TESTER
+    # (--bundle) path; a from-source dev build has no manifest and the
+    # firmware's default HIL_LIB_SHA is "unknown", so both sides are blank/skip
+    # this check rather than false-alarm.
+    want_sha = (manifest.get("lib_sha") or "")[:8]
+    have_sha = cfg.get("libsha", "")
+    if want_sha and have_sha not in ("", "unknown") and have_sha != want_sha:
+        msg = (
+            f"flashed firmware reports library sha {have_sha!r}, but the bundle "
+            f"manifest says {want_sha!r} -- this board is running a different "
+            f"library build than the one this run is testing (stale/failed "
+            f"flash, or the wrong board wired to this port)"
+        )
+        if pytestconfig.getoption("bench"):
+            # --bench is the weekly regression watch and RELEASE.md's pre-tag
+            # validation run -- a genuinely mismatched flash can't produce a
+            # meaningful result, so stop with an unambiguous diagnostic rather
+            # than let the suite run (and test-all.sh retry) against it.
+            d.close()
+            pytest.exit(f"[dut] MISMATCH: {msg}")
+        print(f"[dut] WARNING: {msg}")
     yield d
     d.close()
 

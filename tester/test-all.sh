@@ -148,20 +148,45 @@ strip_stale_fail_verdicts() {
   return 0
 }
 
-# retry_run <bundle> <cmd...> -- run <cmd...> (a test.sh invocation), retrying
-# up to $HIL_RETRY_COUNT times (pausing $HIL_RETRY_PAUSE seconds, doubling
-# each time) if it fails. Records each extra attempt via record_retry, and on
-# an eventual pass, cleans up the stale FAIL verdict(s) it left behind.
+# recover_adapter -- restart BlueZ (host/hil/bluetooth.py's restart_adapter())
+# before a retry attempt. Only ever call this from a context that owns the
+# rig's one BT radio exclusively right now: phase 1 (globally serialized by
+# phase1_turn's flock -- see round_barrier's comment for why no phase 2
+# traffic can be running during it) or a solo/sequential run. Never from
+# --by-board's phase 2 (run_lane's test_bundle call): other lanes' boards are
+# concurrently connected on that same shared adapter there, and restarting
+# bluetoothd would drop every one of them -- the exact contention bug PR #34
+# fixed. Best-effort: a failed restart here doesn't abort the retry -- the
+# next attempt's own pairing (conftest.py's bt_mac) has its own one-shot
+# restart-and-retry fallback if it hits a pairing RuntimeError.
+recover_adapter() {
+  echo "== [$(ts)] restarting bluetooth adapter before retry"
+  PYTHONPATH=host "$PY" -m hil.bluetooth restart-adapter \
+    || echo "== [$(ts)] adapter restart failed (continuing anyway)" >&2
+}
+
+# retry_run <bundle> [--recover] <cmd...> -- run <cmd...> (a test.sh
+# invocation), retrying up to $HIL_RETRY_COUNT times (pausing
+# $HIL_RETRY_PAUSE seconds, doubling each time) if it fails. Records each
+# extra attempt via record_retry, and on an eventual pass, cleans up the
+# stale FAIL verdict(s) it left behind. --recover also restarts the BT
+# adapter before each retry (see recover_adapter) -- pass it only where doing
+# so is safe (see recover_adapter's comment). A fresh MCU reboot on retry
+# needs no separate step here: every <cmd...> this is ever called with
+# reflashes (test.sh's default), and esptool resets the chip as part of that.
 # Returns non-zero only once every attempt (the first, plus all retries) has
 # failed.
 retry_run() {
   local bundle=$1; shift
+  local recover=0
+  if [ "${1:-}" = "--recover" ]; then recover=1; shift; fi
   "$@" && return 0
   local max=$HIL_RETRY_COUNT pause=$HIL_RETRY_PAUSE n=0
   while [ "$n" -lt "$max" ]; do
     n=$((n + 1))
     record_retry "$bundle" 1
     echo "== [$(ts)] $(basename "$bundle") failed -- retry $n/$max in ${pause}s" >&2
+    [ "$recover" = 1 ] && recover_adapter
     sleep "$pause"
     if "$@"; then
       strip_stale_fail_verdicts "$bundle"
@@ -173,9 +198,17 @@ retry_run() {
 }
 
 # one bundle, up to $HIL_RETRY_COUNT retries; returns non-zero once every
-# attempt has failed
+# attempt has failed. No adapter recovery -- also used for --by-board phase 2
+# (run_lane), which must not touch the shared adapter (see recover_adapter).
 test_bundle() {
   retry_run "$1" ./tester/test.sh "$1" "${@:2}" "${kargs[@]}"
+}
+
+# like test_bundle, but also restarts the BT adapter before each retry (see
+# recover_adapter) -- only for callers that hold the adapter exclusively
+# (the sequential/solo loop; never --by-board phase 2).
+test_bundle_recoverable() {
+  retry_run "$1" --recover ./tester/test.sh "$1" "${@:2}" "${kargs[@]}"
 }
 
 # roll every bundle's junit into results/summary.md and echo it (CI lifts this
@@ -274,7 +307,7 @@ phase1_turn() {
     # conftest.py's bt_mac must leave the link connected+trusted instead of
     # its normal end-of-session disconnect+untrust -- otherwise phase 2
     # inherits a dead link with nothing left to reconnect it.
-    retry_run "$bundle" env HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 \
+    retry_run "$bundle" --recover env HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 \
       HIL_KEEP_LINK=1 ./tester/test.sh "$bundle"
   ) 210>"$PHASE1_LOCK" || rc=$?
   round_barrier "$board" "${round}.phase1" || rc=1
@@ -370,9 +403,12 @@ if [ "$BY_BOARD" = 1 ]; then
 fi
 
 while IFS= read -r b; do
-  # retried up to $HIL_RETRY_COUNT times: the C3/S3 external UART bridges drop
-  # a byte under load now and then (README "Benchmarking / Rig note").
-  test_bundle "$b" "$@" || trc=$?
+  # retried up to $HIL_RETRY_COUNT times, restarting the BT adapter before
+  # each retry (test_bundle_recoverable -- safe here: this loop is solo, no
+  # concurrent lane shares the adapter, unlike --by-board's phase 2 above):
+  # the C3/S3 external UART bridges drop a byte under load now and then
+  # (README "Benchmarking / Rig note").
+  test_bundle_recoverable "$b" "$@" || trc=$?
 done < <(all_bundles)
 summarize_all
 exit "$trc"

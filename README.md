@@ -44,7 +44,7 @@ push to the tester, run, pull results). One box can be both roles
 | `builder/build.sh` `builder/make_bundle.py` | compile → firmware bundle(s) → optional `--push` rsync to the tester. Library path comes from `$HIL_LIB_DIR` (exported from `rig.lib_dir`) |
 | `tester/bootstrap-host.sh` (root) `tester/bootstrap.sh` (user) | tester provisioning, split: privileged half (apt / bluetooth / groups / udev) vs unprivileged half (venv / config / health check) |
 | `tester/flash.py` `tester/test.sh` | flash a bundle with esptool, run the suite + benchmark, write `results/`; SKIPs a board the tester doesn't have |
-| `tester/test-all.sh` | loop `tester/test.sh` over every bundle in `~/hil-bundles`, retrying a failed bundle up to `$HIL_RETRY_COUNT` times (default 3, doubling `$HIL_RETRY_PAUSE`-second pause between each, default 15s — both overridable); `--by-board` runs the boards as parallel lanes (functional only, what CI runs by default); `--bench` is the sequential sweep (weekly + at release) |
+| `tester/test-all.sh` | loop `tester/test.sh` over every bundle in `~/hil-bundles`, retrying a failed bundle up to `$HIL_RETRY_COUNT` times (default 3, doubling `$HIL_RETRY_PAUSE`-second pause between each, default 15s — both overridable); a solo/sequential retry (including `--bench`) also restarts the BT adapter first (unsafe during `--by-board`'s parallel phase 2, so that path skips it — see `recover_adapter` in the script); `--by-board` runs the boards as parallel lanes (functional only, what CI runs by default); `--bench` is the sequential sweep (weekly + at release) |
 | `tester/rig-lock.sh` `tester/rig-status.sh` `host/hil/riglock.py` | one-rig `flock` + run-status file — serialise CI and local runs; `rig-status.sh` shows who/what is running (see [CI](#rig-lock--status)) |
 | `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite. Helpers: `serialdev`, `evdev_utils`, `bluetooth`, `gatt` (DIS/PnP/battery over BlueZ D-Bus), `hidraw` (Feature/Output reports + descriptor), `latency`+`bench`, `sysinfo`, `detect` (present boards), `charts`, `summarize` |
 | `hil_config.toml` (+ gitignored `hil_config.local.toml`) | per-machine ports, ssh host, builder board/profile matrix, per-board `enabled` |
@@ -250,7 +250,7 @@ banner and any debug lines are skipped by the host.
 | `PING` | `PONG` |
 | `ID?` | `ID hil_runner profile=… board=… built=…` |
 | `NAME?` | `NAME <advertised BLE name>` — `getDeviceName()`; `HILpad <board>`, or `HILdev <board>` / a `-D HIL_DEVICE_NAME` override for the `local` profile |
-| `CONFIG?` | `CONFIG buttons=… hats=… axes=… special=… axesMin=… axesMax=… vid=… pid=… ver=… reportId=… feat=… out=… profile=…` |
+| `CONFIG?` | `CONFIG buttons=… hats=… axes=… special=… axesMin=… axesMax=… vid=… pid=… ver=… reportId=… feat=… out=… profile=… libsha=…` — `libsha` is the ESP32-BLE-Gamepad commit this build embeds (`-D HIL_LIB_SHA`, set by `builder/build.sh`; `"unknown"` for a from-source dev build). `conftest.py`'s `dut` fixture checks it against the flashed bundle's `manifest.json` `lib_sha` to catch a stale/wrong flash — same board/profile/layout can still be the wrong build |
 | `DIS?` | `DIS model=… serial=… fw=… hw=… sw=… mfr=…` — the DIS strings the firmware configured |
 | `PNP?` | `PNP vidsrc=1 vid=… pid=… ver=…` |
 | `RSIZE?` | `RSIZE report=<n> descriptor=<n>` |

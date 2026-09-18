@@ -23,6 +23,7 @@ Manual equivalent: `bluetoothctl` -> `scan on` / `pair` / `trust` / `connect`
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 from collections import deque
@@ -422,3 +423,21 @@ def ensure_paired(btctl, name_contains, known_mac=None, want_fresh=False):
         btctl.connect(mac)
         time.sleep(1)
     raise RuntimeError(f"{mac} bonded but never connected")
+
+
+def main(argv):
+    """`python -m hil.bluetooth restart-adapter` -- lets tester/test-all.sh
+    call restart_adapter() as a retry-recovery step without a Python one-liner
+    in bash. Only ever invoked where the caller already knows the adapter is
+    exclusively theirs right now (phase 1 / a solo run) -- see
+    tester/test-all.sh's retry_run/round_barrier comments for why a
+    concurrent --by-board phase 2 lane must never do this."""
+    if len(argv) == 1 and argv[0] == "restart-adapter":
+        restart_adapter()
+        return 0
+    print("usage: python -m hil.bluetooth restart-adapter", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

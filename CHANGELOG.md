@@ -18,6 +18,21 @@ What a bump means:
 
 ## [Unreleased]
 
+### Added
+
+- **Firmware/bundle mismatch detection** — `CONFIG?` gained a `libsha=` field
+  (the ESP32-BLE-Gamepad commit the firmware was built against, `-D
+  HIL_LIB_SHA` set by `builder/build.sh`). `conftest.py`'s `dut` fixture now
+  compares it against the flashed bundle's `manifest.json` `lib_sha`: same
+  board, same profile, same layout can still be the *wrong build* (a flash
+  that silently didn't take, or the wrong board wired to a port) — nothing
+  previously caught that, so CI just kept retrying a bundle that could never
+  pass. `--bench` runs (the weekly regression watch and RELEASE.md's pre-tag
+  validation) fail fast with an unambiguous `MISMATCH` diagnostic on a
+  mismatch; other runs (`--by-board`, everyday push/PR) log a `[dut] WARNING`
+  and continue, since a transient bad flash there can still be fixed by the
+  next retry's reflash.
+
 ### Changed
 
 - **Configurable retry count + backoff** — `tester/test-all.sh` retried a
@@ -29,6 +44,16 @@ What a bump means:
   suite. `--by-board`'s barrier/mutex timeout defaults
   (`$HIL_PHASE1_BARRIER_TIMEOUT`, `$HIL_PHASE1_MUTEX_TIMEOUT`) now scale with
   these knobs instead of assuming a single retry.
+
+- **BT adapter restart on retry** — a solo/sequential `test-all.sh` retry
+  (including `--bench`) now restarts BlueZ (`host/hil/bluetooth.py
+  restart_adapter()`, now also reachable as `python -m hil.bluetooth
+  restart-adapter`) before trying again, on top of the MCU reset a retry
+  already gets for free (every retried bundle reflashes, and esptool resets
+  the chip as part of that). `--by-board`'s parallel phase 2 deliberately
+  skips this — it shares the one BT radio with other lanes' live connections,
+  and restarting bluetoothd there would drop all of them (the contention bug
+  PR #34 fixed); phase 1 is globally serialized, so it's safe there too.
 
 ### Fixed
 
