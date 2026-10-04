@@ -277,6 +277,7 @@ banner and any debug lines are skipped by the host.
 | `PING` | `PONG` |
 | `ID?` | `ID hil_runner profile=… board=… built=…` |
 | `NAME?` | `NAME <advertised BLE name>` — `getDeviceName()`; `HILpad <board>`, or `HILdev <board>` / a `-D HIL_DEVICE_NAME` override for the `local` profile |
+| `ADDR?` | `ADDR <aa:bb:cc:dd:ee:ff>` — this board's own BLE address (`NimBLEDevice::getAddress()`), e.g. to point a Bluepad32 observer's `allow <addr>` at it |
 | `CONFIG?` | `CONFIG buttons=… hats=… axes=… special=… axesMin=… axesMax=… vid=… pid=… ver=… reportId=… feat=… out=… profile=… libsha=…` — `libsha` is the ESP32-BLE-Gamepad commit this build embeds (`-D HIL_LIB_SHA`, set by `builder/build.sh`; `"unknown"` for a from-source dev build). `conftest.py`'s `dut` fixture checks it against the flashed bundle's `manifest.json` `lib_sha` to catch a stale/wrong flash — same board/profile/layout can still be the wrong build |
 | `DIS?` | `DIS model=… serial=… fw=… hw=… sw=… mfr=…` — the DIS strings the firmware configured |
 | `PNP?` | `PNP vidsrc=1 vid=… pid=… ver=…` |

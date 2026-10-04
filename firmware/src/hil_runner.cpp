@@ -215,6 +215,14 @@ static void handle(const String &cmd)
         return;
     }
 
+    if (c == "ADDR?")
+    {
+        // This board's own BLE address, so an observer that filters by address (Bluepad32's
+        // `allow <addr>`) can be pointed at whichever board plays the gamepad in a rotation.
+        Serial.printf("ADDR %s\n", NimBLEDevice::getAddress().toString().c_str());
+        return;
+    }
+
     if (c == "CONFIG?")
     {
         char axes[40];
