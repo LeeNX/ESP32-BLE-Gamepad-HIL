@@ -214,6 +214,30 @@ Afterwards, reflash the board's usual bundle and remove its BLE bond (the
 gaps: the IMU input device has no vendor/product, and SInput's paddle,
 touchpad-click, power and misc buttons have no evdev codes.
 
+#### Bluepad32 as the observer (`tester/bp32_swap.sh`, `tester/bp32_hil.py`)
+
+The third SInput observer, with no extra hardware: for one run the rig's
+`esp32dev` becomes a [Bluepad32](https://github.com/ricardoquesada/bluepad32)
+host and the `esp32c3` runs the `sinput` profile. `bp32_hil.py` drives the
+C3 over serial and reads what Bluepad32's SInput parser reports from the
+host's `HIL ...` console lines: buttons, D-pad, sticks, triggers, IMU in SI
+units, the feature response, and player LED / RGB / rumble sent back to the
+gamepad. `bp32_swap.sh` flashes both boards, runs it, and restores both to
+their current `default` bundles (dropping their BlueZ bonds so CI pairs fresh).
+
+```bash
+tester/rig-lock.sh -- tester/bp32_swap.sh <bluepad32 host image dir> <esp32c3 sinput bundle dir>
+```
+
+The host image is the Bluepad32 HIL rig's `host/` firmware
+(`leenx-foss/antBot-hil`), built without NuS/OTA and with
+`HIL_ALLOW_ADDR=<esp32c3 BLE address>` so it pairs only with the C3 (it
+ignores `HILpad*` names otherwise). Keep both directories outside
+`~/hil-bundles`, which `builder/build.sh --push` syncs with `--delete`.
+First run, 2026-10-04 (Bluepad32 PR #234 `6f603c7`, library `80a0d7c`):
+51/51 checks pass; gaps: Bluepad32 has no fields for SInput's paddle,
+touchpad-click, power and misc buttons, and no touchpad API.
+
 ## Benchmarking (`--bench`)
 
 `test_latency.py` runs one sweep per flashed profile via `host/hil/bench.py`,
