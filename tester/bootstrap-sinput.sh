@@ -14,7 +14,10 @@
 #   3. Installs /usr/local/sbin/hil-sinput-driver and a sudoers entry letting the
 #      test user run only that wrapper. The wrapper installs a .deb that is
 #      already staged in /opt/hil-sinput (by version, for the running kernel),
-#      removes it, or loads/unloads the module -- nothing else.
+#      removes it, loads/unloads the module, or re-probes SInput devices --
+#      nothing else. Loading takes over an already-connected SInput device from
+#      hid-generic (the HID core re-probes on driver registration); unloading
+#      hands it back by re-probing, so a test can switch drivers mid-connection.
 #
 # Why a wrapper and a root-owned staging dir: a package's maintainer scripts run
 # as root, so letting the test user `dpkg -i` a file it controls is the same as
@@ -52,10 +55,19 @@ echo "== /usr/local/sbin/hil-sinput-driver"
 cat > /usr/local/sbin/hil-sinput-driver <<'WRAPPER'
 #!/bin/sh
 # Root-owned; the HIL test user may run it via sudo (tester/bootstrap-sinput.sh).
-#   hil-sinput-driver install <version> | remove | load | unload | status
+#   hil-sinput-driver install <version> | remove | load | unload | reprobe | status
 set -eu
 dir=/opt/hil-sinput
 pkg="sinput-modules-$(uname -r)"
+# Re-probe SInput HID devices that no driver holds (after an unload), so
+# hid-generic takes them back without a BLE reconnect.
+reprobe() {
+  for dev in /sys/bus/hid/devices/*:2E8A:10C6.*; do
+    [ -e "$dev" ] || continue
+    [ -e "$dev/driver" ] && continue
+    printf '%s' "$(basename "$dev")" > /sys/bus/hid/drivers_probe || true
+  done
+}
 case "${1:-}" in
   install)
     ver="${2:-}"
@@ -64,13 +76,14 @@ case "${1:-}" in
     [ -f "$deb" ] || { echo "not staged: $deb" >&2; exit 2; }
     dpkg -i "$deb"
     modprobe sinput ;;
-  remove) modprobe -r sinput 2>/dev/null || true; dpkg -r "$pkg" ;;
+  remove) modprobe -r sinput 2>/dev/null || true; dpkg -r "$pkg"; reprobe ;;
   load) modprobe sinput ;;
-  unload) modprobe -r sinput ;;
+  unload) modprobe -r sinput; reprobe ;;
+  reprobe) reprobe ;;
   status) dpkg-query -W -f '${Package} ${Version}\n' "$pkg" 2>/dev/null || echo "$pkg not installed"
           grep -q '^sinput ' /proc/modules && echo "module loaded" || echo "module not loaded"
           ls "$dir" ;;
-  *) echo "usage: $0 install <version> | remove | load | unload | status" >&2; exit 2 ;;
+  *) echo "usage: $0 install <version> | remove | load | unload | reprobe | status" >&2; exit 2 ;;
 esac
 WRAPPER
 chown root:root /usr/local/sbin/hil-sinput-driver
