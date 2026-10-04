@@ -1,0 +1,369 @@
+#!/usr/bin/env python3
+"""Bluepad32 as the observer: hil_runner's `sinput` profile on one board, Bluepad32 (SInput parser) on another.
+
+The gamepad board is driven over its serial port; the Bluepad32 board runs the HIL host firmware from the Bluepad32
+HIL rig (leenx-foss/antBot-hil host/, built without NuS/OTA, with HIL_ALLOW_ADDR baked in) and prints what it parsed
+as `HIL ...` lines on its serial console. Both boards are already flashed; run under tester/rig-lock.sh.
+
+  bp32_hil.py <gamepad serial port> <bluepad32 serial port>
+
+Output: `ok` / `FAIL` per check, `GAP` for things Bluepad32 doesn't expose (not counted as failures).
+"""
+
+import argparse
+import re
+import sys
+import threading
+import time
+
+import serial
+
+ap = argparse.ArgumentParser()
+ap.add_argument("gamepad_port")
+ap.add_argument("bp32_port")
+ap.add_argument(
+    "--settle", type=float, default=0.5, help="seconds to wait for Bluepad32 after each change"
+)
+args = ap.parse_args()
+
+results, gaps = [], []
+
+
+def check(name, ok, detail=""):
+    results.append(ok)
+    print(
+        ("ok   " if ok else "FAIL ") + name + ("" if ok or not detail else f": {detail}"),
+        flush=True,
+    )
+    return ok
+
+
+def gap(name, detail=""):
+    gaps.append(name)
+    print(f"GAP  {name}" + (f": {detail}" if detail else ""), flush=True)
+
+
+def section(title):
+    print(f"\n== {title}", flush=True)
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Gamepad board: hil_runner, sinput profile
+pad = serial.Serial(args.gamepad_port, 115200, timeout=0.2)
+
+
+def cmd(c, timeout=2.0):
+    pad.reset_input_buffer()
+    pad.write((c + "\n").encode())
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        line = pad.readline().decode(errors="replace").strip()
+        if line and not line.startswith(("[", "HIL hil_runner ready")):
+            return line
+    return None
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Bluepad32 board: HIL host console
+class Bluepad32:
+    def __init__(self, port):
+        # Open with the board held in reset (RTS -> EN), so it only starts scanning once the gamepad is ready.
+        self.ser = serial.Serial()
+        self.ser.port, self.ser.baudrate, self.ser.timeout = port, 115200, 0.2
+        self.ser.dtr, self.ser.rts = False, True
+        self.ser.open()
+        self.lock = threading.Lock()
+        self.state, self.ready, self.features, self.log = None, None, None, []
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self):
+        while True:
+            line = self.ser.readline().decode(errors="replace").strip()
+            if not line.startswith("HIL "):
+                continue
+            with self.lock:
+                self.log.append(line)
+                if line.startswith("HIL state"):
+                    self.state = {k: int(v, 0) for k, v in re.findall(r"(\w+)=(-?\w+)", line)}
+                elif line.startswith("HIL ready"):
+                    self.ready = line
+                elif line.startswith("HIL features"):
+                    self.features = (
+                        {k: int(v, 0) for k, v in re.findall(r"(\w+)=(\w+)", line)}
+                        if "none" not in line
+                        else None
+                    )
+
+    def release_reset(self):
+        self.ser.rts = False
+
+    def send(self, line):
+        self.ser.write((line + "\n").encode())
+
+    def mark(self):
+        with self.lock:
+            return len(self.log)
+
+    def wait_for(self, prefix, since, timeout=3.0):
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            with self.lock:
+                for line in self.log[since:]:
+                    if line.startswith(prefix):
+                        return line
+            time.sleep(0.05)
+        return None
+
+    def snapshot(self):
+        with self.lock:
+            return dict(self.state) if self.state else {}
+
+
+# Bluepad32 constants (uni_gamepad.h)
+BTN_A, BTN_B, BTN_X, BTN_Y = 0x0001, 0x0002, 0x0004, 0x0008
+BTN_SHOULDER_L, BTN_SHOULDER_R, BTN_TRIGGER_L, BTN_TRIGGER_R = 0x0010, 0x0020, 0x0040, 0x0080
+BTN_THUMB_L, BTN_THUMB_R = 0x0100, 0x0200
+DPAD_UP, DPAD_DOWN, DPAD_RIGHT, DPAD_LEFT = 1, 2, 4, 8
+MISC_SYSTEM, MISC_SELECT, MISC_START, MISC_CAPTURE = 1, 2, 4, 8
+
+# hil_runner button n (ESP32-BLE-Gamepad's SInput packing) -> what Bluepad32's SInput parser reports.
+# None = Bluepad32 has no field for it (paddles, touchpad clicks, power, misc): reported as a gap.
+BUTTONS = {
+    1: ("btn", BTN_A),
+    2: ("btn", BTN_B),
+    3: ("btn", BTN_X),
+    4: ("btn", BTN_Y),
+    5: ("btn", BTN_SHOULDER_L),
+    6: ("btn", BTN_SHOULDER_R),
+    7: ("btn", BTN_THUMB_L),
+    8: ("btn", BTN_THUMB_R),
+    9: ("btn", BTN_TRIGGER_L),
+    10: ("btn", BTN_TRIGGER_R),
+    13: ("misc", MISC_CAPTURE),
+}
+BUTTON_NAMES = {
+    11: "L paddle 1",
+    12: "R paddle 1",
+    14: "L paddle 2",
+    15: "R paddle 2",
+    16: "touchpad 1 click",
+    17: "touchpad 2 click",
+    18: "power",
+}
+SPECIALS = {
+    0: ("start", MISC_START),
+    1: ("select/back", MISC_SELECT),
+    3: ("home/guide", MISC_SYSTEM),
+}
+HATS = {1: DPAD_UP, 5: DPAD_DOWN, 3: DPAD_RIGHT, 7: DPAD_LEFT, 4: DPAD_DOWN | DPAD_RIGHT}
+
+# AXIS <name> <int16>: x/y left stick, z/rz right stick, rx/ry triggers. Bluepad32: sticks -512..511 (>> 6),
+# triggers 0..1023 (>> 5).
+AXES = [
+    ("x", 16000, "lx", 250),
+    ("y", -16000, "ly", -250),
+    ("z", -32767, "rx", -512),
+    ("rz", 32767, "ry", 511),
+    ("rx", 16384, "brake", 512),
+    ("ry", 32767, "thr", 1023),
+]
+# MOTION <gx> <gy> <gz> <ax> <ay> <az> in raw counts; +/-8 g and +/-2000 dps, so 4096 = 1 g = 9807 mm/s^2 and
+# 16384 = 1000 dps = 17453 mrad/s. Bluepad32's frame (X right, Y up, Z toward the player) = SDL's: (-x, +z, -y).
+IMU = [
+    ("flat at rest (+1 g up)", "MOTION 0 0 0 0 0 4096", {"ax": 0, "ay": 9807, "az": 0}),
+    ("accel axes", "MOTION 0 0 0 -4096 4096 8192", {"ax": 9807, "ay": 19613, "az": -9807}),
+    ("gyro axes", "MOTION -16384 16384 -8192 0 0 0", {"gx": 17453, "gy": -8727, "gz": -17453}),
+    (
+        "full scale",
+        "MOTION 32767 -32768 0 32767 -32768 0",
+        {"ax": -78451, "az": 78453, "gx": -34906, "gz": 34907},
+    ),
+]
+TOL = {
+    "lx": 2,
+    "ly": 2,
+    "rx": 2,
+    "ry": 2,
+    "brake": 2,
+    "thr": 2,
+    "ax": 5,
+    "ay": 5,
+    "az": 5,
+    "gx": 5,
+    "gy": 5,
+    "gz": 5,
+}
+
+
+def expect(name, after, want):
+    """Run gamepad command(s), let Bluepad32 settle, compare its state line."""
+    for c in [after] if isinstance(after, str) else after:
+        reply = cmd(c)
+        if reply != "OK":
+            return check(name, False, f"'{c}' -> {reply}")
+    time.sleep(args.settle)
+    got = bp.snapshot()
+    bad = {
+        k: (v, got.get(k))
+        for k, v in want.items()
+        if got.get(k) is None or abs(got[k] - v) > TOL.get(k, 0)
+    }
+    return check(name, not bad, f"expected/got {bad}")
+
+
+# ---------------------------------------------------------------------------------------------------------------
+section("boards")
+ident = cmd("ID?")
+check("gamepad: sinput profile", ident is not None and "profile=sinput" in ident, ident)
+print("     ", cmd("NAME?"), "|", cmd("PNP?"))
+cmd("RESET")
+
+bp = Bluepad32(args.bp32_port)
+time.sleep(0.5)
+bp.release_reset()
+section("Bluepad32 pairs with the gamepad")
+for _ in range(90):
+    if bp.ready:
+        break
+    time.sleep(1)
+print(f"      {bp.ready}")
+if not check(
+    "Bluepad32: device ready as SInput (type 58, 2E8A:10C6)",
+    bool(bp.ready and "type=58" in bp.ready and "vid=0x2e8a pid=0x10c6" in bp.ready),
+    bp.ready,
+):
+    with bp.lock:
+        print("\n".join(bp.log[-15:]))
+    sys.exit(1)
+time.sleep(1.5)  # feature response, first state report
+
+section("features")
+f = bp.features
+if check("Bluepad32: feature response parsed", bool(f), f"{f}"):
+    check(
+        "features: caps0=0xff caps1 touch+rgb",
+        f.get("caps0") == 0xFF and (f.get("caps1", 0) & 0x03) == 0x03,
+        f"{f}",
+    )
+    check(
+        "features: IMU poll/ranges 5000us/8g/2000dps",
+        (f.get("poll"), f.get("accel"), f.get("gyro")) == (5000, 8, 2000),
+        f"{f}",
+    )
+
+section("inputs")
+expect(
+    "idle",
+    "RESET",
+    {"btn": 0, "misc": 0, "dpad": 0, "lx": 0, "ly": 0, "rx": 0, "ry": 0, "brake": 0, "thr": 0},
+)
+missing = []
+for n in range(1, 26):
+    want = BUTTONS.get(n)
+    cmd(f"PRESS {n}")
+    time.sleep(args.settle)
+    got = bp.snapshot()
+    if want:
+        field, bit = want
+        others = "misc" if field == "btn" else "btn"
+        check(
+            f"button {n} -> {field}=0x{bit:x}",
+            got.get(field) == bit and got.get(others) == 0,
+            f"btn={got.get('btn')} misc={got.get('misc')}",
+        )
+    elif got.get("btn") or got.get("misc"):
+        check(
+            f"button {n} (no Bluepad32 field) changes nothing",
+            False,
+            f"btn={got.get('btn')} misc={got.get('misc')}",
+        )
+    else:
+        missing.append(BUTTON_NAMES.get(n, f"misc {n - 18}"))
+    cmd(f"RELEASE {n}")
+if missing:
+    gap("Bluepad32: SInput buttons with no gamepad field", ", ".join(missing))
+for k, (name, bit) in SPECIALS.items():
+    expect(f"special {name} -> misc=0x{bit:x}", f"SPECIAL PRESS {k}", {"misc": bit, "btn": 0})
+    cmd(f"SPECIAL RELEASE {k}")
+for h, bits in HATS.items():
+    expect(f"hat {h} -> dpad=0x{bits:x}", f"HAT 1 {h}", {"dpad": bits})
+cmd("HAT 1 0")
+for axis, raw, field, val in AXES:
+    expect(f"axis {axis} {raw} -> {field}={val}", f"AXIS {axis} {raw}", {field: val})
+    cmd(f"AXIS {axis} 0")
+expect("imu idle", "MOTION 0 0 0 0 0 0", {"ax": 0, "ay": 0, "az": 0, "gx": 0, "gy": 0, "gz": 0})
+for name, c, want in IMU:
+    expect(f"imu {name}", c, want)
+cmd("RESET")
+cmd("TOUCH 0 1000 -1000 500")
+gap("Bluepad32: touchpad has no API (uni_gamepad_t has no touch fields)")
+cmd("RESET")
+
+section("Bluepad32 -> gamepad commands")
+cmd("PLED?"), cmd("RGB?"), cmd("RUMBLE?")  # clear the received flags
+
+
+def host(c, ack):
+    m = bp.mark()
+    bp.send(c)
+    return bp.wait_for(ack, m)
+
+
+for n in (1, 2, 3, 4, 0):
+    ack = host(f"led {n}", "HIL ok led")
+    time.sleep(args.settle + 0.4)
+    got = cmd("PLED?")
+    check(
+        f"player LED {n}",
+        ack is not None and got is not None and got.endswith(f" {n}"),
+        f"ack={ack} gamepad={got}",
+    )
+for r, g, b in ((255, 0, 128), (0, 255, 0), (1, 2, 3), (0, 0, 0)):
+    ack = host(f"rgb {r} {g} {b}", "HIL ok rgb")
+    time.sleep(args.settle + 0.4)
+    got = cmd("RGB?")
+    check(
+        f"RGB {r},{g},{b}",
+        ack is not None and got is not None and f"r={r} g={g} b={b}" in got,
+        f"ack={ack} gamepad={got}",
+    )
+# Rumble: SInput haptic type 2, left = strong (low frequency), right = weak (high frequency), like SDL.
+for weak, strong in ((0, 200), (120, 0), (77, 255)):
+    ack = host(f"rumble {weak} {strong} 5000", "HIL ok rumble")
+    time.sleep(args.settle + 0.4)
+    got = cmd("RUMBLE?")
+    check(
+        f"rumble weak={weak} strong={strong}",
+        ack is not None and got is not None and f"left={strong} right={weak}" in got,
+        f"ack={ack} gamepad={got}",
+    )
+ack = host("rumble 0 0 0", "HIL ok rumble")
+time.sleep(args.settle + 0.4)
+got = cmd("RUMBLE?")
+check(
+    "rumble stop",
+    ack is not None and got is not None and "left=0 right=0" in got,
+    f"ack={ack} gamepad={got}",
+)
+ack = host("rumble 50 60 2000", "HIL ok rumble")
+time.sleep(args.settle + 0.4)
+got = cmd("RUMBLE?")
+check(
+    "rumble timed: on",
+    ack is not None and got is not None and "left=60 right=50" in got,
+    f"gamepad={got}",
+)
+time.sleep(2.0)
+got = cmd("RUMBLE?")
+check(
+    "rumble timed: stops after duration",
+    got is not None and "left=0 right=0" in got,
+    f"gamepad={got}",
+)
+
+cmd("RESET")
+print(f"\nGAPS ({len(gaps)}): " + "; ".join(gaps) if gaps else "\nGAPS: none")
+print(
+    "PASSED" if all(results) else "FAILED", f"({results.count(False)} failures of {len(results)})"
+)
+sys.exit(0 if all(results) else 1)
