@@ -537,6 +537,35 @@ above are the software half; these are physical additions:
   = clean shutdown first) rather than a raw kill switch — cutting power to a
   live system is the same risk as the crash that prompted this list.
 
+#### Wish list
+
+Not committed purchases: the budget is limited, so these are ordered by how
+much they unlock per dollar, and found or reused parts come first. They are
+for combining this rig with the Bluepad32 HIL rig (a Bluepad32 ESP32 as a
+second observer next to BlueZ/SDL).
+
+- **Powered USB hub with per-port power switching**: one that
+  [`uhubctl`](https://github.com/mvp/uhubctl) can control port by port (check
+  its supported-hubs list; many hubs only switch all ports together, or not
+  at all). It replaces the current powered hub for the MCU boards; the
+  FTDI/serial bridges still go straight into the Pi (`docs/rig-build.md`).
+  It gives the rig:
+  - a real power cycle of one board, for disconnect/reconnect tests (a
+    serial RTS reset is not enough: an ESP32-C3 that is already connected
+    ignores it);
+  - recovery of a wedged board without touching the Pi or the other boards;
+  - idle boards powered off between runs, which also cuts wear.
+- **One more classic ESP32 dev board** (ESP32-D0WD, BR/EDR + BLE): the
+  Bluepad32 observer on the Pi, or a spare. Classic, not C3/S3, because
+  Bluepad32's BR/EDR paths need it. Cheapest item here; look for a spare one
+  before buying.
+
+**Rotate boards between roles** (gamepad under test, observer, spare) rather
+than keeping one board in one role for good. Every run reflashes the board
+under test, so rotating spreads flash erase cycles and USB-connector wear
+across boards, and keeps the spare known-good. Record which board is in which
+role in `hil_config.local.toml`.
+
 ### Which boards run
 
 The build matrix is fixed, but a tester only flashes the boards it actually has.
