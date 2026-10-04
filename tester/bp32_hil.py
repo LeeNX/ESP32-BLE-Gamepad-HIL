@@ -24,6 +24,17 @@ ap.add_argument("bp32_port")
 ap.add_argument(
     "--settle", type=float, default=0.5, help="seconds to wait for Bluepad32 after each change"
 )
+ap.add_argument(
+    "--profile",
+    choices=("sinput", "minimal", "maxbtn"),
+    default="sinput",
+    help="the gamepad's hil_runner profile; minimal/maxbtn go through Bluepad32's generic HID parser",
+)
+ap.add_argument(
+    "--addr",
+    default="",
+    help="gamepad BLE address for the observer's `allow` filter (default: ask the gamepad, ADDR?)",
+)
 args = ap.parse_args()
 
 results, gaps = [], []
@@ -214,152 +225,248 @@ def expect(name, after, want):
 # ---------------------------------------------------------------------------------------------------------------
 section("boards")
 ident = cmd("ID?")
-check("gamepad: sinput profile", ident is not None and "profile=sinput" in ident, ident)
+check(
+    f"gamepad: {args.profile} profile",
+    ident is not None and f"profile={args.profile}" in ident,
+    ident,
+)
 print("     ", cmd("NAME?"), "|", cmd("PNP?"))
+addr = args.addr
+if not addr:
+    reply = cmd("ADDR?") or ""
+    addr = reply.split()[1] if reply.startswith("ADDR ") else ""
+print(f"      gamepad BLE address: {addr or '(unknown: relying on the observer image filter)'}")
 cmd("RESET")
 
 bp = Bluepad32(args.bp32_port)
 time.sleep(0.5)
 bp.release_reset()
 section("Bluepad32 pairs with the gamepad")
+if addr:
+    # The observer ignores HILpad* names until told otherwise; its filter runs on every advertisement.
+    time.sleep(2.5)
+    m = bp.mark()
+    bp.send(f"allow {addr}")
+    check("Bluepad32: allow filter set", bp.wait_for("HIL ok allow", m) is not None)
 for _ in range(90):
     if bp.ready:
         break
     time.sleep(1)
 print(f"      {bp.ready}")
+want_ids = "type=58 vid=0x2e8a pid=0x10c6" if args.profile == "sinput" else "vid=0x1d34 pid=0x8010"
 if not check(
-    "Bluepad32: device ready as SInput (type 58, 2E8A:10C6)",
-    bool(bp.ready and "type=58" in bp.ready and "vid=0x2e8a pid=0x10c6" in bp.ready),
+    f"Bluepad32: device ready ({want_ids})",
+    bool(bp.ready and all(t in bp.ready for t in want_ids.split())),
     bp.ready,
 ):
     with bp.lock:
         print("\n".join(bp.log[-15:]))
     sys.exit(1)
-time.sleep(1.5)  # feature response, first state report
+time.sleep(1.5)  # feature response / first state report
 
-section("features")
-f = bp.features
-if check("Bluepad32: feature response parsed", bool(f), f"{f}"):
-    check(
-        "features: caps0=0xff caps1 touch+rgb",
-        f.get("caps0") == 0xFF and (f.get("caps1", 0) & 0x03) == 0x03,
-        f"{f}",
-    )
-    check(
-        "features: IMU poll/ranges 5000us/8g/2000dps",
-        (f.get("poll"), f.get("accel"), f.get("gyro")) == (5000, 8, 2000),
-        f"{f}",
-    )
 
-section("inputs")
-expect(
-    "idle",
-    "RESET",
-    {"btn": 0, "misc": 0, "dpad": 0, "lx": 0, "ly": 0, "rx": 0, "ry": 0, "brake": 0, "thr": 0},
-)
-missing = []
-for n in range(1, 26):
-    want = BUTTONS.get(n)
-    cmd(f"PRESS {n}")
-    time.sleep(args.settle)
-    got = bp.snapshot()
-    if want:
-        field, bit = want
-        others = "misc" if field == "btn" else "btn"
+def run_sinput():
+    section("features")
+    f = bp.features
+    if check("Bluepad32: feature response parsed", bool(f), f"{f}"):
         check(
-            f"button {n} -> {field}=0x{bit:x}",
-            got.get(field) == bit and got.get(others) == 0,
-            f"btn={got.get('btn')} misc={got.get('misc')}",
+            "features: caps0=0xff caps1 touch+rgb",
+            f.get("caps0") == 0xFF and (f.get("caps1", 0) & 0x03) == 0x03,
+            f"{f}",
         )
-    elif got.get("btn") or got.get("misc"):
         check(
-            f"button {n} (no Bluepad32 field) changes nothing",
-            False,
-            f"btn={got.get('btn')} misc={got.get('misc')}",
+            "features: IMU poll/ranges 5000us/8g/2000dps",
+            (f.get("poll"), f.get("accel"), f.get("gyro")) == (5000, 8, 2000),
+            f"{f}",
         )
-    else:
-        missing.append(BUTTON_NAMES.get(n, f"misc {n - 18}"))
-    cmd(f"RELEASE {n}")
-if missing:
-    gap("Bluepad32: SInput buttons with no gamepad field", ", ".join(missing))
-for k, (name, bit) in SPECIALS.items():
-    expect(f"special {name} -> misc=0x{bit:x}", f"SPECIAL PRESS {k}", {"misc": bit, "btn": 0})
-    cmd(f"SPECIAL RELEASE {k}")
-for h, bits in HATS.items():
-    expect(f"hat {h} -> dpad=0x{bits:x}", f"HAT 1 {h}", {"dpad": bits})
-cmd("HAT 1 0")
-for axis, raw, field, val in AXES:
-    expect(f"axis {axis} {raw} -> {field}={val}", f"AXIS {axis} {raw}", {field: val})
-    cmd(f"AXIS {axis} 0")
-expect("imu idle", "MOTION 0 0 0 0 0 0", {"ax": 0, "ay": 0, "az": 0, "gx": 0, "gy": 0, "gz": 0})
-for name, c, want in IMU:
-    expect(f"imu {name}", c, want)
-cmd("RESET")
-cmd("TOUCH 0 1000 -1000 500")
-gap("Bluepad32: touchpad has no API (uni_gamepad_t has no touch fields)")
-cmd("RESET")
 
-section("Bluepad32 -> gamepad commands")
-cmd("PLED?"), cmd("RGB?"), cmd("RUMBLE?")  # clear the received flags
-
-
-def host(c, ack):
-    m = bp.mark()
-    bp.send(c)
-    return bp.wait_for(ack, m)
-
-
-for n in (1, 2, 3, 4, 0):
-    ack = host(f"led {n}", "HIL ok led")
-    time.sleep(args.settle + 0.4)
-    got = cmd("PLED?")
-    check(
-        f"player LED {n}",
-        ack is not None and got is not None and got.endswith(f" {n}"),
-        f"ack={ack} gamepad={got}",
+    section("inputs")
+    expect(
+        "idle",
+        "RESET",
+        {"btn": 0, "misc": 0, "dpad": 0, "lx": 0, "ly": 0, "rx": 0, "ry": 0, "brake": 0, "thr": 0},
     )
-for r, g, b in ((255, 0, 128), (0, 255, 0), (1, 2, 3), (0, 0, 0)):
-    ack = host(f"rgb {r} {g} {b}", "HIL ok rgb")
-    time.sleep(args.settle + 0.4)
-    got = cmd("RGB?")
-    check(
-        f"RGB {r},{g},{b}",
-        ack is not None and got is not None and f"r={r} g={g} b={b}" in got,
-        f"ack={ack} gamepad={got}",
-    )
-# Rumble: SInput haptic type 2, left = strong (low frequency), right = weak (high frequency), like SDL.
-for weak, strong in ((0, 200), (120, 0), (77, 255)):
-    ack = host(f"rumble {weak} {strong} 5000", "HIL ok rumble")
+    missing = []
+    for n in range(1, 26):
+        want = BUTTONS.get(n)
+        cmd(f"PRESS {n}")
+        time.sleep(args.settle)
+        got = bp.snapshot()
+        if want:
+            field, bit = want
+            others = "misc" if field == "btn" else "btn"
+            check(
+                f"button {n} -> {field}=0x{bit:x}",
+                got.get(field) == bit and got.get(others) == 0,
+                f"btn={got.get('btn')} misc={got.get('misc')}",
+            )
+        elif got.get("btn") or got.get("misc"):
+            check(
+                f"button {n} (no Bluepad32 field) changes nothing",
+                False,
+                f"btn={got.get('btn')} misc={got.get('misc')}",
+            )
+        else:
+            missing.append(BUTTON_NAMES.get(n, f"misc {n - 18}"))
+        cmd(f"RELEASE {n}")
+    if missing:
+        gap("Bluepad32: SInput buttons with no gamepad field", ", ".join(missing))
+    for k, (name, bit) in SPECIALS.items():
+        expect(f"special {name} -> misc=0x{bit:x}", f"SPECIAL PRESS {k}", {"misc": bit, "btn": 0})
+        cmd(f"SPECIAL RELEASE {k}")
+    for h, bits in HATS.items():
+        expect(f"hat {h} -> dpad=0x{bits:x}", f"HAT 1 {h}", {"dpad": bits})
+    cmd("HAT 1 0")
+    for axis, raw, field, val in AXES:
+        expect(f"axis {axis} {raw} -> {field}={val}", f"AXIS {axis} {raw}", {field: val})
+        cmd(f"AXIS {axis} 0")
+    expect("imu idle", "MOTION 0 0 0 0 0 0", {"ax": 0, "ay": 0, "az": 0, "gx": 0, "gy": 0, "gz": 0})
+    for name, c, want in IMU:
+        expect(f"imu {name}", c, want)
+    cmd("RESET")
+    cmd("TOUCH 0 1000 -1000 500")
+    gap("Bluepad32: touchpad has no API (uni_gamepad_t has no touch fields)")
+    cmd("RESET")
+
+    section("Bluepad32 -> gamepad commands")
+    cmd("PLED?"), cmd("RGB?"), cmd("RUMBLE?")  # clear the received flags
+
+    def host(c, ack):
+        m = bp.mark()
+        bp.send(c)
+        return bp.wait_for(ack, m)
+
+    for n in (1, 2, 3, 4, 0):
+        ack = host(f"led {n}", "HIL ok led")
+        time.sleep(args.settle + 0.4)
+        got = cmd("PLED?")
+        check(
+            f"player LED {n}",
+            ack is not None and got is not None and got.endswith(f" {n}"),
+            f"ack={ack} gamepad={got}",
+        )
+    for r, g, b in ((255, 0, 128), (0, 255, 0), (1, 2, 3), (0, 0, 0)):
+        ack = host(f"rgb {r} {g} {b}", "HIL ok rgb")
+        time.sleep(args.settle + 0.4)
+        got = cmd("RGB?")
+        check(
+            f"RGB {r},{g},{b}",
+            ack is not None and got is not None and f"r={r} g={g} b={b}" in got,
+            f"ack={ack} gamepad={got}",
+        )
+    # Rumble: SInput haptic type 2, left = strong (low frequency), right = weak (high frequency), like SDL.
+    for weak, strong in ((0, 200), (120, 0), (77, 255)):
+        ack = host(f"rumble {weak} {strong} 5000", "HIL ok rumble")
+        time.sleep(args.settle + 0.4)
+        got = cmd("RUMBLE?")
+        check(
+            f"rumble weak={weak} strong={strong}",
+            ack is not None and got is not None and f"left={strong} right={weak}" in got,
+            f"ack={ack} gamepad={got}",
+        )
+    ack = host("rumble 0 0 0", "HIL ok rumble")
     time.sleep(args.settle + 0.4)
     got = cmd("RUMBLE?")
     check(
-        f"rumble weak={weak} strong={strong}",
-        ack is not None and got is not None and f"left={strong} right={weak}" in got,
+        "rumble stop",
+        ack is not None and got is not None and "left=0 right=0" in got,
         f"ack={ack} gamepad={got}",
     )
-ack = host("rumble 0 0 0", "HIL ok rumble")
-time.sleep(args.settle + 0.4)
-got = cmd("RUMBLE?")
-check(
-    "rumble stop",
-    ack is not None and got is not None and "left=0 right=0" in got,
-    f"ack={ack} gamepad={got}",
-)
-ack = host("rumble 50 60 2000", "HIL ok rumble")
-time.sleep(args.settle + 0.4)
-got = cmd("RUMBLE?")
-check(
-    "rumble timed: on",
-    ack is not None and got is not None and "left=60 right=50" in got,
-    f"gamepad={got}",
-)
-time.sleep(2.0)
-got = cmd("RUMBLE?")
-check(
-    "rumble timed: stops after duration",
-    got is not None and "left=0 right=0" in got,
-    f"gamepad={got}",
-)
+    ack = host("rumble 50 60 2000", "HIL ok rumble")
+    time.sleep(args.settle + 0.4)
+    got = cmd("RUMBLE?")
+    check(
+        "rumble timed: on",
+        ack is not None and got is not None and "left=60 right=50" in got,
+        f"gamepad={got}",
+    )
+    time.sleep(2.0)
+    got = cmd("RUMBLE?")
+    check(
+        "rumble timed: stops after duration",
+        got is not None and "left=0 right=0" in got,
+        f"gamepad={got}",
+    )
+
+
+# Bluepad32's generic HID parser (uni_hid_parser_generic.c): HID buttons 1,2,4,5,7,8 -> A,B,X,Y,L,R;
+# 11,12,13 -> select, start, system; 14,15 -> thumb L/R; every other button is dropped. Axes scale the
+# descriptor's logical range to -512..511.
+GENERIC_BUTTONS = {
+    1: ("btn", BTN_A),
+    2: ("btn", BTN_B),
+    4: ("btn", BTN_X),
+    5: ("btn", BTN_Y),
+    7: ("btn", BTN_SHOULDER_L),
+    8: ("btn", BTN_SHOULDER_R),
+    11: ("misc", MISC_SELECT),
+    12: ("misc", MISC_START),
+    13: ("misc", MISC_SYSTEM),
+    14: ("btn", BTN_THUMB_L),
+    15: ("btn", BTN_THUMB_R),
+}
+
+
+def run_generic():
+    config = cmd("CONFIG?") or ""
+    n_buttons = int(re.search(r"buttons=(\d+)", config).group(1)) if "buttons=" in config else 0
+    axes = re.search(r"axes=(\S+)", config).group(1).split(",") if "axes=" in config else []
+    print(f"      gamepad: {n_buttons} buttons, axes {axes}")
+    section("features")
+    check(
+        "Bluepad32: no SInput feature response (generic device)",
+        bp.features is None,
+        f"{bp.features}",
+    )
+
+    section("inputs")
+    cmd("RESET")
+    time.sleep(args.settle)
+    got = bp.snapshot()
+    check("idle: no buttons", got.get("btn") == 0 and got.get("misc") == 0, f"{got}")
+    seen, dropped = 0, 0
+    for n in range(1, n_buttons + 1):
+        want = GENERIC_BUTTONS.get(n)
+        cmd(f"PRESS {n}")
+        time.sleep(args.settle)
+        got = bp.snapshot()
+        if want:
+            field, bit = want
+            others = "misc" if field == "btn" else "btn"
+            if check(
+                f"button {n} -> {field}=0x{bit:x}",
+                got.get(field) == bit and got.get(others) == 0,
+                f"btn={got.get('btn')} misc={got.get('misc')}",
+            ):
+                seen += 1
+        elif got.get("btn") or got.get("misc"):
+            check(
+                f"button {n} (dropped by the generic parser) changes nothing",
+                False,
+                f"btn={got.get('btn')} misc={got.get('misc')}",
+            )
+        else:
+            dropped += 1
+        cmd(f"RELEASE {n}")
+    if dropped:
+        gap(
+            f"Bluepad32 generic parser: {dropped} of {n_buttons} buttons have no gamepad field",
+            f"{seen} mapped (HID buttons 1,2,4,5,7,8,11-15)",
+        )
+    # minimal: unsigned 0..32767 X/Y -> -512..511.
+    for axis, field in (("x", "lx"), ("y", "ly")):
+        if axis not in axes:
+            continue
+        expect(f"axis {axis} 32767 -> {field}=511", f"AXIS {axis} 32767", {field: 511})
+        expect(f"axis {axis} 0 -> {field}=-512", f"AXIS {axis} 0", {field: -512})
+        expect(f"axis {axis} 16384 -> {field}=0", f"AXIS {axis} 16384", {field: 0})
+        cmd(f"AXIS {axis} 0")
+
+
+if args.profile == "sinput":
+    run_sinput()
+else:
+    run_generic()
 
 cmd("RESET")
 print(f"\nGAPS ({len(gaps)}): " + "; ".join(gaps) if gaps else "\nGAPS: none")
