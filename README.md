@@ -188,6 +188,32 @@ git add firmware/golden/ && git commit
 | Feature / Output reports | `specials` profile — Feature Report both directions (`setFeatureBuffer` ↔ `HIDIOCGFEATURE`, `HIDIOCSFEATURE` ↔ `getFeatureBuffer`); Output Report host→device via `write(/dev/hidraw*)` → `getOutputBuffer` |
 | Latency / throughput | `--bench`, see below |
 
+### SInput (`sinput` profile, `tester/sinput_hil.py`)
+
+A separate, not-yet-pytest check of the `sinput` profile, with two Linux
+observers on one BLE connection: raw `/dev/hidraw` reports under
+`hid-generic`, and the [LeeNX/linux-hid-sinput](https://github.com/LeeNX/linux-hid-sinput)
+kernel driver (evdev, IMU and touchpad input devices, `power_supply`, force
+feedback). It switches drivers by unloading and loading the module while the
+board stays connected, then repeats that for `--cycles` rounds and checks
+`dmesg`. Driver features it finds missing are printed as `GAP` lines, not
+failures.
+
+Setup is root-only and done once: `sudo tester/bootstrap-sinput.sh --user <test user> <driver .deb>`,
+then `sudo hil-sinput-driver install <version>` as the test user. A run, with
+the board already flashed with an `sinput` bundle:
+
+```bash
+tester/rig-lock.sh -- env PYTHONPATH=host ~/.venvs/hil/bin/python tester/sinput_hil.py \
+  "$(python3 host/hil/config.py board.esp32c3.port)" "HILpad esp32c3" --cycles 5
+```
+
+Afterwards, reflash the board's usual bundle and remove its BLE bond (the
+`sinput` descriptor differs). First run, 2026-10-04 (esp32c3, library
+`65d5178`, driver 0.3.0, kernel `6.18.50+rpt-rpi-v8`): 44/44 checks pass;
+gaps: the IMU input device has no vendor/product, and SInput's paddle,
+touchpad-click, power and misc buttons have no evdev codes.
+
 ## Benchmarking (`--bench`)
 
 `test_latency.py` runs one sweep per flashed profile via `host/hil/bench.py`,
