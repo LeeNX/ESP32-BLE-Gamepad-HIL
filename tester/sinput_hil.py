@@ -8,6 +8,7 @@ with an `sinput` bundle and the driver installed (tester/bootstrap-sinput.sh + `
 
   sinput_hil.py <serial port> <name contains> [--cycles N]
 """
+
 import argparse
 import glob
 import os
@@ -41,7 +42,10 @@ def gap(name, detail=""):
 
 def check(name, ok, detail=""):
     results.append(ok)
-    print(("ok   " if ok else "FAIL ") + name + ("" if ok or not detail else f": {detail}"), flush=True)
+    print(
+        ("ok   " if ok else "FAIL ") + name + ("" if ok or not detail else f": {detail}"),
+        flush=True,
+    )
     return ok
 
 
@@ -66,7 +70,9 @@ def cmd(c, timeout=2.0):
 
 
 def driver_ctl(action):
-    p = subprocess.run(["sudo", "-n", "hil-sinput-driver", action], capture_output=True, text=True, timeout=60)
+    p = subprocess.run(
+        ["sudo", "-n", "hil-sinput-driver", action], capture_output=True, text=True, timeout=60
+    )
     return p.returncode == 0, (p.stdout + p.stderr).strip()
 
 
@@ -160,8 +166,33 @@ def s16(r, i):
 # ESP32-BLE-Gamepad's SInput packing (BleGamepad.cpp): button n -> SInput button bit. Not n-1: 5/6 are the
 # bumpers (bits 10/11), 7/8 the stick clicks (8/9), 13 capture (19). D-pad bits 4-7 come from hat 1, and
 # start/back/guide (16/17/18) from special buttons 0 (start), 1 (select) and 3 (home).
-LIB_BIT = {1: 0, 2: 1, 3: 2, 4: 3, 5: 10, 6: 11, 7: 8, 8: 9, 9: 12, 10: 13, 11: 14, 12: 15, 13: 19, 14: 20, 15: 21,
-           16: 22, 17: 23, 18: 24, 19: 25, 20: 26, 21: 27, 22: 28, 23: 29, 24: 30, 25: 31}
+LIB_BIT = {
+    1: 0,
+    2: 1,
+    3: 2,
+    4: 3,
+    5: 10,
+    6: 11,
+    7: 8,
+    8: 9,
+    9: 12,
+    10: 13,
+    11: 14,
+    12: 15,
+    13: 19,
+    14: 20,
+    15: 21,
+    16: 22,
+    17: 23,
+    18: 24,
+    19: 25,
+    20: 26,
+    21: 27,
+    22: 28,
+    23: 29,
+    24: 30,
+    25: 31,
+}
 SPECIAL_BIT = {0: 16, 1: 17, 3: 18}  # start, select -> back, home -> guide
 
 
@@ -184,8 +215,14 @@ def raw_checks(raw):
             bad.append(f"special {k}->{pressed or reply}")
         cmd(f"SPECIAL RELEASE {k}")
     check("raw: start/select/home -> bits 16/17/18", not bad, " ".join(bad))
-    for axis, idx, val in (("x", 7, 16000), ("y", 9, -16000), ("z", 11, 12345), ("rz", 13, -32767),
-                           ("rx", 15, 32767), ("ry", 17, 2000)):
+    for axis, idx, val in (
+        ("x", 7, 16000),
+        ("y", 9, -16000),
+        ("z", 11, 12345),
+        ("rz", 13, -32767),
+        ("rx", 15, 32767),
+        ("ry", 17, 2000),
+    ):
         r, reply = raw.state_after(f"AXIS {axis} {val}")
         got = s16(r, idx) if r else reply
         check(f"raw: axis {axis} {val} -> report[{idx}]", got == val, f"got {got}")
@@ -195,7 +232,11 @@ def raw_checks(raw):
     cmd("HAT 1 0")
     r, reply = raw.state_after("MOTION 100 -200 300 -4096 4096 8192")
     got = [s16(r, i) for i in (23, 25, 27, 29, 31, 33)] if r else reply
-    check("raw: motion -> accel 23/25/27, gyro 29/31/33", got == [-4096, 4096, 8192, 100, -200, 300], f"got {got}")
+    check(
+        "raw: motion -> accel 23/25/27, gyro 29/31/33",
+        got == [-4096, 4096, 8192, 100, -200, 300],
+        f"got {got}",
+    )
     check("raw: imu timestamp nonzero", bool(r and struct.unpack_from("<I", r, 19)[0]))
     r, reply = raw.state_after("TOUCH 0 1000 -1000 500")
     got = [s16(r, 35), s16(r, 37), struct.unpack_from("<H", r, 39)[0]] if r else reply
@@ -210,15 +251,25 @@ def raw_checks(raw):
     f = raw.last(0x02, wait=1.5)
     if check("raw: features response", bool(f and f[1] == 0x02), f[:4].hex() if f else "none"):
         print(f"      features: {f[:24].hex(' ')}")
-        check("raw: features caps0=0xff, caps1 touch+rgb", f[4] == 0xFF and (f[5] & 0x03) == 0x03,
-              f"caps0=0x{f[4]:02x} caps1=0x{f[5]:02x}")
-        check("raw: features poll/accel/gyro 5000/8/2000", struct.unpack_from("<HHH", f, 8) == (5000, 8, 2000),
-              f"{struct.unpack_from('<HHH', f, 8)}")
+        check(
+            "raw: features caps0=0xff, caps1 touch+rgb",
+            f[4] == 0xFF and (f[5] & 0x03) == 0x03,
+            f"caps0=0x{f[4]:02x} caps1=0x{f[5]:02x}",
+        )
+        check(
+            "raw: features poll/accel/gyro 5000/8/2000",
+            struct.unpack_from("<HHH", f, 8) == (5000, 8, 2000),
+            f"{struct.unpack_from('<HHH', f, 8)}",
+        )
     cmd("RUMBLE?"), cmd("RGB?"), cmd("PLED?")  # clear the received flags
     raw.send([0x01, 0x02, 200, 0, 40, 0])
     time.sleep(0.5)
     got = cmd("RUMBLE?")
-    check("raw: haptic -> device left=200 right=40", got is not None and "left=200 right=40" in got, got)
+    check(
+        "raw: haptic -> device left=200 right=40",
+        got is not None and "left=200 right=40" in got,
+        got,
+    )
     raw.send([0x04, 10, 20, 30])
     time.sleep(0.5)
     got = cmd("RGB?")
@@ -271,30 +322,61 @@ def settle(*devs, wait=0.4):
 
 
 # linux-hid-sinput's mapping (sinput_input.c), by SInput button bit. Bits it doesn't map are reported as gaps.
-DRIVER_KEY = {0: e.BTN_SOUTH, 1: e.BTN_EAST, 2: e.BTN_WEST, 3: e.BTN_NORTH, 4: e.BTN_DPAD_UP, 5: e.BTN_DPAD_DOWN,
-              6: e.BTN_DPAD_LEFT, 7: e.BTN_DPAD_RIGHT, 8: e.BTN_THUMBL, 9: e.BTN_THUMBR, 10: e.BTN_TL, 11: e.BTN_TR,
-              12: e.BTN_TL2, 13: e.BTN_TR2, 16: e.BTN_START, 17: e.BTN_SELECT, 18: e.BTN_MODE, 19: e.BTN_MISC}
-SINPUT_BIT_NAMES = {14: "L paddle 1", 15: "R paddle 1", 20: "L paddle 2", 21: "R paddle 2", 22: "touchpad 1 click",
-                    23: "touchpad 2 click", 24: "power"}
+DRIVER_KEY = {
+    0: e.BTN_SOUTH,
+    1: e.BTN_EAST,
+    2: e.BTN_WEST,
+    3: e.BTN_NORTH,
+    4: e.BTN_DPAD_UP,
+    5: e.BTN_DPAD_DOWN,
+    6: e.BTN_DPAD_LEFT,
+    7: e.BTN_DPAD_RIGHT,
+    8: e.BTN_THUMBL,
+    9: e.BTN_THUMBR,
+    10: e.BTN_TL,
+    11: e.BTN_TR,
+    12: e.BTN_TL2,
+    13: e.BTN_TR2,
+    16: e.BTN_START,
+    17: e.BTN_SELECT,
+    18: e.BTN_MODE,
+    19: e.BTN_MISC,
+}
+SINPUT_BIT_NAMES = {
+    14: "L paddle 1",
+    15: "R paddle 1",
+    20: "L paddle 2",
+    21: "R paddle 2",
+    22: "touchpad 1 click",
+    23: "touchpad 2 click",
+    24: "power",
+}
 
 
 def driver_checks(dev):
     pad, imu, touch = dev.get("pad"), dev.get("imu"), dev.get("touch")
-    check("driver: SInput Gamepad / IMU / touchpad input devices", bool(pad and imu and touch),
-          f"found {sorted(dev)}")
+    check(
+        "driver: SInput Gamepad / IMU / touchpad input devices",
+        bool(pad and imu and touch),
+        f"found {sorted(dev)}",
+    )
     if not pad:
         return
     for k, d in (("imu", imu), ("touch", touch)):
         if d and d.phys != pad.phys:
             check(f"driver: {k} shares the gamepad's phys", False, f"{d.phys} != {pad.phys}")
         if d and (d.info.vendor, d.info.product) != (pad.info.vendor, pad.info.product):
-            gap(f"driver: {k} input device has no vendor/product",
+            gap(
+                f"driver: {k} input device has no vendor/product",
                 f"{d.info.vendor:04x}:{d.info.product:04x} vs gamepad {pad.info.vendor:04x}:{pad.info.product:04x}; "
-                "hid-playstation copies the HID ids so userspace can pair sensors with the gamepad")
+                "hid-playstation copies the HID ids so userspace can pair sensors with the gamepad",
+            )
     cmd("RESET")
     bad, unmapped = [], []
     presses = [(f"PRESS {n}", f"RELEASE {n}", LIB_BIT[n]) for n in range(1, 26)]
-    presses += [(f"SPECIAL PRESS {k}", f"SPECIAL RELEASE {k}", bit) for k, bit in SPECIAL_BIT.items()]
+    presses += [
+        (f"SPECIAL PRESS {k}", f"SPECIAL RELEASE {k}", bit) for k, bit in SPECIAL_BIT.items()
+    ]
     presses += [(f"HAT 1 {h}", "HAT 1 0", bit) for h, bit in ((1, 4), (5, 5), (7, 6), (3, 7))]
     for press, release, bit in presses:
         cmd(press)
@@ -309,15 +391,24 @@ def driver_checks(dev):
             unmapped.append(SINPUT_BIT_NAMES.get(bit, f"misc bit {bit}"))
         cmd(release)
     settle(pad)
-    check(f"driver: {len(DRIVER_KEY)} mapped SInput buttons -> BTN_* (incl. d-pad, start/back/guide)", not bad,
-          " ".join(bad))
+    check(
+        f"driver: {len(DRIVER_KEY)} mapped SInput buttons -> BTN_* (incl. d-pad, start/back/guide)",
+        not bad,
+        " ".join(bad),
+    )
     if unmapped:
         gap("driver: SInput buttons with no evdev code", ", ".join(unmapped))
 
     # hil_runner axes: x/y left stick, z/rz right stick, rx/ry triggers. Driver: ABS_X/Y left, ABS_RX/RY right,
     # ABS_Z/RZ triggers.
-    for axis, code, val in (("x", e.ABS_X, 16000), ("y", e.ABS_Y, -16000), ("z", e.ABS_RX, 12345),
-                            ("rz", e.ABS_RY, -32767), ("rx", e.ABS_Z, 32767), ("ry", e.ABS_RZ, 2000)):
+    for axis, code, val in (
+        ("x", e.ABS_X, 16000),
+        ("y", e.ABS_Y, -16000),
+        ("z", e.ABS_RX, 12345),
+        ("rz", e.ABS_RY, -32767),
+        ("rx", e.ABS_Z, 32767),
+        ("ry", e.ABS_RZ, 2000),
+    ):
         cmd(f"AXIS {axis} {val}")
         settle(pad)
         got = pad.absinfo(code).value
@@ -326,13 +417,27 @@ def driver_checks(dev):
 
     if imu:
         props = imu.input_props()
-        check("driver: IMU has INPUT_PROP_ACCELEROMETER", e.INPUT_PROP_ACCELEROMETER in props, f"{props}")
+        check(
+            "driver: IMU has INPUT_PROP_ACCELEROMETER",
+            e.INPUT_PROP_ACCELEROMETER in props,
+            f"{props}",
+        )
         cmd("MOTION 100 -200 300 -4096 4096 8192")
         settle(imu)
-        got = [imu.absinfo(c).value for c in (e.ABS_X, e.ABS_Y, e.ABS_Z, e.ABS_RX, e.ABS_RY, e.ABS_RZ)]
-        check("driver: IMU accel/gyro values", got == [-4096, 4096, 8192, 100, -200, 300], f"got {got}")
+        got = [
+            imu.absinfo(c).value for c in (e.ABS_X, e.ABS_Y, e.ABS_Z, e.ABS_RX, e.ABS_RY, e.ABS_RZ)
+        ]
+        check(
+            "driver: IMU accel/gyro values",
+            got == [-4096, 4096, 8192, 100, -200, 300],
+            f"got {got}",
+        )
         res = (imu.absinfo(e.ABS_X).resolution, imu.absinfo(e.ABS_RX).resolution)
-        check("driver: IMU resolution 4096/g (8 g), 16/dps (2000 dps)", res == (4096, 16), f"got {res}")
+        check(
+            "driver: IMU resolution 4096/g (8 g), 16/dps (2000 dps)",
+            res == (4096, 16),
+            f"got {res}",
+        )
         cmd("MOTION 0 0 0 0 0 0")
 
     if touch:
@@ -352,7 +457,11 @@ def driver_checks(dev):
                 slot = ev.value
             elif ev.type == e.EV_ABS and slot == 0:
                 seen[ev.code] = ev.value
-        got = (seen.get(e.ABS_MT_POSITION_X), seen.get(e.ABS_MT_POSITION_Y), seen.get(e.ABS_MT_PRESSURE))
+        got = (
+            seen.get(e.ABS_MT_POSITION_X),
+            seen.get(e.ABS_MT_POSITION_Y),
+            seen.get(e.ABS_MT_PRESSURE),
+        )
         check("driver: touchpad slot 0 x/y/pressure", got == (1000, -1000, 500), f"got {got}")
         cmd("TOUCH 0 0 0 0")
 
@@ -365,18 +474,32 @@ def driver_checks(dev):
     # Force feedback: strong -> left, weak -> right, 16-bit -> 8-bit (same as SDL and Bluepad32).
     cmd("RUMBLE?")
     rumble = evdev.ff.Rumble(strong_magnitude=0xC800, weak_magnitude=0x2800)
-    effect = evdev.ff.Effect(e.FF_RUMBLE, -1, 0, evdev.ff.Trigger(0, 0), evdev.ff.Replay(1000, 0),
-                             evdev.ff.EffectType(ff_rumble_effect=rumble))
+    effect = evdev.ff.Effect(
+        e.FF_RUMBLE,
+        -1,
+        0,
+        evdev.ff.Trigger(0, 0),
+        evdev.ff.Replay(1000, 0),
+        evdev.ff.EffectType(ff_rumble_effect=rumble),
+    )
     try:
         eid = pad.upload_effect(effect)
         pad.write(e.EV_FF, eid, 1)
         time.sleep(0.5)
         got = cmd("RUMBLE?")
-        check("driver: FF rumble -> device left=200 right=40", got is not None and "left=200 right=40" in got, got)
+        check(
+            "driver: FF rumble -> device left=200 right=40",
+            got is not None and "left=200 right=40" in got,
+            got,
+        )
         pad.write(e.EV_FF, eid, 0)
         time.sleep(0.5)
         got = cmd("RUMBLE?")
-        check("driver: FF stop -> device left=0 right=0", got is not None and "left=0 right=0" in got, got)
+        check(
+            "driver: FF stop -> device left=0 right=0",
+            got is not None and "left=0 right=0" in got,
+            got,
+        )
         pad.erase_effect(eid)
     except OSError as ex:
         check("driver: FF rumble", False, repr(ex))
@@ -398,10 +521,14 @@ with bt.BtCtl() as btctl:
 check("BLE paired + services resolved", bool(mac), mac)
 
 section("A: hid-generic (raw reports)")
-print(f"      after pairing: bound to {bound_driver()} (a new device autoloads sinput via its modalias)")
+print(
+    f"      after pairing: bound to {bound_driver()} (a new device autoloads sinput via its modalias)"
+)
 ok, out = driver_ctl("unload")
 check("hil-sinput-driver unload", ok, out)
-check("hid-generic takes the device back (no reconnect)", wait_driver("hid-generic"), bound_driver())
+check(
+    "hid-generic takes the device back (no reconnect)", wait_driver("hid-generic"), bound_driver()
+)
 check("BLE link stayed up", bt.is_connected(mac))
 raw = Raw()
 print(f"      {raw.node}")
@@ -411,7 +538,9 @@ raw.close()
 section("B: load sinput while connected")
 ok, out = driver_ctl("load")
 check("hil-sinput-driver load", ok, out)
-check("sinput takes the connected device over (no reconnect)", wait_driver("sinput"), bound_driver())
+check(
+    "sinput takes the connected device over (no reconnect)", wait_driver("sinput"), bound_driver()
+)
 check("BLE link stayed up", bt.is_connected(mac))
 dev = sinput_inputs()
 driver_checks(dev)
@@ -442,20 +571,39 @@ for i in range(args.cycles):
             cmd("RELEASE 1")
         for d in dev.values():
             d.close()
-    good = ok1 and gen and bool(r and r[3] & 1) and ok2 and sin and keys == [e.BTN_SOUTH] and bt.is_connected(mac)
+    good = (
+        ok1
+        and gen
+        and bool(r and r[3] & 1)
+        and ok2
+        and sin
+        and keys == [e.BTN_SOUTH]
+        and bt.is_connected(mac)
+    )
     if not good:
-        cycle_bad.append(f"#{i + 1}: unload={ok1} generic={gen} raw={bool(r and r[3] & 1)} "
-                         f"load={ok2} sinput={sin} keys={keys} link={bt.is_connected(mac)}")
-check(f"{args.cycles} cycles: driver switches both ways, input works in each, link stays up", not cycle_bad,
-      "; ".join(cycle_bad))
+        cycle_bad.append(
+            f"#{i + 1}: unload={ok1} generic={gen} raw={bool(r and r[3] & 1)} "
+            f"load={ok2} sinput={sin} keys={keys} link={bt.is_connected(mac)}"
+        )
+check(
+    f"{args.cycles} cycles: driver switches both ways, input works in each, link stays up",
+    not cycle_bad,
+    "; ".join(cycle_bad),
+)
 
 new = dmesg_lines()[dmesg_start:]
-alarms = [ln for ln in new if re.search(r"WARNING|BUG|Oops|refcount|use-after-free|leak|Call trace|kernel BUG", ln)]
+alarms = [
+    ln
+    for ln in new
+    if re.search(r"WARNING|BUG|Oops|refcount|use-after-free|leak|Call trace|kernel BUG", ln)
+]
 check("dmesg: no warnings/oopses during the run", not alarms, " | ".join(alarms[:5]))
 print(f"      dmesg: {len(new)} new lines, {sum('sinput' in ln for ln in new)} from sinput")
 
 cmd("RESET")
 print(f"\nMAC {mac}")
 print(f"GAPS ({len(gaps)}): " + "; ".join(gaps) if gaps else "GAPS: none")
-print("PASSED" if all(results) else "FAILED", f"({results.count(False)} failures of {len(results)})")
+print(
+    "PASSED" if all(results) else "FAILED", f"({results.count(False)} failures of {len(results)})"
+)
 sys.exit(0 if all(results) else 1)
