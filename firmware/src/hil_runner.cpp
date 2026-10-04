@@ -132,7 +132,7 @@ static void applyHat(int idx, signed char dir)
 }
 
 // Split "PART0 PART1 .. PARTn" -> up to HIL_MAX_TOKENS tokens. Returns count.
-static const int HIL_MAX_TOKENS = 6;
+static const int HIL_MAX_TOKENS = 8;  // MOTION takes 7
 static int tokenize(const String &s, String out[HIL_MAX_TOKENS])
 {
     int n = 0, start = 0;
@@ -223,9 +223,11 @@ static void handle(const String &cmd)
                       "axesMin=%d axesMax=%d vid=%04X pid=%04X ver=%04X "
                       "reportId=%d feat=%d out=%d profile=%s libsha=%s\n",
                       HIL_BUTTON_COUNT, HIL_HAT_COUNT, axes,
-                      HIL_SPECIALS ? "start,select,menu,home,back,volinc,voldec,volmute" : "none",
+                      HIL_SINPUT     ? "start,select,home"
+                      : HIL_SPECIALS ? "start,select,menu,home,back,volinc,voldec,volmute"
+                                     : "none",
                       (int)bleGamepadConfig.getAxesMin(), (int)bleGamepadConfig.getAxesMax(),
-                      HIL_VID, HIL_PID, HIL_GUID_VERSION,
+                      bleGamepadConfig.getVid(), bleGamepadConfig.getPid(), bleGamepadConfig.getGuidVersion(),
                       bleGamepadConfig.getHidReportId(),
                       HIL_FEATURE_REPORT_LEN, HIL_OUTPUT_REPORT_LEN, HIL_PROFILE_NAME, HIL_LIB_SHA);
         return;
@@ -507,6 +509,64 @@ static void handle(const String &cmd)
         return;
     }
 
+    // SInput-only commands. Report what the host sent (rumble, RGB, player LED)
+    // and drive the report fields the generic profiles don't have (IMU, touch).
+    if (c == "MOTION" || c == "TOUCH" || c == "RUMBLE?" || c == "RGB?" || c == "PLED?")
+    {
+#if !HIL_SINPUT
+        reply("ERR disabled");
+        return;
+#else
+        if (c == "MOTION")   // MOTION <gx> <gy> <gz> <ax> <ay> <az>, raw int16 counts
+        {
+            if (n < 7) { reply("ERR args"); return; }
+            long v[6];
+            for (int i = 0; i < 6; i++)
+            {
+                v[i] = t[i + 1].toInt();
+                if (v[i] < -32768 || v[i] > 32767) { reply("ERR range"); return; }
+            }
+            bleGamepad.setMotionControls(v[0], v[1], v[2], v[3], v[4], v[5]);
+            bleGamepad.sendReport();
+            reply("OK");
+            return;
+        }
+        if (c == "TOUCH")    // TOUCH <finger 0|1> <x> <y> <pressure>, pressure 0 = lifted
+        {
+            if (n < 5) { reply("ERR args"); return; }
+            long f = t[1].toInt(), x = t[2].toInt(), y = t[3].toInt(), p = t[4].toInt();
+            if (f < 0 || f > 1 || x < -32768 || x > 32767 || y < -32768 || y > 32767 || p < 0 || p > 65535)
+            {
+                reply("ERR range");
+                return;
+            }
+            bleGamepad.setTouchpad((uint8_t)f, (int16_t)x, (int16_t)y, (uint16_t)p);
+            bleGamepad.sendReport();
+            reply("OK");
+            return;
+        }
+        // The *Received() getters clear their flag, so recv=1 means "new since the last query".
+        if (c == "RUMBLE?")
+        {
+            bool recv = bleGamepad.isRumbleReceived();
+            Serial.printf("RUMBLE recv=%d left=%u right=%u\n", recv ? 1 : 0,
+                          bleGamepad.getRumbleLeftAmplitude(), bleGamepad.getRumbleRightAmplitude());
+            return;
+        }
+        if (c == "RGB?")
+        {
+            bool recv = bleGamepad.isRgbReceived();
+            Serial.printf("RGB recv=%d r=%u g=%u b=%u\n", recv ? 1 : 0,
+                          bleGamepad.getRgbRed(), bleGamepad.getRgbGreen(), bleGamepad.getRgbBlue());
+            return;
+        }
+        // PLED?
+        bool recv = bleGamepad.isPlayerLedReceived();
+        Serial.printf("PLED recv=%d %u\n", recv ? 1 : 0, bleGamepad.getPlayerLedIndex());
+        return;
+#endif
+    }
+
     if (c == "RESET")
     {
         bleGamepad.resetButtons();
@@ -515,6 +575,11 @@ static void handle(const String &cmd)
 #endif
         for (int i = 0; i < 8; i++) applyAxis(i, 0);
         for (int i = 1; i <= HIL_HAT_COUNT; i++) applyHat(i, 0);
+#if HIL_SINPUT
+        bleGamepad.setMotionControls(0, 0, 0, 0, 0, 0);
+        bleGamepad.setTouchpad(0, 0, 0, 0);
+        bleGamepad.setTouchpad(1, 0, 0, 0);
+#endif
         bleGamepad.sendReport();
         reply("OK");
         return;

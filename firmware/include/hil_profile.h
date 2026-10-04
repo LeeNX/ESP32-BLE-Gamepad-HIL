@@ -48,6 +48,7 @@
 #define HIL_PROFILE_MINIMAL 3
 #define HIL_PROFILE_MAXBTN 4
 #define HIL_PROFILE_LOCAL 5
+#define HIL_PROFILE_SINPUT 6
 
 #ifndef HIL_PROFILE
 #define HIL_PROFILE HIL_PROFILE_DEFAULT
@@ -173,6 +174,29 @@
 #define HIL_AX_RZ 0
 #define HIL_AX_S1 0
 #define HIL_AX_S2 0
+#elif HIL_PROFILE == HIL_PROFILE_SINPUT
+// SInput mode (GamepadMode::SInput): the fixed SInput report layout and the
+// SInput VID/PID 0x2E8A:0x10C6, which is how SDL and Bluepad32 recognise it.
+// Not a descriptor-layout profile like the others: the mode preset fixes 25
+// buttons, 1 hat, both sticks (x/y left, z/rz right) and both triggers
+// (rx/ry), plus start/select/home. IMU and RGB are switched on too, so the
+// MOTION / RUMBLE? / RGB? / PLED? / TOUCH commands have something to drive.
+// Meant for an SInput-aware observer (SDL3 with the SInput hint, Bluepad32).
+#define HIL_PROFILE_NAME "sinput"
+#define HIL_SINPUT 1
+#define HIL_BUTTON_COUNT 25
+#define HIL_HAT_COUNT 1
+#define HIL_AXES_MIN ((int16_t)0x8001) // -32767
+#define HIL_AXES_MAX 0x7FFF
+#define HIL_SPECIALS 1
+#define HIL_AX_X 1
+#define HIL_AX_Y 1
+#define HIL_AX_Z 1
+#define HIL_AX_RX 1
+#define HIL_AX_RY 1
+#define HIL_AX_RZ 1
+#define HIL_AX_S1 0
+#define HIL_AX_S2 0
 #elif HIL_PROFILE == HIL_PROFILE_LOCAL
 // Ad-hoc profile for local developer smoke-testing -- deliberately NOT in the
 // CI build matrix (hil_config.toml [builder] profiles) or any release. A small
@@ -198,6 +222,9 @@
 #error "unknown HIL_PROFILE"
 #endif
 
+#ifndef HIL_SINPUT
+#define HIL_SINPUT 0
+#endif
 #ifndef HIL_OUTPUT_REPORT_LEN
 #define HIL_OUTPUT_REPORT_LEN 0
 #endif
@@ -247,6 +274,13 @@ static inline bool hilAxisEnabled(int idx)
 static inline void hilApplyProfile(BleGamepadConfiguration &cfg)
 {
     cfg.setAutoReport(false);
+#if HIL_SINPUT
+    // The mode preset sets VID/PID, buttons, hat, axes, rumble and touchpad;
+    // don't override them with the generic profile settings below.
+    cfg.setGamepadMode(GamepadMode::SInput);
+    cfg.setEnableSInputIMU(true);
+    cfg.setEnableSInputRGB(true);
+#else
     cfg.setControllerType(HIL_CONTROLLER_TYPE);
     cfg.setButtonCount(HIL_BUTTON_COUNT);
     cfg.setHatSwitchCount(HIL_HAT_COUNT);
@@ -271,6 +305,7 @@ static inline void hilApplyProfile(BleGamepadConfiguration &cfg)
     cfg.setVid(HIL_VID);
     cfg.setPid(HIL_PID);
     cfg.setGuidVersion(HIL_GUID_VERSION);
+#endif
     cfg.setModelNumber(HIL_DIS_MODEL);
     cfg.setSerialNumber(HIL_DIS_SERIAL);
     cfg.setHardwareRevision(HIL_DIS_HW);

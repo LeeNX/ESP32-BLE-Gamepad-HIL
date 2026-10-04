@@ -59,7 +59,7 @@ fi
 profile_suffix() { case "$1" in
   default) echo "" ;; specials) echo "-specials" ;;
   minimal) echo "-minimal" ;; maxbtn) echo "-maxbtn" ;;
-  local) echo "-local" ;;
+  local) echo "-local" ;; sinput) echo "-sinput" ;;
   *) echo "unknown profile: $1" >&2; exit 2 ;; esac; }
 board_chip() { case "$1" in
   esp32dev) echo esp32 ;; esp32c3) echo esp32c3 ;; esp32s3) echo esp32s3 ;;
