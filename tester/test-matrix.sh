@@ -81,7 +81,11 @@ for obs in "${ROTATIONS[@]}"; do
       continue
     fi
     echo "== $obs/$p: flashing $bz and $bp"
-    flash "$bz" "$bz_bundle" & flash "$bp" "$bp_bundle" & wait
+    # One at a time: on the Pi 3B+ every USB port and the Ethernet share one controller, and parallel flashing
+    # plus BLE traffic has wedged it hard enough to need a power cycle (2026-09-11, 2026-10-04). test-all.sh
+    # serializes flash+pair for the same reason; only the test lanes below run in parallel.
+    flash "$bz" "$bz_bundle"
+    flash "$bp" "$bp_bundle"
     sleep 3
     tag="obs-$obs-$p"
     (
