@@ -62,6 +62,7 @@ push to the tester, run, pull results). One box can be both roles
 | `specials` | 16 btn, X/Y axis (**−32767..32767**), 8 special buttons, **Output + Feature reports** | the fragile, least-exercised surface in one flash: special usages, signed axes (`test_ranges` negative rail), and the O/F report plumbing (`setEnable{Output,Feature}Report`) | every push |
 | `maxbtn` | 128 btn, no hats/axes | the largest layout the HID transport currently supports — the library's 128-button ceiling | every push |
 | `minimal` | 2 btn, X/Y axis | smallest input report — the latency-curve low-end anchor, and nothing else depends on it | weekly + release |
+| `sinput` | SInput mode: 25 btn, 1 hat, sticks x/y + z/rz, triggers rx/ry, start/select/home, IMU, RGB, rumble, touchpad; VID/PID `2E8A:10C6` | for SInput-aware observers (SDL3 with the SInput hint, Bluepad32). Drives the SInput-only commands (`MOTION`, `TOUCH`, `RUMBLE?`, `RGB?`, `PLED?`). **Needs a library with `GamepadMode::SInput`** (upstream `master`; the rig's pinned checkout is older). BlueZ/evdev tests don't know SInput yet | not yet |
 | `local` | 4 btn, 1 hat, 2 axis | **ad-hoc, not built by CI** — for local developer smoke tests ([`desktop/`](desktop/)). Advertises as `HILdev <board>`, not `HILpad <board>`, so a dev board doesn't clash with the rig | never |
 
 Four CI profiles, each folding in more than one concern so a matrix run stays
@@ -271,7 +272,10 @@ banner and any debug lines are skipped by the host.
 | `FEATURE?` | `FEATURE recv=0\|1 <hex>` — `isFeatureReceived()` + `getFeatureBuffer()` |
 | `FEATURE SET <hex>` | `OK` — `setFeatureBuffer()` |
 | `OUTPUT?` | `OUTPUT recv=0\|1 <hex>` — `isOutputReceived()` + `getOutputBuffer()` |
-| `RESET` | `OK` — zero buttons, axes, hats |
+| `RESET` | `OK` — zero buttons, axes, hats (and IMU + touch on `sinput`) |
+| `MOTION <gx> <gy> <gz> <ax> <ay> <az>` | `OK` / `ERR range` / `ERR disabled` — `sinput` only: raw int16 gyro + accel counts into the SInput report's IMU block |
+| `TOUCH <0\|1> <x> <y> <pressure>` | `OK` / `ERR range` / `ERR disabled` — `sinput` only: touchpad finger; pressure 0 = lifted |
+| `RUMBLE?` / `RGB?` / `PLED?` | `RUMBLE recv=0\|1 left=<n> right=<n>` / `RGB recv=0\|1 r= g= b=` / `PLED recv=0\|1 <n>` / `ERR disabled` — `sinput` only: what the host last sent (haptic type 2 amplitudes, RGB, player LED index). `recv=1` means new since the last query |
 | `TEMP?` | `TEMP <celsius>` — on-die temp sensor via `temperatureRead()`, all 3 boards (the classic esp32 goes through an undocumented ROM function and reads uncalibrated/high — trend indicator, not a precise value) |
 | `LED ON\|OFF` | `OK` / `ERR unsupported` — explicit override of the activity LED; `ERR unsupported` until `HIL_LED_PIN` is wired + set for that board (see "Rig hardware TODO") |
 
