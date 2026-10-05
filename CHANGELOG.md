@@ -77,6 +77,17 @@ What a bump means:
   CI flashes only what differs. Verdict lines carry each lane's `VERSIONS`
   (kernel, `sinput` driver + package, firmware/library, BlueZ, Bluepad32 build),
   printed by `sinput_hil.py` and `bp32_hil.py`.
+- **`tester/test-matrix.sh` keeps bonds between hil_runner profiles**: a board's
+  settings region is wiped only when it changes firmware family (hil_runner <->
+  Bluepad32 observer) or on its first flash of the run. Wiping on every profile
+  change dropped the gamepad's bond while the observer kept its copy, so the
+  observer reconnected with a stale key and the gamepad never came up.
+- **`tester/bp32_hil.py --bp32-reset-port`**: resets the observer through its
+  native USB-Serial/JTAG when its console bridge has no RTS -> EN (the esp32c3's
+  FTDI is TX/RX/GND only). Without a reset, a gamepad that kept its bond
+  reconnected to the still-running observer before the lane listened, and its
+  `HIL ready` was missed. `test-matrix.sh` passes the observer's `flash_port`
+  when one is configured.
 - **`CONFIG?`** lists the specials a profile actually enables and adds a
   `sim=` field; the special-button tests sweep only the listed specials.
 - **Flash the ESP32-S3 DevKitC-1 through its UART bridge**: the config

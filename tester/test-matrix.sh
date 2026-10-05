@@ -16,8 +16,9 @@
 #
 # Flash wear: a board is only written when it doesn't already hold the bundle (tester/flash.py verifies first),
 # and boards are left on whatever they ran last unless --restore -- the next run (or CI's suite) flashes only
-# what differs. When a board does get written, its settings region (NVS: bonds) is wiped first, since the two
-# firmwares lay it out differently.
+# what differs. A board's settings region (NVS: bonds) is wiped only when it changes firmware family (hil_runner
+# <-> Bluepad32 observer, whose layouts differ) or on its first flash of the run -- not between hil_runner profiles,
+# where it would drop a gamepad's bond the observer still holds.
 #
 # USB safety (the Pi 3B+'s one USB controller, shared with Ethernet, has wedged under parallel flashing):
 # flashing is serialized (tester/flash.py's flash lock); the two lanes run one after the other by default
@@ -66,10 +67,17 @@ bundle() {  # <board> <profile>
 }
 # Boards flashed over native USB (USB-Serial/JTAG) re-enumerate after the reset: give that time to settle (and
 # any dwc_otg warnings it causes time to land) before the next health check counts them.
-# flash.py skips a board that already holds the bundle; --wipe-settings clears NVS/otadata only when it writes.
-flash() {
-  local out
-  out=$("$PY" tester/flash.py "$2" --port "$(flash_port "$1")" --wipe-settings 2>&1 | grep '^flash:' | tail -1)
+# flash.py skips a board that already holds the bundle. The settings region (NVS: BLE bonds) is wiped only when
+# a board changes firmware family (hil_runner <-> Bluepad32 observer, whose layouts differ) or on its first flash of
+# the run (state unknown) -- not between hil_runner profiles: wiping a gamepad's bond while the observer keeps its
+# copy leaves the observer reconnecting with a stale key, and the gamepad never comes up.
+declare -A FAMILY=()
+flash() {  # <board> <bundle>
+  local out fam wipe=()
+  fam=$([[ $2 == *-bp32obs-* ]] && echo observer || echo runner)
+  [[ ${FAMILY[$1]:-} != "$fam" ]] && wipe=(--wipe-settings)
+  FAMILY[$1]=$fam
+  out=$("$PY" tester/flash.py "$2" --port "$(flash_port "$1")" "${wipe[@]}" 2>&1 | grep '^flash:' | tail -1)
   echo "$out"
   [[ $out == *"not rewritten"* ]] && return 0
   [[ -n $(cfg "board.$1.flash_port") ]] && sleep 5
@@ -109,6 +117,9 @@ for obs in "${ROTATIONS[@]}"; do
   i=0; for b in "${BOARDS[@]}"; do [[ $b == "$obs" ]] && break; i=$((i + 1)); done
   bz=${BOARDS[$(((i + 1) % 3))]}; bp=${BOARDS[$(((i + 2) % 3))]}
   obs_bundle=$(bundle "$obs" bp32obs) || { echo "no observer bundle for $obs" >&2; fail=1; continue; }
+  # bp32_hil.py resets the observer at the start of each lane; through its native USB when it has one, since a
+  # console bridge may lack RTS -> EN.
+  obs_rst=$(cfg "board.$obs.flash_port")
   echo; echo "==== rotation: observer=$obs  BlueZ<-$bz  Bluepad32<-$bp"
   unbond
   flash "$obs" "$obs_bundle"
@@ -142,6 +153,7 @@ for obs in "${ROTATIONS[@]}"; do
     bz_pid=$!
     if [[ $LANES == serial ]]; then wait $bz_pid; bz_rc=$?; fi
     PYTHONPATH=host timeout 900 "$PY" tester/bp32_hil.py --profile "$p" "$(port "$bp")" "$(port "$obs")" \
+      ${obs_rst:+--bp32-reset-port "$obs_rst"} \
       > "$OUT/$tag-bp32-$bp.log" 2>&1 &
     bp_pid=$!
     if [[ $LANES != serial ]]; then wait $bz_pid; bz_rc=$?; fi
