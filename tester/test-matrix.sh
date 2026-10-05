@@ -73,7 +73,10 @@ health() { PYTHONPATH=host python3 -m hil.usbhealth "${@:-check}"; }
 # Stop at the first unhealthy check: more flashing on a wedged bus only makes it worse.
 guard() {  # <where>
   local out
-  out=$(health check) && return 0
+  # Re-baseline after every passing check, so a guard counts the dwc_otg warnings of *this* step: a wedge comes
+  # as one burst (dozens), while each ESP32-S3 flash leaves ~2 even through its UART bridge, which would add up
+  # past the threshold over a run.
+  out=$(health check) && { health baseline >/dev/null; return 0; }
   echo "ABORT at $1: $out -- reboot the host, then restore the boards" | tee -a "$VERDICTS"
   printf '%s\n' "${summary[@]}"
   exit 3
