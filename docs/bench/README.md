@@ -14,15 +14,13 @@ cp results/bench-table.md results/*.svg <this repo>/docs/bench/
 
 ## This snapshot
 
-- **2026-09-18** — ESP32-BLE-Gamepad `9282be1` (the `HIL_LIB_REF` fork branch
-  pending merge to `master` — see [RELEASE.md](../../RELEASE.md)), all 3
-  boards × the current 4 profiles (`default specials minimal maxbtn`) on the
-  reference rig (Raspberry Pi 3B+, kernel 6.18.50, BlueZ 5.82), from the
-  full-matrix + `--bench` CI run for the v0.2.6 release
-  ([run 35344716184](https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/actions/runs/35344716184)).
-  Replaces the 2026-09-05 snapshot, which still had the pre-profile-fold
-  6-profile set (`minimal reports maxbtn specials default signed-axes`, PR
-  #21 folded these to 4).
+- **2026-10-05** — ESP32-BLE-Gamepad `80a0d7c` (0.8.0, library `master`), all 3
+  boards × the 5 suite profiles (`default specials minimal maxbtn maxfeat`) on
+  the reference rig (Raspberry Pi 3B+, kernel 6.18.50, BlueZ 5.82), from the
+  full-matrix + `--bench` CI run for the v0.3.0 release
+  ([run 37295281897](https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/actions/runs/37295281897)).
+  Replaces the 2026-09-18 v0.2.6 snapshot (library `9282be1`). `sinput` isn't
+  in the suite, so it has no row: the observer matrix covers it.
 
 | | |
 |---|---|
@@ -30,27 +28,24 @@ cp results/bench-table.md results/*.svg <this repo>/docs/bench/
 | [`polling-rate.svg`](polling-rate.svg) | clean paced rate vs the connection-interval ceiling, per profile/board |
 | [`latency-distribution.svg`](latency-distribution.svg) | p50 / p90 / p99 spread per profile/board |
 
-**Reading it:** button e2e p50 is a flat **~18.6 ms** on every board and profile
-— latency does not track report size (3–28 B) or chip. p99 is dominated by
-connection-interval jitter (one 48.75 ms interval) and swings run to run
-depending on where the sample lands; treat p50 as the signal. Zero dropped
-events across 200 paced presses per profile. The connection interval is
-48.75 ms on every profile: the library does not request a fast one.
+**Reading it:** the connection interval moved since v0.2.6. It was 48.75 ms on
+every board then; now it is **8.75 ms** on the esp32c3 and esp32s3 and
+**43.75 ms** on the esp32dev. The rig itself didn't change (same kernel and
+BlueZ), so this follows the library update (`9282be1` → `80a0d7c`). Button e2e
+p50 follows suit: **~4.9 ms** on the esp32s3 (was ~18.6 ms everywhere), **~13.6 ms**
+on the esp32dev, and **~17.8 ms** on the esp32c3. As before, latency doesn't track
+report size (5–28 B) within a board. p99 is dominated by connection-interval
+jitter, so treat p50 as the signal. Zero dropped events in every row.
 
-**Contention in this snapshot:** every row shows `links: 3` — all three
-boards stayed bonded/connected to the adapter for the whole run (this
-full-matrix release validation runs the functional `--by-board` matrix
-immediately before `--bench` in the same CI job, and nothing disconnects the
-other two boards in between), not the solo `links: 1` conditions this
-snapshot is meant to represent. `esp32c3`'s clean paced rate is the most
-visibly affected — **62–63 Hz**, roughly half the ~130 Hz in the 2026-09-05
-solo snapshot; `esp32dev`/`esp32s3` are closer to normal (88–131 Hz) but
-still somewhat below their old baselines on some profiles. Button e2e p50
-itself is unaffected by this (still flat ~18.6 ms) — `clean_rate` is the
-metric contention degrades, per the `links` column's own purpose (see the
-table's footnote). Treat the `clean Hz` column in this snapshot with that
-caveat; a true solo re-measurement would need a `--bench`-only run starting
-from an unbonded adapter, not one immediately following `--by-board`.
+**Contention differs per board in this snapshot**: the `links` column is **3**
+for the esp32c3, **2** for the esp32dev and **1** for the esp32s3. The boards bench
+in that order after the functional `--by-board` matrix, with one fewer link
+live each time: the first benches with all three up, the last alone. That
+confounds the comparison between boards: the esp32c3 and esp32s3
+negotiate the same 8.75 ms interval, yet the esp32c3 (3 links) shows ~17.8 ms p50
+and ~63 Hz clean rate against the esp32s3's ~4.9 ms and 258–276 Hz (1 link).
+Compare a board with itself across snapshots, not boards with each other; a
+like-for-like comparison needs a `--bench`-only run from an unbonded adapter.
 
 **C3 / S3 `--bench` reliability:** the cheap external USB-UART bridges drop a
 byte now and then under the burst sweep — ~1 run in 5 needed a retry (all
