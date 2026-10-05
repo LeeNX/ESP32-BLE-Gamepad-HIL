@@ -26,10 +26,11 @@ What a bump means:
   `bundles/matrix/`, which `test-all.sh` skips.
 - **`tester/sinput_hil.py`**: the `sinput` profile against `hid-generic`
   (raw hidraw) and the [linux-hid-sinput](https://github.com/LeeNX/linux-hid-sinput)
-  kernel driver, switching drivers by module load/unload on a live connection;
-  `tester/bootstrap-sinput.sh` (root) sets up the hidraw rule, driver staging
-  dir, `hil-sinput-driver` wrapper and sudoers rule (also in the `leenx-ansible`
-  `hil` role, `hil_sinput_*`).
+  kernel driver, switching drivers by module load/unload on a live connection
+  (it waits for the HID device to bind first: on the esp32dev the device lands
+  after pairing returns); `tester/bootstrap-sinput.sh` (root) sets up the
+  hidraw rule, driver staging dir, `hil-sinput-driver` wrapper and sudoers rule
+  (also in the `leenx-ansible` `hil` role, `hil_sinput_*`).
 - **`maxfeat` profile**: max *features* rather than max buttons -- 16 buttons,
   1 hat, x/y/z/rx/ry/rz, accelerator + brake, home + back: what Bluepad32 maps
   from a generic gamepad. Golden descriptor `firmware/golden/maxfeat.hiddesc`.
@@ -42,14 +43,21 @@ What a bump means:
   `tester/bp32_hil.py` checks what Bluepad32 parses (`sinput`, `minimal`,
   `maxbtn`, `maxfeat`; its expectations follow the parser Bluepad32 picks --
   Android for an unrecognised BLE gamepad -- and report unmapped inputs as GAPs).
+  It holds the observer in reset (RTS -> EN) until it is listening; for a board
+  whose console bridge has no RTS -> EN (the esp32c3's FTDI is TX/RX/GND only),
+  `--bp32-reset-port` resets it through its native USB-Serial/JTAG instead.
 - **`tester/test-matrix.sh`**: the observer matrix -- each rotation makes one
   board a Bluepad32 observer and the other two gamepads (one observed by BlueZ,
   one by Bluepad32), for `minimal`/`maxfeat`/`sinput`; serial flashing, USB
-  health guards per step, `--lanes serial|parallel`, `--max-cells`,
-  `--restore` (every board back on its `default` bundle).
-  `tester/bp32_swap.sh` is the one-off version.
+  health guards per step, `--lanes serial|parallel`, `--max-cells`. Boards stay
+  on what they ran last (`--restore` puts every board back on `default`), so
+  the next run or CI flashes only what differs; a board's settings region
+  (bonds) is wiped only when it changes firmware family (hil_runner <->
+  observer), so the observer's copy of a gamepad's bond stays valid across
+  profiles; a failed flash stops the run. Verdict lines carry each lane's
+  `VERSIONS` (kernel, `sinput` driver + package, firmware/library, BlueZ,
+  Bluepad32 build). `tester/bp32_swap.sh` is the one-off version.
 - `builder/make_bundle.py`: `--app-offset` and `--extra-image OFFSET:FILE`.
-
 - **Rig-wide flash lock** in `tester/flash.py` (`$XDG_CACHE_HOME/esp32-hil/flash.lock`,
   or `$HIL_FLASH_LOCK`): flashes anywhere on the rig run one at a time. On the
   Raspberry Pi 3B+ every USB port and `eth0` share one `dwc_otg` controller, and
@@ -70,34 +78,21 @@ What a bump means:
   `verify_flash` (an on-chip digest of each image region -- reads only) and
   skips the write when the bundle is already there; `--force` always writes.
   `--wipe-settings` erases the settings region (NVS/otadata/phy) before a real
-  write, for a board changing role. `make_bundle.py --extra-image` images are
-  marked `"verify": false` (e.g. a blank NVS the firmware writes to).
-- **`tester/test-matrix.sh` doesn't restore by default**: boards stay on what
-  they ran last (`--restore` puts them back on `default`), so the next run or
-  CI flashes only what differs. Verdict lines carry each lane's `VERSIONS`
-  (kernel, `sinput` driver + package, firmware/library, BlueZ, Bluepad32 build),
-  printed by `sinput_hil.py` and `bp32_hil.py`.
-- **`tester/test-matrix.sh` keeps bonds between hil_runner profiles**: a board's
-  settings region is wiped only when it changes firmware family (hil_runner <->
-  Bluepad32 observer) or on its first flash of the run. Wiping on every profile
-  change dropped the gamepad's bond while the observer kept its copy, so the
-  observer reconnected with a stale key and the gamepad never came up.
-- **`tester/bp32_hil.py --bp32-reset-port`**: resets the observer through its
-  native USB-Serial/JTAG when its console bridge has no RTS -> EN (the esp32c3's
-  FTDI is TX/RX/GND only). Without a reset, a gamepad that kept its bond
-  reconnected to the still-running observer before the lane listened, and its
-  `HIL ready` was missed. `test-matrix.sh` passes the observer's `flash_port`
-  when one is configured.
-- **`tester/sinput_hil.py` waits for the HID device to bind** before unloading
-  the `sinput` driver. On the esp32dev the device lands after pairing returns,
-  so the unload came first and the modalias autoload bound `sinput` afterwards:
-  hid-generic never took it, and phase B started from the wrong state.
+  write, for a board changing role, and stops if that erase fails.
+  `make_bundle.py --extra-image` images are marked `"verify": false` (e.g. a
+  blank NVS the firmware writes to).
+- **Releases ship `maxfeat` and `sinput` bundles** (`sinput` under
+  `firmware-bundles/matrix/`, listed in `index.json`), and the weekly CI
+  schedule adds `maxfeat` to `minimal`. The pre-release `hil.yml` dispatch
+  covers the 5 suite profiles; `sinput` is validated by the observer matrix
+  (see [RELEASE.md](RELEASE.md)).
 - **`CONFIG?`** lists the specials a profile actually enables and adds a
   `sim=` field; the special-button tests sweep only the listed specials.
 - **Flash the ESP32-S3 DevKitC-1 through its UART bridge**: the config
   template and README "ESP32-S3 dual-USB-C" now recommend leaving `flash_port`
   unset. Flashing over the native USB port gave bursts of 12-14 `dwc_otg`
-  timeouts per flash on the 3B+; through the bridge, ~2.
+  timeouts per flash on the 3B+; through the bridge, ~2. Unplug the unused
+  native "USB" cable as well: it still re-enumerates on every reset.
 
 ## [0.2.6] — 2026-09-18
 

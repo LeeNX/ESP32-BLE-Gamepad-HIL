@@ -43,10 +43,13 @@ python3 - "$TAG" "$RIG_SHA" "$LIB_REPO" "$LIB_SHA" "$LIB_DESCRIBE" > "$stage/ind
 import datetime as dt, json, pathlib, sys
 tag, rig_sha, lib_repo, lib_sha, lib_describe = sys.argv[1:6]
 bundles = []
-for m in sorted(pathlib.Path("bundles").glob("*/manifest.json")):
+# matrix/ holds the bundles test-all.sh doesn't run (sinput); they ship too.
+root = pathlib.Path("bundles")
+for m in sorted([*root.glob("*/manifest.json"), *root.glob("matrix/*/manifest.json")]):
     d = json.loads(m.read_text())
     bundles.append({k: d[k] for k in ("board", "chip", "profile", "pio_env",
-                                      "lib_sha", "lib_describe")} | {"dir": m.parent.name})
+                                      "lib_sha", "lib_describe")}
+                   | {"dir": str(m.parent.relative_to(root))})
 print(json.dumps({
     "rig_version": tag.lstrip("v"),
     "rig_sha": rig_sha,
