@@ -71,15 +71,23 @@ bundle() {  # <board> <profile>
 # a board changes firmware family (hil_runner <-> Bluepad32 observer, whose layouts differ) or on its first flash of
 # the run (state unknown) -- not between hil_runner profiles: wiping a gamepad's bond while the observer keeps its
 # copy leaves the observer reconnecting with a stale key, and the gamepad never comes up.
+# A failed flash stops the run: the next cell would test the old firmware.
 declare -A FAMILY=()
 flash() {  # <board> <bundle>
-  local out fam wipe=()
+  local out rc fam wipe=()
   fam=$([[ $2 == *-bp32obs-* ]] && echo observer || echo runner)
   [[ ${FAMILY[$1]:-} != "$fam" ]] && wipe=(--wipe-settings)
+  out=$("$PY" tester/flash.py "$2" --port "$(flash_port "$1")" "${wipe[@]}" 2>&1)
+  rc=$?
+  grep '^flash:' <<<"$out" | tail -1
+  if ((rc != 0)); then
+    tail -5 <<<"$out" >&2
+    echo "ABORT at flash $1: tester/flash.py rc=$rc" | tee -a "$VERDICTS"
+    printf '%s\n' "${summary[@]}"
+    exit 3
+  fi
   FAMILY[$1]=$fam
-  out=$("$PY" tester/flash.py "$2" --port "$(flash_port "$1")" "${wipe[@]}" 2>&1 | grep '^flash:' | tail -1)
-  echo "$out"
-  [[ $out == *"not rewritten"* ]] && return 0
+  # Even an unchanged bundle resets the chip (verify_flash's hard reset), so a native-USB port re-enumerates.
   [[ -n $(cfg "board.$1.flash_port") ]] && sleep 5
   return 0
 }

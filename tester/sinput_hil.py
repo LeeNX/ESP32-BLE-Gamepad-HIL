@@ -585,6 +585,14 @@ section("A: hid-generic (raw reports)")
 end = time.monotonic() + 15
 while bound_driver() is None and time.monotonic() < end:
     time.sleep(0.2)
+if not check(
+    "HID device bound after pairing",
+    bound_driver() is not None,
+    f"{hid_dev() or 'no device'}, 15 s",
+):
+    # Unloading now would only bring back the race this wait is for.
+    print(f"FAILED ({results.count(False)} failures of {len(results)})")
+    sys.exit(1)
 print(
     f"      after pairing: bound to {bound_driver()} (a new device autoloads sinput via its modalias)"
 )

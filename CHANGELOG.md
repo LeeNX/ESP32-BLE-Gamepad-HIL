@@ -45,9 +45,9 @@ What a bump means:
 - **`tester/test-matrix.sh`**: the observer matrix -- each rotation makes one
   board a Bluepad32 observer and the other two gamepads (one observed by BlueZ,
   one by Bluepad32), for `minimal`/`maxfeat`/`sinput`; serial flashing, USB
-  health guards per step, `--lanes serial|parallel`, `--max-cells`; restores
-  every board to its `default` bundle. `tester/bp32_swap.sh` is the one-off
-  version.
+  health guards per step, `--lanes serial|parallel`, `--max-cells`,
+  `--restore` (every board back on its `default` bundle).
+  `tester/bp32_swap.sh` is the one-off version.
 - `builder/make_bundle.py`: `--app-offset` and `--extra-image OFFSET:FILE`.
 
 - **Rig-wide flash lock** in `tester/flash.py` (`$XDG_CACHE_HOME/esp32-hil/flash.lock`,

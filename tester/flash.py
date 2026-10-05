@@ -118,7 +118,13 @@ def main():
             )
             return 0
     if args.wipe_settings:
-        subprocess.run(base + ["erase_region", *SETTINGS_REGION], capture_output=True)
+        r = subprocess.run(
+            base + ["erase_region", *SETTINGS_REGION], capture_output=True, text=True
+        )
+        if r.returncode != 0:
+            # Writing anyway would report success with the old settings (bonds) still in place.
+            print(f"erase_region failed:\n{(r.stdout + r.stderr).strip()}", file=sys.stderr)
+            return 1
 
     # default reset-before / hard-reset-after are the esptool defaults; naming
     # them explicitly just trips deprecation warnings across the 4.x/5.x split.
