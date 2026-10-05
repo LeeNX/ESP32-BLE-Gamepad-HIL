@@ -69,7 +69,7 @@ erase_settings() {
   "$PY" -m esptool --chip "$(chip "$1")" --port "$(flash_port "$1")" erase-region 0x9000 0x9000 2>&1 \
     | grep -iE "erased|error" | tail -1
 }
-health() { PYTHONPATH=host python3 -m hil.usbhealth "${1:-check}"; }
+health() { PYTHONPATH=host python3 -m hil.usbhealth "${@:-check}"; }
 # Stop at the first unhealthy check: more flashing on a wedged bus only makes it worse.
 guard() {  # <where>
   local out
@@ -90,7 +90,9 @@ echo "## matrix $(date -u +%FT%TZ) rotations=${ROTATIONS[*]} profiles=${PROFILES
 fail=0
 cells=0
 summary=()
-health check || { echo "USB unhealthy before the run: not starting" >&2; exit 3; }
+# Before the run: is the bus usable now? (Warnings from an earlier burst it recovered from don't count; the
+# fresh baseline below makes the in-run guards count only this run's.)
+health check --ignore-dwc || { echo "USB unhealthy before the run: not starting" >&2; exit 3; }
 health baseline
 
 for obs in "${ROTATIONS[@]}"; do
