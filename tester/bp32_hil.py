@@ -389,9 +389,12 @@ def run_sinput():
     )
 
 
-# Bluepad32's generic HID parser (uni_hid_parser_generic.c): HID buttons 1,2,4,5,7,8 -> A,B,X,Y,L,R;
-# 11,12,13 -> select, start, system; 14,15 -> thumb L/R; every other button is dropped. Axes scale the
-# descriptor's logical range to -512..511.
+# Which parser Bluepad32 picks for a gamepad it doesn't recognise: on BLE that's the Android profile
+# (uni_hid_device.c: "Fallback: using Android profile", CONTROLLER_TYPE_AndroidController = 37), whose
+# parser differs from uni_hid_parser_generic.c -- so the expectations follow the `type=` Bluepad32 reports.
+#
+# Generic parser: HID buttons 1,2,4,5,7,8 -> A,B,X,Y,L,R; 11,12,13 -> select, start, system; 14,15 -> thumb
+# L/R; others dropped. Axes X,Y -> lx,ly; Z and Rx both -> rx; Ry (pedal) and Rz both -> ry.
 GENERIC_BUTTONS = {
     1: ("btn", BTN_A),
     2: ("btn", BTN_B),
@@ -407,7 +410,24 @@ GENERIC_BUTTONS = {
 }
 
 
+# Android parser (uni_hid_parser_android.c): as generic, plus 9,10 -> trigger L/R (and 19,20 -> trigger L/R,
+# Stadia). Axes X,Y -> lx,ly; Z -> rx; Rz -> ry; Rx and Ry aren't read.
+ANDROID_BUTTONS = {
+    **GENERIC_BUTTONS,
+    9: ("btn", BTN_TRIGGER_L),
+    10: ("btn", BTN_TRIGGER_R),
+    19: ("btn", BTN_TRIGGER_L),
+    20: ("btn", BTN_TRIGGER_R),
+}
+ANDROID_TYPE = 37
+
+
 def run_generic():
+    m = re.search(r"type=(\d+)", bp.ready or "")
+    android = bool(m) and int(m.group(1)) == ANDROID_TYPE
+    parser = "android" if android else "generic"
+    table = ANDROID_BUTTONS if android else GENERIC_BUTTONS
+    print(f"      Bluepad32 parser: {parser} (type={m.group(1) if m else '?'})")
     config = cmd("CONFIG?") or ""
     n_buttons = int(re.search(r"buttons=(\d+)", config).group(1)) if "buttons=" in config else 0
     m = re.search(r"axes=(\S*)", config)  # maxbtn has none: "axes= special=..."
@@ -436,7 +456,7 @@ def run_generic():
     check("idle: no buttons", got.get("btn") == 0 and got.get("misc") == 0, f"{got}")
     seen, dropped = 0, 0
     for n in range(1, n_buttons + 1):
-        want = GENERIC_BUTTONS.get(n)
+        want = table.get(n)
         cmd(f"PRESS {n}")
         time.sleep(args.settle)
         got = bp.snapshot()
@@ -460,8 +480,8 @@ def run_generic():
         cmd(f"RELEASE {n}")
     if dropped:
         gap(
-            f"Bluepad32 generic parser: {dropped} of {n_buttons} buttons have no gamepad field",
-            f"{seen} mapped (HID buttons 1,2,4,5,7,8,11-15)",
+            f"Bluepad32 {parser} parser: {dropped} of {n_buttons} buttons have no gamepad field",
+            f"{seen} mapped ({parser} parser)",
         )
 
     # Axes, unsigned 0..32767. X -> lx, Y -> ly (-512..511). Z and Rx both feed rx, Ry and Rz both feed ry, so
@@ -476,15 +496,41 @@ def run_generic():
             return c_div(raw * 1024, 32768)
         return c_div((raw - 16384) * 1024, 32768)  # axis: (v - range/2 - min) * 1024 / range
 
-    for axis, field in (("x", "lx"), ("y", "ly")):
+    direct = {"x": "lx", "y": "ly"}
+    if android:
+        direct.update({"z": "rx", "rz": "ry"})
+    for axis, field in direct.items():
         if axis in axes:
             for raw in (32767, 0, 16384):
-                expect(
-                    f"axis {axis} {raw} -> {field}={axis_scale(axis, raw)}",
-                    f"AXIS {axis} {raw}",
-                    {field: axis_scale(axis, raw)},
+                want = axis_scale(axis, raw)
+                expect(f"axis {axis} {raw} -> {field}={want}", f"AXIS {axis} {raw}", {field: want})
+            cmd(f"AXIS {axis} 0")
+    if android:
+        # Rx and Ry aren't read by the Android parser: driving them must not move anything.
+        unread = []
+        for axis in ("rx", "ry"):
+            if axis not in axes:
+                continue
+            cmd("RESET")
+            time.sleep(args.settle)
+            before = bp.snapshot()
+            cmd(f"AXIS {axis} 32767")
+            time.sleep(args.settle)
+            after = bp.snapshot()
+            moved = {
+                k: (before.get(k), after.get(k))
+                for k in ("lx", "ly", "rx", "ry", "brake", "thr")
+                if before.get(k) != after.get(k)
+            }
+            if moved:
+                check(
+                    f"axis {axis} (not read by the android parser) moves nothing", False, f"{moved}"
                 )
-    for a, b, field in (("z", "rx", "rx"), ("ry", "rz", "ry")):
+            else:
+                unread.append(axis)
+        if unread:
+            gap(f"Bluepad32 {parser} parser: axes not read", ", ".join(unread))
+    for a, b, field in () if android else (("z", "rx", "rx"), ("ry", "rz", "ry")):
         present = [x for x in (a, b) if x in axes]
         if not present:
             continue
@@ -502,7 +548,7 @@ def run_generic():
                 continue
             winner, hidden = hits[0], b if hits[0] == a else a
             gap(
-                f"Bluepad32 generic parser: {a} and {b} both map to {field}; only {winner} is visible ({hidden} hidden)"
+                f"Bluepad32 {parser} parser: {a} and {b} both map to {field}; only {winner} is visible ({hidden} hidden)"
             )
         other = [x for x in (a, b) if x != winner and x in axes]
         for x in other:
@@ -526,7 +572,7 @@ def run_generic():
     unmapped_sims = [x for x in sims if x not in ("accelerator", "brake")]
     if unmapped_sims:
         gap(
-            "Bluepad32 generic parser: simulation controls with no gamepad field",
+            f"Bluepad32 {parser} parser: simulation controls with no gamepad field",
             ", ".join(unmapped_sims),
         )
 
@@ -565,7 +611,7 @@ def run_generic():
         cmd(f"SPECIAL RELEASE {i}")
     if unmapped_specials:
         gap(
-            "Bluepad32 generic parser: special buttons with no gamepad field",
+            f"Bluepad32 {parser} parser: special buttons with no gamepad field",
             ", ".join(unmapped_specials),
         )
     cmd("RESET")

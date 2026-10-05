@@ -40,6 +40,12 @@ PROFILE_LAYOUT = {
     ),
     "minimal": dict(buttons=2, hats=0, special="none", axes=["x", "y"]),
     "maxbtn": dict(buttons=128, hats=0, special="none", axes=[]),
+    "maxfeat": dict(
+        buttons=16, hats=1, special="home,back", axes=["x", "y", "z", "rx", "ry", "rz"]
+    ),
+    "sinput": dict(
+        buttons=25, hats=1, special="start,select,home", axes=["x", "y", "z", "rx", "ry", "rz"]
+    ),
     "local": dict(buttons=4, hats=1, special="none", axes=["x", "y"]),
 }
 
