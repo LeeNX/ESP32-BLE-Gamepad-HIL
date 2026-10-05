@@ -88,6 +88,10 @@ What a bump means:
   reconnected to the still-running observer before the lane listened, and its
   `HIL ready` was missed. `test-matrix.sh` passes the observer's `flash_port`
   when one is configured.
+- **`tester/sinput_hil.py` waits for the HID device to bind** before unloading
+  the `sinput` driver. On the esp32dev the device lands after pairing returns,
+  so the unload came first and the modalias autoload bound `sinput` afterwards:
+  hid-generic never took it, and phase B started from the wrong state.
 - **`CONFIG?`** lists the specials a profile actually enables and adds a
   `sim=` field; the special-button tests sweep only the listed specials.
 - **Flash the ESP32-S3 DevKitC-1 through its UART bridge**: the config

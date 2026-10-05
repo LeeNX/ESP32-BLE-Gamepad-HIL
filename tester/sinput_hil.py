@@ -580,6 +580,11 @@ with bt.BtCtl() as btctl:
 check("BLE paired + services resolved", bool(mac), mac)
 
 section("A: hid-generic (raw reports)")
+# The HID device can land after pairing returns (the esp32dev resolves its GATT services slowest). Unloading before
+# it binds lets sinput's modalias autoload bind it afterwards, and hid-generic never gets it.
+end = time.monotonic() + 15
+while bound_driver() is None and time.monotonic() < end:
+    time.sleep(0.2)
 print(
     f"      after pairing: bound to {bound_driver()} (a new device autoloads sinput via its modalias)"
 )
