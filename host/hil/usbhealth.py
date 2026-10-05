@@ -4,7 +4,9 @@ On the reference Raspberry Pi 3B+ every USB port and the Ethernet share one dwc_
 (parallel flashing has done it: 2026-09-11, 2026-10-04) the kernel logs `dwc_otg_hcd_urb_dequeue ... Timed out`
 warnings, the Ethernet loses carrier and USB serial devices drop off or return EIO. Checks:
 
-  - no new dwc_otg dequeue timeouts since the baseline (`baseline` records the current count);
+  - fewer than [rig] health_dwc_burst (default 3) new dwc_otg dequeue timeouts since the baseline (`baseline`
+    records the current count). A single one is normal when a native-USB board (ESP32-C3/S3 USB-Serial/JTAG)
+    re-enumerates after a reset; the wedges logged dozens to hundreds;
   - every configured board's port / flash_port device node exists;
   - the [rig] health_iface interface (default eth0; "" to skip) has carrier, if it exists.
 
@@ -57,8 +59,9 @@ def check(cfg):
         problems.append("can't read the kernel log (dmesg)")
     else:
         base = int(BASELINE.read_text()) if BASELINE.exists() else count
-        if count > base:
-            problems.append(f"{count - base} new dwc_otg dequeue timeouts")
+        burst = int(cfg.get("rig", {}).get("health_dwc_burst", 3))
+        if count - base >= burst:
+            problems.append(f"{count - base} new dwc_otg dequeue timeouts (>= {burst})")
     missing = [d for d in expected_devices(cfg) if not pathlib.Path(d).exists()]
     if missing:
         problems.append("missing " + ", ".join(pathlib.Path(d).name for d in missing))
