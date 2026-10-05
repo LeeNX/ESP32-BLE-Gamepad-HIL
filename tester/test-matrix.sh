@@ -12,6 +12,13 @@
 #   tester/test-matrix.sh                                   # all rotations, minimal maxfeat sinput
 #   tester/test-matrix.sh --rotations esp32c3 --profiles sinput
 #   tester/test-matrix.sh --max-cells 1 --lanes serial      # ramp up: one cell, lanes one after the other
+#   tester/test-matrix.sh --restore                         # finish with every board on its default bundle
+#
+# Flash wear: a board is only written when it doesn't already hold the bundle (tester/flash.py verifies first),
+# and boards are left on whatever they ran last unless --restore -- the next run (or CI's suite) flashes only
+# what differs. A board's settings region (NVS: bonds) is wiped only when it changes firmware family (hil_runner
+# <-> Bluepad32 observer, whose layouts differ) or on its first flash of the run -- not between hil_runner profiles,
+# where it would drop a gamepad's bond the observer still holds.
 #
 # USB safety (the Pi 3B+'s one USB controller, shared with Ethernet, has wedged under parallel flashing):
 # flashing is serialized (tester/flash.py's flash lock); the two lanes run one after the other by default
@@ -20,9 +27,9 @@
 # then restore by hand or rerun.
 #
 # Bundles: the profile bundles <board>-<profile>-* (sinput ones under matrix/) and the observer bundles
-# matrix/<board>-bp32obs-* (builder/build-observers.sh), newest by name. Ends by putting every board back on its
-# <board>-default-* bundle and dropping the HILpad BlueZ bonds, so the normal suite pairs fresh. Results go to
-# results/matrix/ (one log per lane) and results/matrix-verdicts.md.
+# matrix/<board>-bp32obs-* (builder/build-observers.sh), newest by name. Ends by dropping the HILpad BlueZ bonds,
+# so the normal suite pairs fresh. Results go to results/matrix/ (one log per lane) and results/matrix-verdicts.md;
+# each verdict line carries the lane's VERSIONS (kernel, sinput driver, firmware/library, Bluepad32 build).
 set -u
 cd "$(dirname "$0")/.." || exit 2
 REPO=$(pwd)
@@ -38,13 +45,15 @@ ROTATIONS=("${BOARDS[@]}")
 PROFILES=(minimal maxfeat sinput)
 LANES=serial
 MAX_CELLS=0
+RESTORE=0
 while [[ $# -gt 0 ]]; do
   case $1 in
     --rotations) read -r -a ROTATIONS <<<"$2"; shift 2 ;;
     --profiles) read -r -a PROFILES <<<"$2"; shift 2 ;;
     --lanes) LANES=$2; shift 2 ;;
     --max-cells) MAX_CELLS=$2; shift 2 ;;
-    -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
+    --restore) RESTORE=1; shift ;;
+    -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -52,22 +61,35 @@ done
 cfg() { python3 host/hil/config.py "$1"; }
 port() { cfg "board.$1.port"; }
 flash_port() { local p; p=$(cfg "board.$1.flash_port"); echo "${p:-$(port "$1")}"; }
-chip() { case "$1" in esp32dev) echo esp32 ;; esp32c3) echo esp32c3 ;; esp32s3) echo esp32s3 ;; esac; }
 newest() { local d=("$@"); [[ -d "${d[-1]}" ]] && echo "${d[-1]}"; }  # globs sort: last = newest name
 bundle() {  # <board> <profile>
   if [[ $2 == sinput || $2 == bp32obs ]]; then newest "$BUNDLE_DIR/matrix/$1-$2"-*; else newest "$BUNDLE_DIR/$1-$2"-*; fi
 }
 # Boards flashed over native USB (USB-Serial/JTAG) re-enumerate after the reset: give that time to settle (and
 # any dwc_otg warnings it causes time to land) before the next health check counts them.
-flash() {
-  "$PY" tester/flash.py "$2" --port "$(flash_port "$1")" 2>&1 | tail -1
+# flash.py skips a board that already holds the bundle. The settings region (NVS: BLE bonds) is wiped only when
+# a board changes firmware family (hil_runner <-> Bluepad32 observer, whose layouts differ) or on its first flash of
+# the run (state unknown) -- not between hil_runner profiles: wiping a gamepad's bond while the observer keeps its
+# copy leaves the observer reconnecting with a stale key, and the gamepad never comes up.
+# A failed flash stops the run: the next cell would test the old firmware.
+declare -A FAMILY=()
+flash() {  # <board> <bundle>
+  local out rc fam wipe=()
+  fam=$([[ $2 == *-bp32obs-* ]] && echo observer || echo runner)
+  [[ ${FAMILY[$1]:-} != "$fam" ]] && wipe=(--wipe-settings)
+  out=$("$PY" tester/flash.py "$2" --port "$(flash_port "$1")" "${wipe[@]}" 2>&1)
+  rc=$?
+  grep '^flash:' <<<"$out" | tail -1
+  if ((rc != 0)); then
+    tail -5 <<<"$out" >&2
+    echo "ABORT at flash $1: tester/flash.py rc=$rc" | tee -a "$VERDICTS"
+    printf '%s\n' "${summary[@]}"
+    exit 3
+  fi
+  FAMILY[$1]=$fam
+  # Even an unchanged bundle resets the chip (verify_flash's hard reset), so a native-USB port re-enumerates.
   [[ -n $(cfg "board.$1.flash_port") ]] && sleep 5
   return 0
-}
-# Settings (NVS/otadata) differ between hil_runner and the Bluepad32 observer: clear them when a board changes role.
-erase_settings() {
-  "$PY" -m esptool --chip "$(chip "$1")" --port "$(flash_port "$1")" erase-region 0x9000 0x9000 2>&1 \
-    | grep -iE "erased|error" | tail -1
 }
 health() { PYTHONPATH=host python3 -m hil.usbhealth "${@:-check}"; }
 # Stop at the first unhealthy check: more flashing on a wedged bus only makes it worse.
@@ -103,9 +125,11 @@ for obs in "${ROTATIONS[@]}"; do
   i=0; for b in "${BOARDS[@]}"; do [[ $b == "$obs" ]] && break; i=$((i + 1)); done
   bz=${BOARDS[$(((i + 1) % 3))]}; bp=${BOARDS[$(((i + 2) % 3))]}
   obs_bundle=$(bundle "$obs" bp32obs) || { echo "no observer bundle for $obs" >&2; fail=1; continue; }
+  # bp32_hil.py resets the observer at the start of each lane; through its native USB when it has one, since a
+  # console bridge may lack RTS -> EN.
+  obs_rst=$(cfg "board.$obs.flash_port")
   echo; echo "==== rotation: observer=$obs  BlueZ<-$bz  Bluepad32<-$bp"
   unbond
-  erase_settings "$obs"
   flash "$obs" "$obs_bundle"
   guard "flash observer $obs"
 
@@ -137,6 +161,7 @@ for obs in "${ROTATIONS[@]}"; do
     bz_pid=$!
     if [[ $LANES == serial ]]; then wait $bz_pid; bz_rc=$?; fi
     PYTHONPATH=host timeout 900 "$PY" tester/bp32_hil.py --profile "$p" "$(port "$bp")" "$(port "$obs")" \
+      ${obs_rst:+--bp32-reset-port "$obs_rst"} \
       > "$OUT/$tag-bp32-$bp.log" 2>&1 &
     bp_pid=$!
     if [[ $LANES != serial ]]; then wait $bz_pid; bz_rc=$?; fi
@@ -147,7 +172,8 @@ for obs in "${ROTATIONS[@]}"; do
       verdict=$([[ $rc == 0 ]] && echo PASS || echo FAIL)
       result=$(grep -E "^(PASSED|FAILED)|passed|failed" "$log" | tail -1)
       gaps=$(grep -c "^GAP " "$log")
-      line="$verdict observer=$obs profile=$p lane=$name gamepad=$board rc=$rc gaps=$gaps  $result"
+      vers=$(grep -m1 "^VERSIONS " "$log" | cut -d' ' -f2-)
+      line="$verdict observer=$obs profile=$p lane=$name gamepad=$board rc=$rc gaps=$gaps  $result${vers:+  [$vers]}"
       echo "$line" | tee -a "$VERDICTS"
       summary+=("$line")
       [[ $rc == 0 ]] || fail=1
@@ -156,16 +182,16 @@ for obs in "${ROTATIONS[@]}"; do
     unbond
     guard "after cell $tag"
   done
-  erase_settings "$obs"
 done
 
-echo; echo "==== restore"
-for b in "${BOARDS[@]}"; do
-  def_bundle=$(bundle "$b" default) || { echo "no default bundle for $b" >&2; continue; }
-  erase_settings "$b"
-  flash "$b" "$def_bundle"
-  guard "restore $b"
-done
+if ((RESTORE)); then
+  echo; echo "==== restore"
+  for b in "${BOARDS[@]}"; do
+    def_bundle=$(bundle "$b" default) || { echo "no default bundle for $b" >&2; continue; }
+    flash "$b" "$def_bundle"
+    guard "restore $b"
+  done
+fi
 unbond
 
 echo; echo "==== matrix summary"

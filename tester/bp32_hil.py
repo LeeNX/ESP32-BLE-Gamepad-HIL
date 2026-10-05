@@ -35,6 +35,11 @@ ap.add_argument(
     default="",
     help="gamepad BLE address for the observer's `allow` filter (default: ask the gamepad, ADDR?)",
 )
+ap.add_argument(
+    "--bp32-reset-port",
+    default="",
+    help="the observer's native USB-Serial/JTAG port, to reset it through when bp32_port has no RTS -> EN wiring",
+)
 args = ap.parse_args()
 
 results, gaps = [], []
@@ -77,12 +82,20 @@ def cmd(c, timeout=2.0):
 # ---------------------------------------------------------------------------------------------------------------
 # Bluepad32 board: HIL host console
 class Bluepad32:
-    def __init__(self, port):
+    def __init__(self, port, reset_port=""):
         # Open with the board held in reset (RTS -> EN), so it only starts scanning once the gamepad is ready.
+        # A board whose console bridge has no RTS -> EN (the esp32c3's FTDI: TX/RX/GND) keeps running instead, and a
+        # gamepad that kept its bond has already reconnected to it -- its "HIL ready" long gone. reset_port, the
+        # chip's own USB-Serial/JTAG, resets it the same way (RTS with DTR low), as esptool's hard reset does.
         self.ser = serial.Serial()
         self.ser.port, self.ser.baudrate, self.ser.timeout = port, 115200, 0.2
         self.ser.dtr, self.ser.rts = False, True
         self.ser.open()
+        self.rst = None
+        if reset_port:
+            self.rst = serial.Serial()
+            self.rst.port, self.rst.dtr, self.rst.rts = reset_port, False, True
+            self.rst.open()
         self.lock = threading.Lock()
         self.state, self.ready, self.features, self.log = None, None, None, []
         threading.Thread(target=self._run, daemon=True).start()
@@ -107,6 +120,13 @@ class Bluepad32:
 
     def release_reset(self):
         self.ser.rts = False
+        if self.rst:
+            # The chip re-enumerates its USB port as it boots: the handle goes stale.
+            try:
+                self.rst.rts = False
+                self.rst.close()
+            except (OSError, serial.SerialException):
+                pass
 
     def send(self, line):
         self.ser.write((line + "\n").encode())
@@ -238,7 +258,7 @@ if not addr:
 print(f"      gamepad BLE address: {addr or '(unknown: relying on the observer image filter)'}")
 cmd("RESET")
 
-bp = Bluepad32(args.bp32_port)
+bp = Bluepad32(args.bp32_port, args.bp32_reset_port)
 time.sleep(0.5)
 bp.release_reset()
 section("Bluepad32 pairs with the gamepad")
@@ -253,6 +273,12 @@ for _ in range(90):
         break
     time.sleep(1)
 print(f"      {bp.ready}")
+m = bp.mark()
+bp.send("version?")
+bp32_build = (bp.wait_for("HIL version", m) or "HIL version ?").split()[-1]
+cfg_line = cmd("CONFIG?") or ""
+lib = (re.search(r"libsha=(\S+)", cfg_line) or [None, "?"])[1]
+print(f"VERSIONS bluepad32={bp32_build} fw={args.profile}/{lib}", flush=True)
 want_ids = "type=58 vid=0x2e8a pid=0x10c6" if args.profile == "sinput" else "vid=0x1d34 pid=0x8010"
 if not check(
     f"Bluepad32: device ready ({want_ids})",

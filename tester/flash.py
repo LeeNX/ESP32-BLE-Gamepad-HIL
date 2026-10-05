@@ -40,6 +40,11 @@ FLASH_LOCK = pathlib.Path(
 )
 
 
+# NVS / otadata / phy on both layouts the rig flashes (hil_runner: nvs 0x9000+0x5000, otadata 0xe000; the
+# Bluepad32 observer: nvs 0x9000+0x6000, otadata 0xf000, phy 0x11000), up to the first app offset.
+SETTINGS_REGION = ("0x9000", "0x9000")
+
+
 def flash_lock():
     """Block until this process holds the rig-wide flash lock; released when the process exits."""
     FLASH_LOCK.parent.mkdir(parents=True, exist_ok=True)
@@ -68,13 +73,25 @@ def main():
     ap.add_argument("--port", required=True)
     ap.add_argument("--baud", type=int, default=None)
     ap.add_argument("--retries", type=int, default=3)
+    ap.add_argument(
+        "--force",
+        action="store_true",
+        help="always write; by default a board already holding this bundle (esptool verify_flash: the chip "
+        "digests each image region) is left alone -- no flash wear for an unchanged image",
+    )
+    ap.add_argument(
+        "--wipe-settings",
+        action="store_true",
+        help=f"when writing, first erase the settings region ({SETTINGS_REGION[0]}+{SETTINGS_REGION[1]}: NVS, "
+        "otadata, phy) -- for a board changing role between firmwares that lay it out differently",
+    )
     args = ap.parse_args()
 
     manifest = json.loads((args.bundle / "manifest.json").read_text())
     chip = manifest["chip"]
     baud = args.baud or (115200 if chip in SLOW_CHIPS else 460800)
 
-    write_args = []
+    write_args, verify_args = [], []
     for img in manifest["images"]:
         path = args.bundle / img["file"]
         if not path.is_file():
@@ -83,6 +100,31 @@ def main():
         if got != img["sha256"]:
             raise SystemExit(f"sha256 mismatch for {img['file']}: {got} != {img['sha256']}")
         write_args += [img["offset"], str(path)]
+        if img.get("verify", True):
+            verify_args += [img["offset"], str(path)]
+
+    base = esptool_cmd() + ["--chip", chip, "--port", args.port, "--baud", str(baud)]
+    flash_lock()
+    if not args.force:
+        # Already on the chip? verify_flash compares an on-chip digest of each region: reads only, no wear.
+        r = subprocess.run(base + ["verify_flash", *verify_args], capture_output=True, text=True)
+        if r.returncode == 0:
+            print(
+                "flash:",
+                manifest["board"],
+                manifest["profile"],
+                manifest["lib_describe"],
+                "already on the chip (verified) -- not rewritten",
+            )
+            return 0
+    if args.wipe_settings:
+        r = subprocess.run(
+            base + ["erase_region", *SETTINGS_REGION], capture_output=True, text=True
+        )
+        if r.returncode != 0:
+            # Writing anyway would report success with the old settings (bonds) still in place.
+            print(f"erase_region failed:\n{(r.stdout + r.stderr).strip()}", file=sys.stderr)
+            return 1
 
     # default reset-before / hard-reset-after are the esptool defaults; naming
     # them explicitly just trips deprecation warnings across the 4.x/5.x split.
@@ -104,7 +146,6 @@ def main():
         f"({chip} @ {baud})",
     )
 
-    flash_lock()
     for attempt in range(1, args.retries + 1):
         r = subprocess.run(cmd)
         if r.returncode == 0:
