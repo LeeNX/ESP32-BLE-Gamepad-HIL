@@ -6,7 +6,7 @@
 #   builder/build-observers.sh                          # [builder] boards, paths from [observer] in hil_config
 #   builder/build-observers.sh --boards "esp32c3" --out /tmp/bundles
 #
-# Bundles land in <out>/matrix/<board>-bp32obs-<bluepad32 sha8>/ -- under matrix/ so tester/test-all.sh (which only
+# Bundles land in <out>/matrix/<board>-bp32obs-<bluepad32 sha8>-<rig sha8>/ -- under matrix/ so tester/test-all.sh (which only
 # runs top-level bundles) never flashes one as a gamepad. Each carries a blank NVS image, so an observer always
 # starts without stale bonds, and puts the app in the host's factory slot (PlatformIO's idedata would pick ota_0).
 #
@@ -45,6 +45,7 @@ board_chip() { case "$1" in
 part() { awk -F, -v n="$1" -v f="$2" '$1 ~ "^"n"[ \t]*$" {gsub(/[ \t]/, "", $f); print $f}' "$HOST_DIR/partitions.csv"; }
 
 BP32_SHA=$(git -C "$BP32_DIR" rev-parse --short=8 HEAD)
+RIG_SHA=$(git rev-parse --short=8 HEAD)
 NVS_OFF=$(part nvs 4); NVS_SIZE=$(part nvs 5); APP_OFF=$(part factory 4)
 [[ -n "$NVS_OFF" && -n "$NVS_SIZE" && -n "$APP_OFF" ]] || { echo "can't read nvs/factory from partitions.csv" >&2; exit 2; }
 echo "== bluepad32 $(git -C "$BP32_DIR" describe --tags --always --dirty) ($(git -C "$BP32_DIR" rev-parse --abbrev-ref HEAD))"
@@ -59,14 +60,14 @@ for board in "${BOARDS[@]}"; do
   echo "== build observer $board (env=$env chip=$chip)"
   # The firmware version string comes from the environment, which the build doesn't track: wipe.
   rm -rf "$HOST_DIR/.pio/build/$env" "$HOST_DIR/sdkconfig.$env"
-  export HIL_BLUEPAD32_DIR="$BP32_DIR" HIL_FW_VERSION="bp32obs-$BP32_SHA"
+  export HIL_BLUEPAD32_DIR="$BP32_DIR" HIL_FW_VERSION="bp32obs-$BP32_SHA-$RIG_SHA"
   "$PIO" run -e "$env" -d "$HOST_DIR"
   ide=$(mktemp)
   "$PIO" run -e "$env" -d "$HOST_DIR" -t idedata > "$ide" 2>/dev/null
   python3 builder/make_bundle.py \
     --build-dir "$HOST_DIR/.pio/build/$env" \
     --idedata "$ide" --env "$env" --profile bp32obs \
-    --board "$board" --chip "$chip" --lib-dir "$BP32_DIR" --out-root "$OUT_ROOT/matrix" \
+    --board "$board" --chip "$chip" --lib-dir "$BP32_DIR" --out-root "$OUT_ROOT/matrix" --name-suffix "$RIG_SHA" \
     --app-offset "$APP_OFF" --extra-image "$NVS_OFF:$tmp/nvs_blank.bin"
   rm -f "$ide"
 done

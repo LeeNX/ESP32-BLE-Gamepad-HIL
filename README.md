@@ -268,19 +268,23 @@ was carrying during that sweep (normally `1`); `bench.py` records it as
 `adapter_links` so a number taken while another bond lingered isn't mistaken
 for a clean solo measurement.
 
-### Findings (all 3 boards × 6 profiles, Raspberry Pi 3B+, kernel 6.18, BlueZ 5.82)
+### Findings (3 boards × 5 suite profiles, Raspberry Pi 3B+, kernel 6.18, BlueZ 5.82)
 
-- Single button press → host in **~18.6 ms** median on **every board and
-  profile** — `esp32dev`, `esp32c3`, `esp32s3` are indistinguishable at p50.
-  **0 dropped** across 200 paced presses per profile.
-- **Latency is flat vs HID report size** (3–28 B) and vs chip. p99 (~20–68 ms)
-  is just connection-interval jitter — one 48.75 ms interval — and swings run
-  to run with where the sample lands; p50 is the signal.
-- **Connection interval 48.75 ms, MTU 255** on every board/profile — the
-  library doesn't request a fast one. It bounds *latency*, not paced *rate*:
-  NimBLE sends several packets per connection event, so paced input delivers
-  ~100% at **80–133 Hz** (here it's the serial / bridge channel, not BLE, that
-  runs out first).
+From the v0.3.0 snapshot in [`docs/bench/`](docs/bench/README.md) (library
+0.8.0); its README has the full table and the caveats.
+
+- **Connection interval 8.75 ms on the esp32c3/esp32s3, 43.75 ms on the
+  esp32dev, MTU 255.** With library 0.8.0 it's no longer 48.75 ms everywhere
+  (the v0.2.6 numbers).
+- Single button press → host: **~4.9 ms** median on the esp32s3, **~13.6 ms**
+  on the esp32dev, **~17.8 ms** on the esp32c3. **0 dropped** across 200 paced
+  presses per profile. In that run the boards benched with 3, 2 and 1 BLE
+  links up (C3, esp32dev, S3), so the C3's figure carries the most contention:
+  compare a board with itself across snapshots, not boards with each other.
+- **Latency is flat vs HID report size** (5–28 B) within a board. p99 is
+  connection-interval jitter and swings run to run; p50 is the signal. The
+  interval bounds *latency*, not paced *rate*: NimBLE sends several packets per
+  connection event, and the esp32s3 paces **~260–275 Hz** clean.
 - **Unpaced `sendReport()` bursts overflow and drop silently** — at gap=0 only
   ~2% of a 500-report burst survives. Don't call `sendReport()` faster than you
   can transmit.
@@ -429,7 +433,8 @@ the bus mid-transfer when esptool resets it, and on the 3B+ — one `dwc_otg`
 controller shared by every USB port *and* `eth0` — that produced bursts of
 12-14 `dwc_otg_hcd_urb_dequeue ... Timed out` warnings per flash, the failure
 mode that wedged USB and Ethernet on 2026-09-11 and 2026-10-04. Through the
-bridge: 2 (the native port still re-enumerates on reset). Watch for it with
+bridge it's usually ~2, but a single reset can still leave a burst of 6–9 (seen
+2026-10-05), which is why `[rig].health_dwc_burst` defaults to 12. Watch for it with
 `dmesg | grep -c dwc_otg_hcd_urb_dequeue` climbing after flashes, or
 `PYTHONPATH=host python3 -m hil.usbhealth check`. Setting `flash_port` to the
 native port still works where the host copes; it's capped at 115200 like the

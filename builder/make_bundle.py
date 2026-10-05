@@ -70,6 +70,12 @@ def main():
         "so the tester can assert NAME? against it. Empty = firmware default.",
     )
     ap.add_argument(
+        "--name-suffix",
+        default="",
+        help="extra component for the bundle dir name, after the library sha (build-observers.sh: the rig sha, "
+        "since an observer's firmware source is this repo)",
+    )
+    ap.add_argument(
         "--app-offset",
         default="",
         help="flash offset for firmware.bin, overriding idedata's application_offset (which is the first "
@@ -107,7 +113,10 @@ def main():
     rig_sha = git(rig_dir, "rev-parse", "HEAD")
     rig_describe = git(rig_dir, "describe", "--tags", "--always", "--dirty") or rig_sha[:8]
 
-    out = pathlib.Path(args.out_root) / f"{args.board}-{args.profile}-{lib_sha[:8]}"
+    name = f"{args.board}-{args.profile}-{lib_sha[:8]}" + (
+        f"-{args.name_suffix}" if args.name_suffix else ""
+    )
+    out = pathlib.Path(args.out_root) / name
     out.mkdir(parents=True, exist_ok=True)
 
     manifest_images = []

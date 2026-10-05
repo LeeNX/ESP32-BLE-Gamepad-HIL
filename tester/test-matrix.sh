@@ -27,7 +27,7 @@
 # then restore by hand or rerun.
 #
 # Bundles: the profile bundles <board>-<profile>-* (sinput ones under matrix/) and the observer bundles
-# matrix/<board>-bp32obs-* (builder/build-observers.sh), newest by name. Ends by dropping the HILpad BlueZ bonds,
+# matrix/<board>-bp32obs-* (builder/build-observers.sh), the most recently built of each. Ends by dropping the HILpad BlueZ bonds,
 # so the normal suite pairs fresh. Results go to results/matrix/ (one log per lane) and results/matrix-verdicts.md;
 # each verdict line carries the lane's VERSIONS (kernel, sinput driver, firmware/library, Bluepad32 build).
 set -u
@@ -61,7 +61,8 @@ done
 cfg() { python3 host/hil/config.py "$1"; }
 port() { cfg "board.$1.port"; }
 flash_port() { local p; p=$(cfg "board.$1.flash_port"); echo "${p:-$(port "$1")}"; }
-newest() { local d=("$@"); [[ -d "${d[-1]}" ]] && echo "${d[-1]}"; }  # globs sort: last = newest name
+# Most recently built (rsync keeps the build's mtime): names end in shas, so sorting them says nothing about age.
+newest() { [[ -d $1 ]] && ls -1dt "$@" | head -1; }
 bundle() {  # <board> <profile>
   if [[ $2 == sinput || $2 == bp32obs ]]; then newest "$BUNDLE_DIR/matrix/$1-$2"-*; else newest "$BUNDLE_DIR/$1-$2"-*; fi
 }
@@ -96,8 +97,8 @@ health() { PYTHONPATH=host python3 -m hil.usbhealth "${@:-check}"; }
 guard() {  # <where>
   local out
   # Re-baseline after every passing check, so a guard counts the dwc_otg warnings of *this* step: a wedge comes
-  # as one burst (dozens), while each ESP32-S3 flash leaves ~2 even through its UART bridge, which would add up
-  # past the threshold over a run.
+  # as one burst (dozens), while a board's reset can leave a burst of 6-9 even through a UART bridge, and those
+  # would add up past the threshold over a run.
   out=$(health check) && { health baseline >/dev/null; return 0; }
   echo "ABORT at $1: $out -- reboot the host, then restore the boards" | tee -a "$VERDICTS"
   printf '%s\n' "${summary[@]}"

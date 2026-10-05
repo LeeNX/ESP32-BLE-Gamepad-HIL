@@ -33,7 +33,18 @@ What a bump means:
 ### Changed
 
 - **`builder/build-observers.sh` builds `firmware/observer`**:
-  `[observer].host_dir` and `HIL_OBSERVER` are gone.
+  `[observer].host_dir` and `HIL_OBSERVER` are gone. Observer bundles are
+  named `<board>-bp32obs-<bluepad32 sha8>-<rig sha8>` and report the same in
+  `version?`, so two builds from the same Bluepad32 commit can be told apart
+  (`make_bundle.py --name-suffix`).
+- **`tester/test-matrix.sh` picks the most recently built bundle** (by mtime)
+  rather than the last by name, which ends in a sha and says nothing about age.
+- **`[rig].health_dwc_burst` defaults to 12** (was 5). A single board reset
+  can leave a burst of 6–9 `dwc_otg` timeouts even through a UART bridge (the
+  0.3.0 notes said ~2), and at 5 the guard kept aborting healthy runs; a real
+  wedge is dozens.
+- **README findings** follow the v0.3.0 bench snapshot (library 0.8.0's faster
+  connection interval) instead of the v0.2.6 numbers.
 
 ## [0.3.0] — 2026-10-05
 
