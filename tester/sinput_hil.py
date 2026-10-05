@@ -342,13 +342,26 @@ DRIVER_KEY = {
     18: e.BTN_MODE,
     19: e.BTN_MISC,
 }
+# Added in linux-hid-sinput after 0.3.0: paddles -> BTN_GRIPL/GRIPR/GRIPL2/GRIPR2 (hid-steam's back levers), power and
+# misc 4-10 -> BTN_TRIGGER_HAPPY1..8. Optional, so the test runs against older drivers too: an unmapped bit is a GAP,
+# the expected code is a pass, anything else fails. Numeric fallbacks for python-evdev builds older than the codes.
+_GRIPL = getattr(e, "BTN_GRIPL", 0x224)
+_HAPPY1 = e.BTN_TRIGGER_HAPPY1
+DRIVER_KEY_OPTIONAL = {
+    14: _GRIPL,
+    15: _GRIPL + 1,
+    20: _GRIPL + 2,
+    21: _GRIPL + 3,
+    **{bit: _HAPPY1 + (bit - 24) for bit in range(24, 32)},
+}
+# Touchpad clicks report BTN_LEFT on the touchpad input device, not the gamepad. With one touchpad (this
+# firmware: 1 pad, 2 fingers) only touchpad 1's click exists; bit 23 is ignored by design.
+TOUCHPAD_CLICK_BITS = {22: True, 23: False}
 SINPUT_BIT_NAMES = {
     14: "L paddle 1",
     15: "R paddle 1",
     20: "L paddle 2",
     21: "R paddle 2",
-    22: "touchpad 1 click",
-    23: "touchpad 2 click",
     24: "power",
 }
 
@@ -378,24 +391,42 @@ def driver_checks(dev):
         (f"SPECIAL PRESS {k}", f"SPECIAL RELEASE {k}", bit) for k, bit in SPECIAL_BIT.items()
     ]
     presses += [(f"HAT 1 {h}", "HAT 1 0", bit) for h, bit in ((1, 4), (5, 5), (7, 6), (3, 7))]
+    mapped_optional, click_bad = 0, []
     for press, release, bit in presses:
         cmd(press)
-        settle(pad)
+        settle(pad, *([touch] if touch else []))
         keys = pad.active_keys()
         if bit in DRIVER_KEY:
             if keys != [DRIVER_KEY[bit]]:
                 bad.append(f"bit {bit} ({press})->{keys}")
+        elif bit in TOUCHPAD_CLICK_BITS:
+            if keys:
+                bad.append(f"touchpad click bit {bit} ({press}) on the gamepad: {keys}")
+            clicked = bool(touch and e.BTN_LEFT in touch.active_keys())
+            if clicked != TOUCHPAD_CLICK_BITS[bit]:
+                click_bad.append(f"bit {bit}: BTN_LEFT {'set' if clicked else 'not set'}")
+        elif keys == [DRIVER_KEY_OPTIONAL.get(bit)]:
+            mapped_optional += 1
         elif keys:
-            bad.append(f"unmapped bit {bit} ({press}) produced {keys}")
+            bad.append(
+                f"bit {bit} ({press}) produced {keys}, expected {DRIVER_KEY_OPTIONAL.get(bit)} or nothing"
+            )
         else:
             unmapped.append(SINPUT_BIT_NAMES.get(bit, f"misc bit {bit}"))
         cmd(release)
     settle(pad)
     check(
-        f"driver: {len(DRIVER_KEY)} mapped SInput buttons -> BTN_* (incl. d-pad, start/back/guide)",
+        f"driver: {len(DRIVER_KEY) + mapped_optional} mapped SInput buttons -> BTN_* "
+        f"(incl. d-pad, start/back/guide; {mapped_optional} paddle/power/misc)",
         not bad,
         " ".join(bad),
     )
+    if touch:
+        check(
+            "driver: touchpad 1 click -> BTN_LEFT on the touchpad (touchpad 2: none, 1 pad)",
+            not click_bad,
+            "; ".join(click_bad),
+        )
     if unmapped:
         gap("driver: SInput buttons with no evdev code", ", ".join(unmapped))
 
