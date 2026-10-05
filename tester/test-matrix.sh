@@ -9,7 +9,7 @@
 # Rotating the observer through every board means each board is observed by both BlueZ and Bluepad32, and each
 # board runs Bluepad32 once (esp32: BR/EDR + BLE; esp32c3/esp32s3: BLE only).
 #
-#   tester/test-matrix.sh                                   # all rotations, minimal maxbtn sinput
+#   tester/test-matrix.sh                                   # all rotations, minimal maxfeat sinput
 #   tester/test-matrix.sh --rotations esp32c3 --profiles sinput
 #   tester/test-matrix.sh --max-cells 1 --lanes serial      # ramp up: one cell, lanes one after the other
 #
@@ -35,7 +35,7 @@ PY="$VENV/bin/python"
 BUNDLE_DIR=${HIL_BUNDLE_DIR:-$HOME/hil-bundles}
 BOARDS=(esp32dev esp32c3 esp32s3)
 ROTATIONS=("${BOARDS[@]}")
-PROFILES=(minimal maxbtn sinput)
+PROFILES=(minimal maxfeat sinput)
 LANES=serial
 MAX_CELLS=0
 while [[ $# -gt 0 ]]; do

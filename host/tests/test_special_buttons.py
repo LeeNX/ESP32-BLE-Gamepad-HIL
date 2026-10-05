@@ -54,8 +54,13 @@ def special_sweep(connected_dut, all_nodes):
                 pass
         except (BlockingIOError, OSError):
             pass
+    # Only the specials this profile enables (CONFIG? special=start,select,...): `specials` has all eight,
+    # `maxfeat` only home/back.
+    enabled = set(connected_dut.config().get("special", "none").split(","))
     result = {}
     for idx, name in SPECIALS.items():
+        if name not in enabled:
+            continue
         _collect_all(all_nodes, settle=0.2, hard=0.5)  # drain
         connected_dut.special("PRESS", idx)
         downs = [(nn, c) for nn, c, v in _collect_all(all_nodes) if v == 1]
@@ -66,7 +71,7 @@ def special_sweep(connected_dut, all_nodes):
 
 
 def test_desktop_specials_on_gamepad_node(special_sweep, rigcfg):
-    for idx in DESKTOP:
+    for idx in sorted(DESKTOP & special_sweep.keys()):
         r = special_sweep[idx]
         assert len(r["downs"]) == 1, f"{r['name']}: downs={r['downs']}"
         node_name, code = r["downs"][0]

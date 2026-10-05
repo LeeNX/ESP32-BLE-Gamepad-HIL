@@ -26,7 +26,7 @@ ap.add_argument(
 )
 ap.add_argument(
     "--profile",
-    choices=("sinput", "minimal", "maxbtn"),
+    choices=("sinput", "minimal", "maxbtn", "maxfeat"),
     default="sinput",
     help="the gamepad's hil_runner profile; minimal/maxbtn go through Bluepad32's generic HID parser",
 )
@@ -412,7 +412,16 @@ def run_generic():
     n_buttons = int(re.search(r"buttons=(\d+)", config).group(1)) if "buttons=" in config else 0
     m = re.search(r"axes=(\S*)", config)  # maxbtn has none: "axes= special=..."
     axes = [a for a in m.group(1).split(",") if a] if m else []
-    print(f"      gamepad: {n_buttons} buttons, axes {axes}")
+
+    def csv(key):
+        m = re.search(rf"{key}=(\S*)", config)
+        return [x for x in m.group(1).split(",") if x and x != "none"] if m else []
+
+    n_hats = int(re.search(r"hats=(\d+)", config).group(1)) if "hats=" in config else 0
+    specials, sims = csv("special"), csv("sim")
+    print(
+        f"      gamepad: {n_buttons} buttons, {n_hats} hats, axes {axes}, specials {specials}, sim {sims}"
+    )
     section("features")
     check(
         "Bluepad32: no SInput feature response (generic device)",
@@ -454,14 +463,112 @@ def run_generic():
             f"Bluepad32 generic parser: {dropped} of {n_buttons} buttons have no gamepad field",
             f"{seen} mapped (HID buttons 1,2,4,5,7,8,11-15)",
         )
-    # minimal: unsigned 0..32767 X/Y -> -512..511.
+
+    # Axes, unsigned 0..32767. X -> lx, Y -> ly (-512..511). Z and Rx both feed rx, Ry and Rz both feed ry, so
+    # only one of each pair is visible: find which (drive one at full scale, the other at 0), check its scaling,
+    # report the hidden one as a gap. Ry goes through Bluepad32's pedal scaling (0..1023), the rest axis scaling.
+    # uni_hid_parser_process_axis / _process_pedal, for the 0..32767 logical range (C integer division truncates).
+    def c_div(a, b):
+        return int(a / b)
+
+    def axis_scale(axis, raw):
+        if axis == "ry":  # pedal: (v - min) * 1024 / range
+            return c_div(raw * 1024, 32768)
+        return c_div((raw - 16384) * 1024, 32768)  # axis: (v - range/2 - min) * 1024 / range
+
     for axis, field in (("x", "lx"), ("y", "ly")):
-        if axis not in axes:
+        if axis in axes:
+            for raw in (32767, 0, 16384):
+                expect(
+                    f"axis {axis} {raw} -> {field}={axis_scale(axis, raw)}",
+                    f"AXIS {axis} {raw}",
+                    {field: axis_scale(axis, raw)},
+                )
+    for a, b, field in (("z", "rx", "rx"), ("ry", "rz", "ry")):
+        present = [x for x in (a, b) if x in axes]
+        if not present:
             continue
-        expect(f"axis {axis} 32767 -> {field}=511", f"AXIS {axis} 32767", {field: 511})
-        expect(f"axis {axis} 0 -> {field}=-512", f"AXIS {axis} 0", {field: -512})
-        expect(f"axis {axis} 16384 -> {field}=0", f"AXIS {axis} 16384", {field: 0})
-        cmd(f"AXIS {axis} 0")
+        winner = present[0]
+        if len(present) == 2:
+            seen = {}
+            for hi in (a, b):
+                lo = b if hi == a else a
+                cmd(f"AXIS {lo} 0")
+                cmd(f"AXIS {hi} 32767")
+                time.sleep(args.settle)
+                seen[hi] = bp.snapshot().get(field)
+            hits = [x for x in (a, b) if seen[x] == axis_scale(x, 32767)]
+            if not check(f"exactly one of {a}/{b} drives {field}", len(hits) == 1, f"{seen}"):
+                continue
+            winner, hidden = hits[0], b if hits[0] == a else a
+            gap(
+                f"Bluepad32 generic parser: {a} and {b} both map to {field}; only {winner} is visible ({hidden} hidden)"
+            )
+        other = [x for x in (a, b) if x != winner and x in axes]
+        for x in other:
+            cmd(f"AXIS {x} 0")
+        for raw in (32767, 0, 16384):
+            want = axis_scale(winner, raw)
+            expect(f"axis {winner} {raw} -> {field}={want}", f"AXIS {winner} {raw}", {field: want})
+    cmd("RESET")
+
+    if n_hats:
+        for h, bits in HATS.items():
+            expect(f"hat {h} -> dpad=0x{bits:x}", f"HAT 1 {h}", {"dpad": bits})
+        cmd("HAT 1 0")
+
+    # Simulation controls: accelerator -> throttle, brake -> brake (pedal scaling, 0..1023).
+    for name, field in (("accelerator", "thr"), ("brake", "brake")):
+        if name in sims:
+            for raw in (32767, 16384, 0):
+                want = c_div(raw * 1024, 32768)
+                expect(f"sim {name} {raw} -> {field}={want}", f"SIM {name} {raw}", {field: want})
+    unmapped_sims = [x for x in sims if x not in ("accelerator", "brake")]
+    if unmapped_sims:
+        gap(
+            "Bluepad32 generic parser: simulation controls with no gamepad field",
+            ", ".join(unmapped_sims),
+        )
+
+    # Specials: only Consumer AC Home (-> MISC_BUTTON_START) and AC Back (-> SELECT) are mapped.
+    special_index = {
+        "start": 0,
+        "select": 1,
+        "menu": 2,
+        "home": 3,
+        "back": 4,
+        "volinc": 5,
+        "voldec": 6,
+        "volmute": 7,
+    }
+    special_want = {"home": MISC_START, "back": MISC_SELECT}
+    unmapped_specials = []
+    for name in specials:
+        i = special_index[name]
+        cmd(f"SPECIAL PRESS {i}")
+        time.sleep(args.settle)
+        got = bp.snapshot()
+        if name in special_want:
+            check(
+                f"special {name} -> misc=0x{special_want[name]:x}",
+                got.get("misc") == special_want[name],
+                f"misc={got.get('misc')}",
+            )
+        elif got.get("btn") or got.get("misc"):
+            check(
+                f"special {name} (unmapped) changes nothing",
+                False,
+                f"btn={got.get('btn')} misc={got.get('misc')}",
+            )
+        else:
+            unmapped_specials.append(name)
+        cmd(f"SPECIAL RELEASE {i}")
+    if unmapped_specials:
+        gap(
+            "Bluepad32 generic parser: special buttons with no gamepad field",
+            ", ".join(unmapped_specials),
+        )
+    cmd("RESET")
 
 
 if args.profile == "sinput":
