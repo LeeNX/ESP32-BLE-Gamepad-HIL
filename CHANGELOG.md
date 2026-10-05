@@ -18,6 +18,29 @@ What a bump means:
 
 ## [Unreleased]
 
+### Added
+
+- **Rig-wide flash lock** in `tester/flash.py` (`$XDG_CACHE_HOME/esp32-hil/flash.lock`,
+  or `$HIL_FLASH_LOCK`): flashes anywhere on the rig run one at a time. On the
+  Raspberry Pi 3B+ every USB port and `eth0` share one `dwc_otg` controller, and
+  parallel flashing wedged it (USB serial EIO/vanishing, Ethernet down) on
+  2026-09-11 and 2026-10-04.
+- **`hil.usbhealth`** (`python3 -m hil.usbhealth baseline|check [--ignore-dwc]`):
+  a burst of new `dwc_otg_hcd_urb_dequeue` timeouts, a configured board's device
+  node missing, or `eth0` without carrier = unhealthy. New `[rig]` config keys
+  `health_iface` (default `eth0`) and `health_dwc_burst` (default 5).
+- **`tester/bootstrap-watchdog.sh`** (root, optional): reboot the host when its
+  USB wedges (STRIKES bad minutes, at most once per MIN_INTERVAL, log-only
+  until `--arm`), plus the SoC hardware watchdog for hangs. The
+  `leenx-ansible` `hil` role carries the same setup (`hil_usb_watchdog_*`).
+
+### Changed
+
+- **Flash the ESP32-S3 DevKitC-1 through its UART bridge**: the config
+  template and README "ESP32-S3 dual-USB-C" now recommend leaving `flash_port`
+  unset. Flashing over the native USB port gave bursts of 12-14 `dwc_otg`
+  timeouts per flash on the 3B+; through the bridge, ~2.
+
 ## [0.2.6] — 2026-09-18
 
 ### Added
