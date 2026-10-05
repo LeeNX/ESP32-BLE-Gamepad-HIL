@@ -11,6 +11,13 @@
 #
 #   tester/test-matrix.sh                                   # all rotations, minimal maxbtn sinput
 #   tester/test-matrix.sh --rotations esp32c3 --profiles sinput
+#   tester/test-matrix.sh --max-cells 1 --lanes serial      # ramp up: one cell, lanes one after the other
+#
+# USB safety (the Pi 3B+'s one USB controller, shared with Ethernet, has wedged under parallel flashing):
+# flashing is serialized (tester/flash.py's flash lock); the two lanes run one after the other by default
+# (--lanes parallel overlaps them); and hil.usbhealth is checked before the run and after every flash and cell.
+# On the first unhealthy check the run stops without restore-flashing -- reboot the host (bootstrap-watchdog.sh),
+# then restore by hand or rerun.
 #
 # Bundles: the profile bundles <board>-<profile>-* (sinput ones under matrix/) and the observer bundles
 # matrix/<board>-bp32obs-* (builder/build-observers.sh), newest by name. Ends by putting every board back on its
@@ -29,11 +36,15 @@ BUNDLE_DIR=${HIL_BUNDLE_DIR:-$HOME/hil-bundles}
 BOARDS=(esp32dev esp32c3 esp32s3)
 ROTATIONS=("${BOARDS[@]}")
 PROFILES=(minimal maxbtn sinput)
+LANES=serial
+MAX_CELLS=0
 while [[ $# -gt 0 ]]; do
   case $1 in
     --rotations) read -r -a ROTATIONS <<<"$2"; shift 2 ;;
     --profiles) read -r -a PROFILES <<<"$2"; shift 2 ;;
-    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+    --lanes) LANES=$2; shift 2 ;;
+    --max-cells) MAX_CELLS=$2; shift 2 ;;
+    -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -52,6 +63,15 @@ erase_settings() {
   "$PY" -m esptool --chip "$(chip "$1")" --port "$(flash_port "$1")" erase-region 0x9000 0x9000 2>&1 \
     | grep -iE "erased|error" | tail -1
 }
+health() { PYTHONPATH=host python3 -m hil.usbhealth "${1:-check}"; }
+# Stop at the first unhealthy check: more flashing on a wedged bus only makes it worse.
+guard() {  # <where>
+  local out
+  out=$(health check) && return 0
+  echo "ABORT at $1: $out -- reboot the host, then restore the boards" | tee -a "$VERDICTS"
+  printf '%s\n' "${summary[@]}"
+  exit 3
+}
 unbond() {
   local m
   for m in $(bluetoothctl devices | awk '/HILpad/ {print $2}'); do bluetoothctl remove "$m" >/dev/null; done
@@ -60,9 +80,12 @@ unbond() {
 OUT=results/matrix
 mkdir -p "$OUT"
 VERDICTS=results/matrix-verdicts.md
-echo "## matrix $(date -u +%FT%TZ) rotations=${ROTATIONS[*]} profiles=${PROFILES[*]}" >> "$VERDICTS"
+echo "## matrix $(date -u +%FT%TZ) rotations=${ROTATIONS[*]} profiles=${PROFILES[*]} lanes=$LANES" >> "$VERDICTS"
 fail=0
+cells=0
 summary=()
+health check || { echo "USB unhealthy before the run: not starting" >&2; exit 3; }
+health baseline
 
 for obs in "${ROTATIONS[@]}"; do
   # The other two boards, in a fixed cyclic order: the first is observed by BlueZ, the second by Bluepad32.
@@ -73,8 +96,11 @@ for obs in "${ROTATIONS[@]}"; do
   unbond
   erase_settings "$obs"
   flash "$obs" "$obs_bundle"
+  guard "flash observer $obs"
 
   for p in "${PROFILES[@]}"; do
+    if ((MAX_CELLS > 0 && cells >= MAX_CELLS)); then break; fi
+    cells=$((cells + 1))
     bz_bundle=$(bundle "$bz" "$p"); bp_bundle=$(bundle "$bp" "$p")
     if [[ -z $bz_bundle || -z $bp_bundle ]]; then
       echo "SKIP $obs/$p: missing bundle (bluez=$bz_bundle bp32=$bp_bundle)" | tee -a "$VERDICTS"
@@ -85,7 +111,9 @@ for obs in "${ROTATIONS[@]}"; do
     # plus BLE traffic has wedged it hard enough to need a power cycle (2026-09-11, 2026-10-04). test-all.sh
     # serializes flash+pair for the same reason; only the test lanes below run in parallel.
     flash "$bz" "$bz_bundle"
+    guard "flash $bz"
     flash "$bp" "$bp_bundle"
+    guard "flash $bp"
     sleep 3
     tag="obs-$obs-$p"
     (
@@ -96,10 +124,11 @@ for obs in "${ROTATIONS[@]}"; do
       fi
     ) > "$OUT/$tag-bluez-$bz.log" 2>&1 &
     bz_pid=$!
+    if [[ $LANES == serial ]]; then wait $bz_pid; bz_rc=$?; fi
     PYTHONPATH=host timeout 900 "$PY" tester/bp32_hil.py --profile "$p" "$(port "$bp")" "$(port "$obs")" \
       > "$OUT/$tag-bp32-$bp.log" 2>&1 &
     bp_pid=$!
-    wait $bz_pid; bz_rc=$?
+    if [[ $LANES != serial ]]; then wait $bz_pid; bz_rc=$?; fi
     wait $bp_pid; bp_rc=$?
     for lane in "bluez:$bz:$bz_rc" "bp32:$bp:$bp_rc"; do
       IFS=: read -r name board rc <<<"$lane"
@@ -114,6 +143,7 @@ for obs in "${ROTATIONS[@]}"; do
     done
     # The two gamepad boards may have bonded with BlueZ; drop that before the next profile's descriptor.
     unbond
+    guard "after cell $tag"
   done
   erase_settings "$obs"
 done
