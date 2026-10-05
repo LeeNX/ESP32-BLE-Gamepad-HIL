@@ -382,21 +382,32 @@ story built in, no soldering required:
 
 | Port (silkscreen) | Interface | Use as |
 |---|---|---|
-| **"USB"** | native USB-OTG (the S3's built-in USB peripheral) | `flash_port` |
-| **"UART"** | onboard CP2102/CH340 bridge → UART0 | `port` |
+| **"USB"** | native USB-OTG (the S3's built-in USB peripheral) | optional `flash_port` — see below |
+| **"UART"** | onboard CP2102/CH340 bridge → UART0, with the DTR/RTS auto-reset circuit | `port`, and flashing |
 
 ```toml
 [board.esp32s3]
-port       = "/dev/serial/by-id/usb-<CP2102-or-CH340-bridge>-if00-port0"  # "UART" port
-flash_port = "/dev/serial/by-id/usb-Espressif…-if00"                     # "USB" port
+port       = "/dev/serial/by-id/usb-<CP2102-or-CH340-bridge>-if00-port0"  # "UART" port: commands + flashing
+# flash_port = "/dev/serial/by-id/usb-Espressif…-if00"                   # "USB" port: see below
 ```
 
 Plug **both** cables into the powered hub, `ls -l /dev/serial/by-id/` to tell
 them apart (the native port identifies as an Espressif device; the bridge as a
-Silicon Labs/CP210x or CH340), fill in both paths, and it behaves exactly like
-`esp32dev` — no `flash_port`/`port` juggling caveats beyond setting them once.
-Native-USB flashing is still capped at 115200 (same flakiness as the C3 —
-`tester/flash.py`'s `SLOW_CHIPS`).
+Silicon Labs/CP210x or CH340), and set `port`. With `flash_port` unset the
+board is flashed through the bridge too, exactly like `esp32dev`.
+
+**Prefer flashing through the bridge on a Raspberry Pi 3B+** (and probably any
+single-controller host): flashing over the native port makes the S3 drop off
+the bus mid-transfer when esptool resets it, and on the 3B+ — one `dwc_otg`
+controller shared by every USB port *and* `eth0` — that produced bursts of
+12-14 `dwc_otg_hcd_urb_dequeue ... Timed out` warnings per flash, the failure
+mode that wedged USB and Ethernet on 2026-09-11 and 2026-10-04. Through the
+bridge: 2 (the native port still re-enumerates on reset). Watch for it with
+`dmesg | grep -c dwc_otg_hcd_urb_dequeue` climbing after flashes, or
+`PYTHONPATH=host python3 -m hil.usbhealth check`. Setting `flash_port` to the
+native port still works where the host copes; it's capped at 115200 like the
+C3 (`tester/flash.py`'s `SLOW_CHIPS`). The C3 has no such choice: its bridge is
+wired to GPIO20/21 only (no EN/IO0), so it can only be flashed natively.
 
 A single-USB-C S3 board (no separate UART bridge) is the C3 situation: it needs
 an external 3.3 V USB-UART adapter on UART0 — check your board's pinout for the

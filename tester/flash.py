@@ -6,8 +6,10 @@ nothing but esptool. No PlatformIO, no toolchain -- fine on a Raspberry Pi.
 """
 
 import argparse
+import fcntl
 import hashlib
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -24,6 +26,30 @@ def sha256(path):
         for chunk in iter(lambda: f.read(1 << 16), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+# One flash at a time across the whole rig (CI lanes, tester/test-matrix.sh, manual runs). On the reference
+# Raspberry Pi 3B+ every USB port and the Ethernet share one dwc_otg controller, and parallel flashing has wedged
+# it (dwc_otg_hcd_urb_dequeue timeouts, Ethernet and USB serial dropping off -- 2026-09-11, 2026-10-04). Serial
+# I/O and BLE can stay concurrent; esptool's bulk transfers can't. $HIL_FLASH_LOCK overrides the lock file.
+FLASH_LOCK = pathlib.Path(
+    os.environ.get("HIL_FLASH_LOCK")
+    or pathlib.Path(os.environ.get("XDG_CACHE_HOME") or pathlib.Path.home() / ".cache")
+    / "esp32-hil"
+    / "flash.lock"
+)
+
+
+def flash_lock():
+    """Block until this process holds the rig-wide flash lock; released when the process exits."""
+    FLASH_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(FLASH_LOCK, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(f"flash: waiting for the flash lock ({FLASH_LOCK})", flush=True)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+    return fd
 
 
 def esptool_cmd():
@@ -78,6 +104,7 @@ def main():
         f"({chip} @ {baud})",
     )
 
+    flash_lock()
     for attempt in range(1, args.retries + 1):
         r = subprocess.run(cmd)
         if r.returncode == 0:
