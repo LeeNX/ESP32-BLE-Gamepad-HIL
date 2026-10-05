@@ -18,6 +18,23 @@ What a bump means:
 
 ## [Unreleased]
 
+### Added
+
+- **`firmware/observer/`**: the Bluepad32 observer firmware now lives in the
+  rig repo, next to `hil_runner`. It comes from the Bluepad32 HIL rig's host
+  firmware (leenx-foss/antBot-hil `host/`) minus NuS, OTA, the access gate and
+  the OTA chord, which the observer never used; every `HIL ...` line and
+  command `tester/bp32_hil.py` relies on is unchanged, as is the partition
+  layout. Bluepad32 stays external: `[observer].bluepad32_dir`, as
+  `[builder].lib_dir` is for the library.
+- **`rig_sha` / `rig_describe` in every bundle manifest**: the rig commit the
+  firmware source came from, next to the library's `lib_sha`.
+
+### Changed
+
+- **`builder/build-observers.sh` builds `firmware/observer`**:
+  `[observer].host_dir` and `HIL_OBSERVER` are gone.
+
 ## [0.3.0] — 2026-10-05
 
 ### Added
