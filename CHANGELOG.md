@@ -93,6 +93,9 @@ What a bump means:
   unset. Flashing over the native USB port gave bursts of 12-14 `dwc_otg`
   timeouts per flash on the 3B+; through the bridge, ~2. Unplug the unused
   native "USB" cable as well: it still re-enumerates on every reset.
+- **REPRODUCE.md** covers the `sinput` bundles and the observer matrix,
+  including the Bluepad32 and antBot-hil refs the observer firmware was built
+  from (it isn't in the archive yet).
 
 ## [0.2.6] — 2026-09-18
 
