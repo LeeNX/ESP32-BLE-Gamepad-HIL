@@ -90,10 +90,13 @@ profile = "default"
 pio_env = "esp32s3"
 # A dual-USB-C board (e.g. ESP32-S3-DevKitC-1): the onboard CP2102 bridge on
 # the "UART" port *is* `port` (hil_runner's Serial -- UART0, same
-# ARDUINO_USB_CDC_ON_BOOT=0 story as the C3) -- no external wiring needed. The
-# "USB" port (native USB-OTG) is `flash_port`. See README "ESP32-S3 dual-USB-C".
+# ARDUINO_USB_CDC_ON_BOOT=0 story as the C3) -- no external wiring needed, and
+# it has the auto-reset circuit, so leave flash_port unset to flash through it
+# too. Flashing over the "USB" port (native USB-OTG) via flash_port works, but
+# on a Pi 3B+ it caused bursts of dwc_otg timeouts (the USB+Ethernet wedge) --
+# see README "ESP32-S3 dual-USB-C".
 port = "/dev/serial/by-id/CHANGE-ME"
-# flash_port = "/dev/serial/by-id/CHANGE-ME"
+# flash_port = "/dev/serial/by-id/CHANGE-ME"   # native "USB" port; see above
 profile = "default"
 # Status LEDs -- see board.esp32dev above. Overrides: $HIL_LED_PIN_ESP32S3 /
 # $HIL_CONN_LED_PIN_ESP32S3.
