@@ -410,7 +410,8 @@ GENERIC_BUTTONS = {
 def run_generic():
     config = cmd("CONFIG?") or ""
     n_buttons = int(re.search(r"buttons=(\d+)", config).group(1)) if "buttons=" in config else 0
-    axes = re.search(r"axes=(\S+)", config).group(1).split(",") if "axes=" in config else []
+    m = re.search(r"axes=(\S*)", config)  # maxbtn has none: "axes= special=..."
+    axes = [a for a in m.group(1).split(",") if a] if m else []
     print(f"      gamepad: {n_buttons} buttons, axes {axes}")
     section("features")
     check(

@@ -57,7 +57,13 @@ newest() { local d=("$@"); [[ -d "${d[-1]}" ]] && echo "${d[-1]}"; }  # globs so
 bundle() {  # <board> <profile>
   if [[ $2 == sinput || $2 == bp32obs ]]; then newest "$BUNDLE_DIR/matrix/$1-$2"-*; else newest "$BUNDLE_DIR/$1-$2"-*; fi
 }
-flash() { "$PY" tester/flash.py "$2" --port "$(flash_port "$1")" 2>&1 | tail -1; }
+# Boards flashed over native USB (USB-Serial/JTAG) re-enumerate after the reset: give that time to settle (and
+# any dwc_otg warnings it causes time to land) before the next health check counts them.
+flash() {
+  "$PY" tester/flash.py "$2" --port "$(flash_port "$1")" 2>&1 | tail -1
+  [[ -n $(cfg "board.$1.flash_port") ]] && sleep 5
+  return 0
+}
 # Settings (NVS/otadata) differ between hil_runner and the Bluepad32 observer: clear them when a board changes role.
 erase_settings() {
   "$PY" -m esptool --chip "$(chip "$1")" --port "$(flash_port "$1")" erase-region 0x9000 0x9000 2>&1 \
@@ -153,6 +159,7 @@ for b in "${BOARDS[@]}"; do
   def_bundle=$(bundle "$b" default) || { echo "no default bundle for $b" >&2; continue; }
   erase_settings "$b"
   flash "$b" "$def_bundle"
+  guard "restore $b"
 done
 unbond
 
