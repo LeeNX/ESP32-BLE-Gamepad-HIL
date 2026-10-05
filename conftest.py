@@ -121,6 +121,8 @@ PROFILE_ENV_SUFFIX = {
     "specials": "-specials",
     "minimal": "-minimal",
     "maxbtn": "-maxbtn",
+    "maxfeat": "-maxfeat",
+    "sinput": "-sinput",
     "local": "-local",  # ad-hoc dev profile -- not in CI; see firmware/include/hil_profile.h
 }
 

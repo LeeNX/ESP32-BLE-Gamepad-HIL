@@ -62,6 +62,7 @@ push to the tester, run, pull results). One box can be both roles
 | `specials` | 16 btn, X/Y axis (**−32767..32767**), 8 special buttons, **Output + Feature reports** | the fragile, least-exercised surface in one flash: special usages, signed axes (`test_ranges` negative rail), and the O/F report plumbing (`setEnable{Output,Feature}Report`) | every push |
 | `maxbtn` | 128 btn, no hats/axes | the largest layout the HID transport currently supports — the library's 128-button ceiling | every push |
 | `minimal` | 2 btn, X/Y axis | smallest input report — the latency-curve low-end anchor, and nothing else depends on it | weekly + release |
+| `maxfeat` | 16 btn, 1 hat, 6 axis (x/y/z/rx/ry/rz), accelerator + brake, home + back | max *features* rather than max buttons: everything Bluepad32's generic HID parser maps, in one descriptor (button 16 is the first it drops). The observer matrix's "max" profile; `maxbtn` still pins the library's 128-button ceiling | not yet |
 | `sinput` | SInput mode: 25 btn, 1 hat, sticks x/y + z/rz, triggers rx/ry, start/select/home, IMU, RGB, rumble, touchpad; VID/PID `2E8A:10C6` | for SInput-aware observers (SDL3 with the SInput hint, Bluepad32). Drives the SInput-only commands (`MOTION`, `TOUCH`, `RUMBLE?`, `RGB?`, `PLED?`). **Needs a library with `GamepadMode::SInput`** (upstream `master`; the rig's pinned checkout is older). BlueZ/evdev tests don't know SInput yet | not yet |
 | `local` | 4 btn, 1 hat, 2 axis | **ad-hoc, not built by CI** — for local developer smoke tests ([`desktop/`](desktop/)). Advertises as `HILdev <board>`, not `HILpad <board>`, so a dev board doesn't clash with the rig | never |
 
@@ -214,6 +215,30 @@ Afterwards, reflash the board's usual bundle and remove its BLE bond (the
 gaps: the IMU input device has no vendor/product, and SInput's paddle,
 touchpad-click, power and misc buttons have no evdev codes.
 
+#### Bluepad32 as the observer (`tester/bp32_swap.sh`, `tester/bp32_hil.py`)
+
+The third SInput observer, with no extra hardware: for one run the rig's
+`esp32dev` becomes a [Bluepad32](https://github.com/ricardoquesada/bluepad32)
+host and the `esp32c3` runs the `sinput` profile. `bp32_hil.py` drives the
+C3 over serial and reads what Bluepad32's SInput parser reports from the
+host's `HIL ...` console lines: buttons, D-pad, sticks, triggers, IMU in SI
+units, the feature response, and player LED / RGB / rumble sent back to the
+gamepad. `bp32_swap.sh` flashes both boards, runs it, and restores both to
+their current `default` bundles (dropping their BlueZ bonds so CI pairs fresh).
+
+```bash
+tester/rig-lock.sh -- tester/bp32_swap.sh <bluepad32 host image dir> <esp32c3 sinput bundle dir>
+```
+
+The host image is the Bluepad32 HIL rig's `host/` firmware
+(`leenx-foss/antBot-hil`), built without NuS/OTA and with
+`HIL_ALLOW_ADDR=<esp32c3 BLE address>` so it pairs only with the C3 (it
+ignores `HILpad*` names otherwise). Keep both directories outside
+`~/hil-bundles`, which `builder/build.sh --push` syncs with `--delete`.
+First run, 2026-10-04 (Bluepad32 PR #234 `6f603c7`, library `80a0d7c`):
+51/51 checks pass; gaps: Bluepad32 has no fields for SInput's paddle,
+touchpad-click, power and misc buttons, and no touchpad API.
+
 ## Benchmarking (`--bench`)
 
 `test_latency.py` runs one sweep per flashed profile via `host/hil/bench.py`,
@@ -277,6 +302,7 @@ banner and any debug lines are skipped by the host.
 | `PING` | `PONG` |
 | `ID?` | `ID hil_runner profile=… board=… built=…` |
 | `NAME?` | `NAME <advertised BLE name>` — `getDeviceName()`; `HILpad <board>`, or `HILdev <board>` / a `-D HIL_DEVICE_NAME` override for the `local` profile |
+| `ADDR?` | `ADDR <aa:bb:cc:dd:ee:ff>` — this board's own BLE address (`NimBLEDevice::getAddress()`), e.g. to point a Bluepad32 observer's `allow <addr>` at it |
 | `CONFIG?` | `CONFIG buttons=… hats=… axes=… special=… axesMin=… axesMax=… vid=… pid=… ver=… reportId=… feat=… out=… profile=… libsha=…` — `libsha` is the ESP32-BLE-Gamepad commit this build embeds (`-D HIL_LIB_SHA`, set by `builder/build.sh`; `"unknown"` for a from-source dev build). `conftest.py`'s `dut` fixture checks it against the flashed bundle's `manifest.json` `lib_sha` to catch a stale/wrong flash — same board/profile/layout can still be the wrong build |
 | `DIS?` | `DIS model=… serial=… fw=… hw=… sw=… mfr=…` — the DIS strings the firmware configured |
 | `PNP?` | `PNP vidsrc=1 vid=… pid=… ver=…` |
@@ -299,6 +325,7 @@ banner and any debug lines are skipped by the host.
 | `FEATURE SET <hex>` | `OK` — `setFeatureBuffer()` |
 | `OUTPUT?` | `OUTPUT recv=0\|1 <hex>` — `isOutputReceived()` + `getOutputBuffer()` |
 | `RESET` | `OK` — zero buttons, axes, hats (and IMU + touch on `sinput`) |
+| `SIM <rudder\|throttle\|accelerator\|brake\|steering> <int16>` | `OK` / `ERR disabled` / `ERR control` / `ERR range` — a Simulation Controls value (`maxfeat`: accelerator, brake); `CONFIG?` lists the enabled ones as `sim=` |
 | `MOTION <gx> <gy> <gz> <ax> <ay> <az>` | `OK` / `ERR range` / `ERR disabled` — `sinput` only: raw int16 gyro + accel counts into the SInput report's IMU block |
 | `TOUCH <0\|1> <x> <y> <pressure>` | `OK` / `ERR range` / `ERR disabled` — `sinput` only: touchpad finger; pressure 0 = lifted |
 | `RUMBLE?` / `RGB?` / `PLED?` | `RUMBLE recv=0\|1 left=<n> right=<n>` / `RGB recv=0\|1 r= g= b=` / `PLED recv=0\|1 <n>` / `ERR disabled` — `sinput` only: what the host last sent (haptic type 2 amplitudes, RGB, player LED index). `recv=1` means new since the last query |

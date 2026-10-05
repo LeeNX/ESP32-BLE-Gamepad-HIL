@@ -177,6 +177,38 @@ static void printBytesHex(const char *tag, bool recv, const uint8_t *d, int n)
     Serial.println();
 }
 
+// "name,name" of the enabled flags, or "none".
+static void namesCsv(char *buf, size_t buflen, const char *const names[], const bool enabled[], int n)
+{
+    buf[0] = '\0';
+    size_t used = 0;
+    for (int i = 0; i < n; i++)
+    {
+        if (!enabled[i]) continue;
+        int w = snprintf(buf + used, buflen - used, "%s%s", used ? "," : "", names[i]);
+        if (w > 0) used += w;
+    }
+    if (!used) snprintf(buf, buflen, "none");
+}
+
+static const char *const HIL_SPECIAL_TOKENS[8] = {"start", "select", "menu", "home", "back", "volinc", "voldec", "volmute"};
+static const bool HIL_SPECIAL_ON[8] = {HIL_SP_START, HIL_SP_SELECT, HIL_SP_MENU, HIL_SP_HOME,
+                                       HIL_SP_BACK, HIL_SP_VOLINC, HIL_SP_VOLDEC, HIL_SP_VOLMUTE};
+static const char *const HIL_SIM_TOKENS[5] = {"rudder", "throttle", "accelerator", "brake", "steering"};
+static const bool HIL_SIM_ON[5] = {HIL_SIM_RUDDER, HIL_SIM_THROTTLE, HIL_SIM_ACCELERATOR, HIL_SIM_BRAKE, HIL_SIM_STEERING};
+
+static void applySim(int idx, int16_t v)
+{
+    switch (idx)
+    {
+    case 0: bleGamepad.setRudder(v); break;
+    case 1: bleGamepad.setThrottle(v); break;
+    case 2: bleGamepad.setAccelerator(v); break;
+    case 3: bleGamepad.setBrake(v); break;
+    case 4: bleGamepad.setSteering(v); break;
+    }
+}
+
 static void printAxesCsv(char *buf, size_t buflen)
 {
     buf[0] = '\0';
@@ -215,17 +247,25 @@ static void handle(const String &cmd)
         return;
     }
 
+    if (c == "ADDR?")
+    {
+        // This board's own BLE address, so an observer that filters by address (Bluepad32's
+        // `allow <addr>`) can be pointed at whichever board plays the gamepad in a rotation.
+        Serial.printf("ADDR %s\n", NimBLEDevice::getAddress().toString().c_str());
+        return;
+    }
+
     if (c == "CONFIG?")
     {
-        char axes[40];
+        char axes[40], specials[64], sims[48];
         printAxesCsv(axes, sizeof(axes));
-        Serial.printf("CONFIG buttons=%d hats=%d axes=%s special=%s "
+        namesCsv(specials, sizeof(specials), HIL_SPECIAL_TOKENS, HIL_SPECIAL_ON, 8);
+        namesCsv(sims, sizeof(sims), HIL_SIM_TOKENS, HIL_SIM_ON, 5);
+        Serial.printf("CONFIG buttons=%d hats=%d axes=%s special=%s sim=%s "
                       "axesMin=%d axesMax=%d vid=%04X pid=%04X ver=%04X "
                       "reportId=%d feat=%d out=%d profile=%s libsha=%s\n",
                       HIL_BUTTON_COUNT, HIL_HAT_COUNT, axes,
-                      HIL_SINPUT     ? "start,select,home"
-                      : HIL_SPECIALS ? "start,select,menu,home,back,volinc,voldec,volmute"
-                                     : "none",
+                      HIL_SINPUT ? "start,select,home" : specials, sims,
                       (int)bleGamepadConfig.getAxesMin(), (int)bleGamepadConfig.getAxesMax(),
                       bleGamepadConfig.getVid(), bleGamepadConfig.getPid(), bleGamepadConfig.getGuidVersion(),
                       bleGamepadConfig.getHidReportId(),
@@ -567,6 +607,22 @@ static void handle(const String &cmd)
 #endif
     }
 
+    if (c == "SIM")   // SIM <rudder|throttle|accelerator|brake|steering> <int16>
+    {
+        if (n < 3) { reply("ERR args"); return; }
+        int idx = -1;
+        for (int i = 0; i < 5; i++)
+            if (t[1].equalsIgnoreCase(HIL_SIM_TOKENS[i])) idx = i;
+        if (idx < 0) { reply("ERR control"); return; }
+        if (!HIL_SIM_ON[idx]) { reply("ERR disabled"); return; }
+        long v = t[2].toInt();
+        if (v < -32768 || v > 32767) { reply("ERR range"); return; }
+        applySim(idx, (int16_t)v);
+        bleGamepad.sendReport();
+        reply("OK");
+        return;
+    }
+
     if (c == "RESET")
     {
         bleGamepad.resetButtons();
@@ -575,6 +631,8 @@ static void handle(const String &cmd)
 #endif
         for (int i = 0; i < 8; i++) applyAxis(i, 0);
         for (int i = 1; i <= HIL_HAT_COUNT; i++) applyHat(i, 0);
+        for (int i = 0; i < 5; i++)
+            if (HIL_SIM_ON[i]) applySim(i, 0);
 #if HIL_SINPUT
         bleGamepad.setMotionControls(0, 0, 0, 0, 0, 0);
         bleGamepad.setTouchpad(0, 0, 0, 0);

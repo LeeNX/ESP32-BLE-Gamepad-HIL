@@ -69,6 +69,19 @@ def main():
         "(builder/build.sh --name / $HIL_DEVICE_NAME). Recorded in the manifest "
         "so the tester can assert NAME? against it. Empty = firmware default.",
     )
+    ap.add_argument(
+        "--app-offset",
+        default="",
+        help="flash offset for firmware.bin, overriding idedata's application_offset (which is the first "
+        "app partition PlatformIO finds -- an OTA slot, for a table with a factory app)",
+    )
+    ap.add_argument(
+        "--extra-image",
+        action="append",
+        default=[],
+        metavar="OFFSET:FILE",
+        help="another image to flash, e.g. a blank NVS so a role-swapped board starts clean; repeatable",
+    )
     args = ap.parse_args()
 
     build_dir = pathlib.Path(args.build_dir)
@@ -78,10 +91,13 @@ def main():
     images = list(extra.get("flash_images", []))
     images.append(
         {
-            "offset": extra.get("application_offset", "0x10000"),
+            "offset": args.app_offset or extra.get("application_offset", "0x10000"),
             "path": str(build_dir / "firmware.bin"),
         }
     )
+    for spec in args.extra_image:
+        offset, _, path = spec.partition(":")
+        images.append({"offset": offset, "path": path})
 
     lib_sha = git(args.lib_dir, "rev-parse", "HEAD")
     lib_describe = git(args.lib_dir, "describe", "--tags", "--always", "--dirty") or lib_sha[:8]

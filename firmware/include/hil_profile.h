@@ -49,6 +49,7 @@
 #define HIL_PROFILE_MAXBTN 4
 #define HIL_PROFILE_LOCAL 5
 #define HIL_PROFILE_SINPUT 6
+#define HIL_PROFILE_MAXFEAT 7
 
 #ifndef HIL_PROFILE
 #define HIL_PROFILE HIL_PROFILE_DEFAULT
@@ -197,6 +198,42 @@
 #define HIL_AX_RZ 1
 #define HIL_AX_S1 0
 #define HIL_AX_S2 0
+#elif HIL_PROFILE == HIL_PROFILE_MAXFEAT
+// Max *features*, not max buttons: everything Bluepad32's generic HID parser
+// (uni_hid_parser_generic.c) maps, in one descriptor, for the observer matrix
+// (tester/bp32_hil.py) -- and a broad generic layout for BlueZ too.
+//   16 buttons  -- Bluepad32 maps HID buttons 1-15 (3/6/9/10 unused); 16 is the
+//                  first one it drops
+//   1 hat       -- Bluepad32's d-pad
+//   6 axes      -- X/Y/Z/Rx/Ry/Rz (Bluepad32 reads Z and Rx into the same field,
+//                  and Ry and Rz; sliders it ignores, so they're off)
+//   accelerator + brake (Simulation Controls) -- Bluepad32's throttle / brake
+//   home + back (Consumer page) -- the only specials Bluepad32 maps (AC Home ->
+//                  MISC_BUTTON_START, AC Back -> MISC_BUTTON_SELECT)
+#define HIL_PROFILE_NAME "maxfeat"
+#define HIL_BUTTON_COUNT 16
+#define HIL_HAT_COUNT 1
+#define HIL_AXES_MIN 0x0000
+#define HIL_AXES_MAX 0x7FFF
+#define HIL_SPECIALS 1
+#define HIL_SP_START 0
+#define HIL_SP_SELECT 0
+#define HIL_SP_MENU 0
+#define HIL_SP_HOME 1
+#define HIL_SP_BACK 1
+#define HIL_SP_VOLINC 0
+#define HIL_SP_VOLDEC 0
+#define HIL_SP_VOLMUTE 0
+#define HIL_SIM_ACCELERATOR 1
+#define HIL_SIM_BRAKE 1
+#define HIL_AX_X 1
+#define HIL_AX_Y 1
+#define HIL_AX_Z 1
+#define HIL_AX_RX 1
+#define HIL_AX_RY 1
+#define HIL_AX_RZ 1
+#define HIL_AX_S1 0
+#define HIL_AX_S2 0
 #elif HIL_PROFILE == HIL_PROFILE_LOCAL
 // Ad-hoc profile for local developer smoke-testing -- deliberately NOT in the
 // CI build matrix (hil_config.toml [builder] profiles) or any release. A small
@@ -224,6 +261,48 @@
 
 #ifndef HIL_SINPUT
 #define HIL_SINPUT 0
+#endif
+// Per-special-button selection (BleGamepad special buttons 0..7). A profile
+// with HIL_SPECIALS gets all eight unless it picks a subset.
+#ifndef HIL_SP_START
+#define HIL_SP_START HIL_SPECIALS
+#endif
+#ifndef HIL_SP_SELECT
+#define HIL_SP_SELECT HIL_SPECIALS
+#endif
+#ifndef HIL_SP_MENU
+#define HIL_SP_MENU HIL_SPECIALS
+#endif
+#ifndef HIL_SP_HOME
+#define HIL_SP_HOME HIL_SPECIALS
+#endif
+#ifndef HIL_SP_BACK
+#define HIL_SP_BACK HIL_SPECIALS
+#endif
+#ifndef HIL_SP_VOLINC
+#define HIL_SP_VOLINC HIL_SPECIALS
+#endif
+#ifndef HIL_SP_VOLDEC
+#define HIL_SP_VOLDEC HIL_SPECIALS
+#endif
+#ifndef HIL_SP_VOLMUTE
+#define HIL_SP_VOLMUTE HIL_SPECIALS
+#endif
+// Simulation Controls (off unless a profile asks).
+#ifndef HIL_SIM_RUDDER
+#define HIL_SIM_RUDDER 0
+#endif
+#ifndef HIL_SIM_THROTTLE
+#define HIL_SIM_THROTTLE 0
+#endif
+#ifndef HIL_SIM_ACCELERATOR
+#define HIL_SIM_ACCELERATOR 0
+#endif
+#ifndef HIL_SIM_BRAKE
+#define HIL_SIM_BRAKE 0
+#endif
+#ifndef HIL_SIM_STEERING
+#define HIL_SIM_STEERING 0
 #endif
 #ifndef HIL_OUTPUT_REPORT_LEN
 #define HIL_OUTPUT_REPORT_LEN 0
@@ -286,12 +365,10 @@ static inline void hilApplyProfile(BleGamepadConfiguration &cfg)
     cfg.setHatSwitchCount(HIL_HAT_COUNT);
     cfg.setWhichAxes(HIL_AX_X, HIL_AX_Y, HIL_AX_Z, HIL_AX_RX,
                      HIL_AX_RY, HIL_AX_RZ, HIL_AX_S1, HIL_AX_S2);
-#if HIL_SPECIALS
-    cfg.setWhichSpecialButtons(true, true, true, true, true, true, true, true);
-#else
-    cfg.setWhichSpecialButtons(false, false, false, false, false, false, false, false);
-#endif
-    cfg.setWhichSimulationControls(false, false, false, false, false);
+    cfg.setWhichSpecialButtons(HIL_SP_START, HIL_SP_SELECT, HIL_SP_MENU, HIL_SP_HOME,
+                               HIL_SP_BACK, HIL_SP_VOLINC, HIL_SP_VOLDEC, HIL_SP_VOLMUTE);
+    cfg.setWhichSimulationControls(HIL_SIM_RUDDER, HIL_SIM_THROTTLE, HIL_SIM_ACCELERATOR,
+                                   HIL_SIM_BRAKE, HIL_SIM_STEERING);
 #if HIL_OUTPUT_REPORT_LEN
     cfg.setEnableOutputReport(true);
     cfg.setOutputReportLength(HIL_OUTPUT_REPORT_LEN);

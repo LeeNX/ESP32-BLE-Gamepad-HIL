@@ -59,7 +59,7 @@ fi
 profile_suffix() { case "$1" in
   default) echo "" ;; specials) echo "-specials" ;;
   minimal) echo "-minimal" ;; maxbtn) echo "-maxbtn" ;;
-  local) echo "-local" ;; sinput) echo "-sinput" ;;
+  local) echo "-local" ;; sinput) echo "-sinput" ;; maxfeat) echo "-maxfeat" ;;
   *) echo "unknown profile: $1" >&2; exit 2 ;; esac; }
 board_chip() { case "$1" in
   esp32dev) echo esp32 ;; esp32c3) echo esp32c3 ;; esp32s3) echo esp32s3 ;;
@@ -120,10 +120,14 @@ for board in "${BOARDS[@]}"; do
     PLATFORMIO_BUILD_FLAGS="$board_flags" "$PIO" run -e "$env" -d "$REPO/firmware"
     ide=$(mktemp)
     PLATFORMIO_BUILD_FLAGS="$board_flags" "$PIO" run -e "$env" -d "$REPO/firmware" -t idedata > "$ide" 2>/dev/null
+    # `sinput` bundles are for the SInput / matrix runners (tester/sinput_hil.py, tester/bp32_hil.py), not the
+    # BlueZ pytest suite: they go under matrix/, which test-all.sh skips (no manifest.json at that level).
+    out_root=$OUT_ROOT
+    [[ $profile == sinput ]] && out_root=$OUT_ROOT/matrix
     python3 builder/make_bundle.py \
       --build-dir "$REPO/firmware/.pio/build/$env" \
       --idedata "$ide" --env "$env" --profile "$profile" \
-      --board "$board" --chip "$chip" --lib-dir "$LIB_DIR" --out-root "$OUT_ROOT" \
+      --board "$board" --chip "$chip" --lib-dir "$LIB_DIR" --out-root "$out_root" \
       --device-name "$DEVICE_NAME"
     rm -f "$ide"
   done

@@ -20,6 +20,36 @@ What a bump means:
 
 ### Added
 
+- **`sinput` profile** (`GamepadMode::SInput`, VID/PID `2E8A:10C6`, IMU + RGB
+  on; needs a library with SInput mode) and its serial commands `MOTION`,
+  `TOUCH`, `RUMBLE?`, `RGB?`, `PLED?`. `sinput` bundles go under
+  `bundles/matrix/`, which `test-all.sh` skips.
+- **`tester/sinput_hil.py`**: the `sinput` profile against `hid-generic`
+  (raw hidraw) and the [linux-hid-sinput](https://github.com/LeeNX/linux-hid-sinput)
+  kernel driver, switching drivers by module load/unload on a live connection;
+  `tester/bootstrap-sinput.sh` (root) sets up the hidraw rule, driver staging
+  dir, `hil-sinput-driver` wrapper and sudoers rule (also in the `leenx-ansible`
+  `hil` role, `hil_sinput_*`).
+- **`maxfeat` profile**: max *features* rather than max buttons -- 16 buttons,
+  1 hat, x/y/z/rx/ry/rz, accelerator + brake, home + back: what Bluepad32 maps
+  from a generic gamepad. Golden descriptor `firmware/golden/maxfeat.hiddesc`.
+- **`SIM <control> <int16>`** serial command and per-profile Simulation Controls
+  / special-button subsets (`HIL_SIM_*`, `HIL_SP_*`); **`ADDR?`** reports the
+  board's BLE address.
+- **Bluepad32 as an observer**: `builder/build-observers.sh` builds
+  `bundles/matrix/<board>-bp32obs-*` (the Bluepad32 HIL host firmware,
+  leenx-foss/antBot-hil, `HIL_OBSERVER=1`; new `[observer]` config section);
+  `tester/bp32_hil.py` checks what Bluepad32 parses (`sinput`, `minimal`,
+  `maxbtn`, `maxfeat`; its expectations follow the parser Bluepad32 picks --
+  Android for an unrecognised BLE gamepad -- and report unmapped inputs as GAPs).
+- **`tester/test-matrix.sh`**: the observer matrix -- each rotation makes one
+  board a Bluepad32 observer and the other two gamepads (one observed by BlueZ,
+  one by Bluepad32), for `minimal`/`maxfeat`/`sinput`; serial flashing, USB
+  health guards per step, `--lanes serial|parallel`, `--max-cells`; restores
+  every board to its `default` bundle. `tester/bp32_swap.sh` is the one-off
+  version.
+- `builder/make_bundle.py`: `--app-offset` and `--extra-image OFFSET:FILE`.
+
 - **Rig-wide flash lock** in `tester/flash.py` (`$XDG_CACHE_HOME/esp32-hil/flash.lock`,
   or `$HIL_FLASH_LOCK`): flashes anywhere on the rig run one at a time. On the
   Raspberry Pi 3B+ every USB port and `eth0` share one `dwc_otg` controller, and
@@ -36,6 +66,8 @@ What a bump means:
 
 ### Changed
 
+- **`CONFIG?`** lists the specials a profile actually enables and adds a
+  `sim=` field; the special-button tests sweep only the listed specials.
 - **Flash the ESP32-S3 DevKitC-1 through its UART bridge**: the config
   template and README "ESP32-S3 dual-USB-C" now recommend leaving `flash_port`
   unset. Flashing over the native USB port gave bursts of 12-14 `dwc_otg`
