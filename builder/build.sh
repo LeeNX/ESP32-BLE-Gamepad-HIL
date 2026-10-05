@@ -62,7 +62,7 @@ profile_suffix() { case "$1" in
   local) echo "-local" ;; sinput) echo "-sinput" ;; maxfeat) echo "-maxfeat" ;;
   *) echo "unknown profile: $1" >&2; exit 2 ;; esac; }
 board_chip() { case "$1" in
-  esp32dev) echo esp32 ;; esp32c3) echo esp32c3 ;; esp32s3) echo esp32s3 ;;
+  esp32dev|esp32dev2) echo esp32 ;; esp32c3) echo esp32c3 ;; esp32s3) echo esp32s3 ;;
   esp32c6) echo esp32c6 ;; esp32h2) echo esp32h2 ;;
   *) echo "unknown board: $1" >&2; exit 2 ;; esac; }
 

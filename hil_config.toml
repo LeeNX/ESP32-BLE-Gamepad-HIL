@@ -48,6 +48,11 @@ profiles = "default specials maxbtn"  # see note above
 bluepad32_dir = ""   # Bluepad32 checkout: LeeNX/bluepad32 feature/sinput until upstream #234 merges, then develop
 pio = ""             # PlatformIO >= 6.2 (pioarduino platform); blank = [rig].pio
 
+# OBSERVER MATRIX -- tester/test-matrix.sh. Its boards (3 or more; each rotation uses three and leaves the rest
+# idle), separate from [builder].boards so a board can join the matrix without joining CI.
+[matrix]
+boards = "esp32dev esp32c3 esp32s3"   # e.g. add "esp32dev2" in hil_config.local.toml
+
 # TESTER role -- the Raspberry Pi + ESP32(s) + BLE adapter. builder/build.sh
 # --push rsyncs bundles here; the library repo's scripts/hil.sh and the CI job
 # drive it over SSH. Never builds -- esptool flash only. Set the real host/user
@@ -107,3 +112,12 @@ profile = "default"
 # $HIL_CONN_LED_PIN_ESP32S3.
 # led_pin = <gpio>
 # conn_led_pin = <gpio>
+
+[board.esp32dev2]
+# A second classic ESP32 DevKit (the rig's original esp32dev, onboard CP2102 with
+# the auto-reset circuit). Observer matrix only: add it to [matrix].boards, not
+# [builder].boards. Same chip as esp32dev; its own firmware name, so it
+# advertises "HILpad esp32dev2".
+pio_env = "esp32dev2"
+port = "/dev/serial/by-id/CHANGE-ME"
+profile = "default"

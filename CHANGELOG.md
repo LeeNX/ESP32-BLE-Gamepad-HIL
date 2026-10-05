@@ -29,6 +29,12 @@ What a bump means:
   `[builder].lib_dir` is for the library.
 - **`rig_sha` / `rig_describe` in every bundle manifest**: the rig commit the
   firmware source came from, next to the library's `lib_sha`.
+- **`esp32dev2` board**: a second classic ESP32 DevKit (the rig's original
+  esp32dev, onboard CP2102), with its own firmware envs so it advertises
+  `HILpad esp32dev2`. Observer matrix only: it isn't in `[builder].boards` or
+  the CI board lists.
+- **`[matrix].boards`** (and `test-matrix.sh --boards`): the matrix's boards,
+  3 or more, separate from the CI build list.
 
 ### Changed
 
@@ -37,6 +43,13 @@ What a bump means:
   named `<board>-bp32obs-<bluepad32 sha8>-<rig sha8>` and report the same in
   `version?`, so two builds from the same Bluepad32 commit can be told apart
   (`make_bundle.py --name-suffix`).
+- **`tester/test-matrix.sh` runs on 3 or more boards**: each rotation uses the
+  observer and the next two boards, and resets any other board first. That
+  board is the previous observer, which would otherwise keep its allow filter
+  and bonds and could take a gamepad another lane is pairing.
+- **Board names match exactly** (`hil.names.name_matches`) in BlueZ pairing and
+  evdev lookups: a substring test let `HILpad esp32dev` match
+  `HILpad esp32dev2`.
 - **`tester/test-matrix.sh` picks the most recently built bundle** (by mtime)
   rather than the last by name, which ends in a sha and says nothing about age.
 - **`[rig].health_dwc_burst` defaults to 12** (was 5). A single board reset

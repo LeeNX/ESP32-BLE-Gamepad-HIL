@@ -21,7 +21,7 @@ from pathlib import Path
 
 from hil.config import load
 
-_CHIP = {"esp32dev": "esp32"}
+_CHIP = {"esp32dev": "esp32", "esp32dev2": "esp32"}
 
 
 def _reason(board, cfg, probe):

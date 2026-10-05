@@ -36,10 +36,10 @@ done
 [[ -d "$BP32_DIR/src/components/bluepad32" ]] || { echo "[observer].bluepad32_dir: not a Bluepad32 checkout: '$BP32_DIR'" >&2; exit 2; }
 
 board_env() { case "$1" in
-  esp32dev) echo esp32dev ;; esp32c3) echo esp32-c3-devkitc-02 ;; esp32s3) echo esp32-s3-devkitc-1 ;;
+  esp32dev|esp32dev2) echo esp32dev ;; esp32c3) echo esp32-c3-devkitc-02 ;; esp32s3) echo esp32-s3-devkitc-1 ;;
   *) echo "no observer env for board: $1" >&2; exit 2 ;; esac; }
 board_chip() { case "$1" in
-  esp32dev) echo esp32 ;; esp32c3) echo esp32c3 ;; esp32s3) echo esp32s3 ;;
+  esp32dev|esp32dev2) echo esp32 ;; esp32c3) echo esp32c3 ;; esp32s3) echo esp32s3 ;;
   *) echo "unknown board: $1" >&2; exit 2 ;; esac; }
 # partitions.csv field (offset or size) of a partition, by name.
 part() { awk -F, -v n="$1" -v f="$2" '$1 ~ "^"n"[ \t]*$" {gsub(/[ \t]/, "", $f); print $f}' "$HOST_DIR/partitions.csv"; }
