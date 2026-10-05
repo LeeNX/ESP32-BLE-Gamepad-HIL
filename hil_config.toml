@@ -6,6 +6,7 @@
 [rig]
 lib_dir = "~/src/ESP32-BLE-Gamepad"   # library checkout the builder compiles against
 device_name = "HILpad"                # firmware advertises "<device_name> <board>"
+health_iface = "eth0"                 # hil.usbhealth: must have carrier if present ("" = skip)
 pio = "pio"                           # or an absolute path, e.g. ~/.venvs/pio/bin/pio
 # local_device_name -- override the advertised BLE name for `--profiles local`
 # builds on THIS box (<= 18 chars), so a dev board doesn't collide with the rig
