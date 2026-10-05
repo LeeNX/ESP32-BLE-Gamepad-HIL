@@ -253,6 +253,12 @@ for _ in range(90):
         break
     time.sleep(1)
 print(f"      {bp.ready}")
+m = bp.mark()
+bp.send("version?")
+bp32_build = (bp.wait_for("HIL version", m) or "HIL version ?").split()[-1]
+cfg_line = cmd("CONFIG?") or ""
+lib = (re.search(r"libsha=(\S+)", cfg_line) or [None, "?"])[1]
+print(f"VERSIONS bluepad32={bp32_build} fw={args.profile}/{lib}", flush=True)
 want_ids = "type=58 vid=0x2e8a pid=0x10c6" if args.profile == "sinput" else "vid=0x1d34 pid=0x8010"
 if not check(
     f"Bluepad32: device ready ({want_ids})",

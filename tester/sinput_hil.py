@@ -544,6 +544,34 @@ check("serial: sinput profile", ident is not None and "profile=sinput" in ident,
 print("     ", cmd("NAME?"), "|", cmd("PNP?"))
 ok, out = driver_ctl("status")
 print("     ", out.replace("\n", " | "))
+
+
+def versions():
+    """One VERSIONS line for the report: what this run actually tested against."""
+
+    def run(*a):
+        try:
+            return subprocess.run(a, capture_output=True, text=True, timeout=10).stdout.strip()
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+
+    kernel = os.uname().release
+    mod = "/sys/module/sinput"
+    loaded = os.path.isdir(mod)
+    drv = open(f"{mod}/version").read().strip() if os.path.exists(f"{mod}/version") else ""
+    drv = drv or run("/usr/sbin/modinfo", "-F", "version", "sinput") or "?"
+    src = open(f"{mod}/srcversion").read().strip() if os.path.exists(f"{mod}/srcversion") else ""
+    pkg = run("dpkg-query", "-W", "-f", "${Version}", f"sinput-modules-{kernel}") or "not installed"
+    cfg = cmd("CONFIG?") or ""
+    lib = (re.search(r"libsha=(\S+)", cfg) or [None, "?"])[1]
+    bluez = run("bluetoothctl", "--version").replace("bluetoothctl: ", "") or "?"
+    return (
+        f"kernel={kernel} sinput={drv}(pkg {pkg}{', srcversion ' + src if src else ''}"
+        f"{'' if loaded else ', not loaded'}) fw=sinput/{lib} bluez={bluez}"
+    )
+
+
+print("VERSIONS", versions(), flush=True)
 dmesg_start = len(dmesg_lines())
 
 section("pair (fresh: the descriptor differs from the board's usual profile)")

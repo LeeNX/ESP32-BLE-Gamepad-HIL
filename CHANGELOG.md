@@ -66,6 +66,17 @@ What a bump means:
 
 ### Changed
 
+- **`tester/flash.py` leaves an unchanged board alone**: it first runs esptool
+  `verify_flash` (an on-chip digest of each image region -- reads only) and
+  skips the write when the bundle is already there; `--force` always writes.
+  `--wipe-settings` erases the settings region (NVS/otadata/phy) before a real
+  write, for a board changing role. `make_bundle.py --extra-image` images are
+  marked `"verify": false` (e.g. a blank NVS the firmware writes to).
+- **`tester/test-matrix.sh` doesn't restore by default**: boards stay on what
+  they ran last (`--restore` puts them back on `default`), so the next run or
+  CI flashes only what differs. Verdict lines carry each lane's `VERSIONS`
+  (kernel, `sinput` driver + package, firmware/library, BlueZ, Bluepad32 build),
+  printed by `sinput_hil.py` and `bp32_hil.py`.
 - **`CONFIG?`** lists the specials a profile actually enables and adds a
   `sim=` field; the special-button tests sweep only the listed specials.
 - **Flash the ESP32-S3 DevKitC-1 through its UART bridge**: the config

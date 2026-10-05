@@ -97,7 +97,8 @@ def main():
     )
     for spec in args.extra_image:
         offset, _, path = spec.partition(":")
-        images.append({"offset": offset, "path": path})
+        # Not part of "is this firmware already on the chip?": e.g. a blank NVS the firmware writes to.
+        images.append({"offset": offset, "path": path, "verify": False})
 
     lib_sha = git(args.lib_dir, "rev-parse", "HEAD")
     lib_describe = git(args.lib_dir, "describe", "--tags", "--always", "--dirty") or lib_sha[:8]
@@ -119,6 +120,7 @@ def main():
                 else hex(int(img["offset"])),
                 "file": src.name,
                 "sha256": sha256(dst),
+                **({"verify": False} if img.get("verify") is False else {}),
             }
         )
 
