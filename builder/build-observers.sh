@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # BUILDER role: Bluepad32 "observer" bundles, one per board, for the SInput / observer matrix (tester/bp32_hil.py).
-# A board flashed with one runs Bluepad32 (the Bluepad32 HIL rig's host firmware, leenx-foss/antBot-hil host/,
-# built with HIL_OBSERVER=1: no NuS/OTA) and prints what it parsed on its serial console, so it can observe another
-# board running hil_runner, next to BlueZ.
+# A board flashed with one runs Bluepad32 with firmware/observer/ as its platform, and prints what it parsed on its
+# serial console, so it can observe another board running hil_runner, next to BlueZ.
 #
 #   builder/build-observers.sh                          # [builder] boards, paths from [observer] in hil_config
 #   builder/build-observers.sh --boards "esp32c3" --out /tmp/bundles
@@ -11,8 +10,7 @@
 # runs top-level bundles) never flashes one as a gamepad. Each carries a blank NVS image, so an observer always
 # starts without stale bonds, and puts the app in the host's factory slot (PlatformIO's idedata would pick ota_0).
 #
-# Needs: a PlatformIO >= 6.2 (the host uses the pioarduino platform), the antBot-hil checkout, and a Bluepad32
-# checkout (LeeNX/bluepad32 feature/sinput until ricardoquesada/bluepad32#234 merges, then upstream develop) with
+# Needs: a PlatformIO >= 6.2 (firmware/observer uses the pioarduino platform) and a Bluepad32 checkout (LeeNX/bluepad32 feature/sinput until ricardoquesada/bluepad32#234 merges, then upstream develop) with
 # its BTstack submodule and l2cap patch applied (see that repo's external/patches).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -20,7 +18,7 @@ REPO=$(pwd)
 cfg() { python3 host/hil/config.py "$1"; }
 path() { python3 -c 'import os,sys; print(os.path.expanduser(sys.argv[1]))' "$1"; }
 
-HOST_DIR=$(path "${HIL_OBSERVER_HOST_DIR:-$(cfg observer.host_dir)}")
+HOST_DIR=$REPO/firmware/observer
 BP32_DIR=$(path "${HIL_BLUEPAD32_DIR:-$(cfg observer.bluepad32_dir)}")
 PIO=${HIL_OBSERVER_PIO:-$(cfg observer.pio)}; PIO=${PIO:-$(cfg rig.pio)}; PIO=$(path "${PIO:-pio}")
 OUT_ROOT=${HIL_BUNDLES:-$REPO/bundles}
@@ -35,7 +33,6 @@ while [[ $# -gt 0 ]]; do
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
-[[ -f "$HOST_DIR/platformio.ini" ]] || { echo "[observer].host_dir: no platformio.ini in '$HOST_DIR'" >&2; exit 2; }
 [[ -d "$BP32_DIR/src/components/bluepad32" ]] || { echo "[observer].bluepad32_dir: not a Bluepad32 checkout: '$BP32_DIR'" >&2; exit 2; }
 
 board_env() { case "$1" in
@@ -51,7 +48,7 @@ BP32_SHA=$(git -C "$BP32_DIR" rev-parse --short=8 HEAD)
 NVS_OFF=$(part nvs 4); NVS_SIZE=$(part nvs 5); APP_OFF=$(part factory 4)
 [[ -n "$NVS_OFF" && -n "$NVS_SIZE" && -n "$APP_OFF" ]] || { echo "can't read nvs/factory from partitions.csv" >&2; exit 2; }
 echo "== bluepad32 $(git -C "$BP32_DIR" describe --tags --always --dirty) ($(git -C "$BP32_DIR" rev-parse --abbrev-ref HEAD))"
-echo "== host $HOST_DIR @ $(git -C "$HOST_DIR" rev-parse --short HEAD); nvs $NVS_OFF+$NVS_SIZE, factory app $APP_OFF"
+echo "== observer firmware/observer @ $(git rev-parse --short HEAD); nvs $NVS_OFF+$NVS_SIZE, factory app $APP_OFF"
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 python3 -c 'import sys; open(sys.argv[1], "wb").write(b"\xff" * int(sys.argv[2], 0))' "$tmp/nvs_blank.bin" "$NVS_SIZE"
@@ -60,9 +57,9 @@ mkdir -p "$OUT_ROOT/matrix"
 for board in "${BOARDS[@]}"; do
   env=$(board_env "$board"); chip=$(board_chip "$board")
   echo "== build observer $board (env=$env chip=$chip)"
-  # The firmware version string and HIL_OBSERVER come from the environment, which the build doesn't track: wipe.
+  # The firmware version string comes from the environment, which the build doesn't track: wipe.
   rm -rf "$HOST_DIR/.pio/build/$env" "$HOST_DIR/sdkconfig.$env"
-  export HIL_OBSERVER=1 HIL_BLUEPAD32_DIR="$BP32_DIR" HIL_FW_VERSION="bp32obs-$BP32_SHA"
+  export HIL_BLUEPAD32_DIR="$BP32_DIR" HIL_FW_VERSION="bp32obs-$BP32_SHA"
   "$PIO" run -e "$env" -d "$HOST_DIR"
   ide=$(mktemp)
   "$PIO" run -e "$env" -d "$HOST_DIR" -t idedata > "$ide" 2>/dev/null

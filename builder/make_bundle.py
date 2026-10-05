@@ -102,6 +102,10 @@ def main():
 
     lib_sha = git(args.lib_dir, "rev-parse", "HEAD")
     lib_describe = git(args.lib_dir, "describe", "--tags", "--always", "--dirty") or lib_sha[:8]
+    # The rig commit the firmware source came from (hil_runner, the observer): this repo.
+    rig_dir = pathlib.Path(__file__).resolve().parent.parent
+    rig_sha = git(rig_dir, "rev-parse", "HEAD")
+    rig_describe = git(rig_dir, "describe", "--tags", "--always", "--dirty") or rig_sha[:8]
 
     out = pathlib.Path(args.out_root) / f"{args.board}-{args.profile}-{lib_sha[:8]}"
     out.mkdir(parents=True, exist_ok=True)
@@ -131,6 +135,8 @@ def main():
         "profile": args.profile,
         "lib_sha": lib_sha,
         "lib_describe": lib_describe,
+        "rig_sha": rig_sha,
+        "rig_describe": rig_describe,
         "built_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
         "builder": socket.gethostname(),
         "images": manifest_images,
