@@ -27,6 +27,12 @@ pio = "pio"                           # or an absolute path, e.g. ~/.venvs/pio/b
 #                and nothing else, so it is NOT in this default set -- it runs on
 #                the weekly CI schedule and at release. Add it back with
 #                --profiles "default specials minimal maxbtn" when you want it.
+#   maxfeat   -- max features rather than buttons (16 btn, 1 hat, 6 axes, accel +
+#                brake, home + back): what Bluepad32 maps from a generic gamepad.
+#                Weekly CI schedule and release, like minimal.
+#   sinput    -- GamepadMode::SInput (2E8A:10C6, IMU + RGB). Its bundles go under
+#                bundles/matrix/, which test-all.sh skips: tester/sinput_hil.py
+#                and tester/test-matrix.sh test it. Release only.
 #
 # `local` is an ad-hoc developer profile -- build it explicitly
 # (HIL_PROFILES=local builder/build.sh), never list it here; CI and releases

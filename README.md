@@ -436,6 +436,11 @@ native port still works where the host copes; it's capped at 115200 like the
 C3 (`tester/flash.py`'s `SLOW_CHIPS`). The C3 has no such choice: its bridge is
 wired to GPIO20/21 only (no EN/IO0), so it can only be flashed natively.
 
+With `flash_port` unset, **unplug the "USB" cable** too: nothing uses it, and it
+still re-enumerates on every reset (each flash, each of the observer matrix's
+RTS resets). Those bursts were what kept tripping `tester/test-matrix.sh`'s
+health guard on 2026-10-05. The "UART" port powers the board on its own.
+
 A single-USB-C S3 board (no separate UART bridge) is the C3 situation: it needs
 an external 3.3 V USB-UART adapter on UART0 — check your board's pinout for the
 `U0TXD`/`U0RXD` pins (not necessarily GPIO43/44; that's DevKitC-1-specific).
