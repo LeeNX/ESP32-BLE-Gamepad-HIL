@@ -12,6 +12,8 @@ warnings, the Ethernet loses carrier and USB serial devices drop off or return E
 
   python3 -m hil.usbhealth baseline        # remember the current dwc_otg warning count
   python3 -m hil.usbhealth check           # exit 0 healthy, 1 unhealthy (one-line reason on stdout)
+  python3 -m hil.usbhealth check --ignore-dwc   # devices + link only: is the bus usable *now*? (before a run,
+                                                # past warnings from a burst the bus recovered from don't count)
 
 The baseline lives in $XDG_CACHE_HOME/esp32-hil/usb-baseline. Reading the kernel log needs dmesg access
 (kernel.dmesg_restrict=0, the Raspberry Pi OS default).
@@ -51,11 +53,13 @@ def expected_devices(cfg):
     return devs
 
 
-def check(cfg):
+def check(cfg, ignore_dwc=False):
     """List of problems; empty = healthy."""
     problems = []
-    count = dwc_warnings()
-    if count is None:
+    count = None if ignore_dwc else dwc_warnings()
+    if ignore_dwc:
+        pass
+    elif count is None:
         problems.append("can't read the kernel log (dmesg)")
     else:
         base = int(BASELINE.read_text()) if BASELINE.exists() else count
@@ -89,7 +93,7 @@ def main(argv):
         print(f"usb: baseline {count} dwc_otg warnings")
         return 0
     if cmd == "check":
-        problems = check(load())
+        problems = check(load(), ignore_dwc="--ignore-dwc" in argv[1:])
         print("usb: OK" if not problems else "usb: UNHEALTHY: " + "; ".join(problems))
         return 1 if problems else 0
     print(__doc__)
