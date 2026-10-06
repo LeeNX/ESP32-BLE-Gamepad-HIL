@@ -1,13 +1,17 @@
 """Press-to-host latency for the desktop tester.
 
 `TPRESS <n>` on the serial channel -> the firmware toggles the button and calls
-`sendReport()`, replying `T <micros>` -- then we block in a hidapi read until
-the DUT's HID report reflects the new state, and time the gap.
+`sendReport()`, replying `T <micros>` -- we block in a hidapi read until the
+DUT's HID report reflects the new state, and time the gap. The reply is read
+only afterwards: a serial bridge can hold it back well after the report (an
+FTDI's latency timer, up to 16 ms), so timing from it clamped every sample to
+the bridge's delay (fixed in rig 0.3.2).
 
 Two figures per transition (host clock, `time.perf_counter`):
 
-    ble  =  t_report - t_serial_reply    BLE air + macOS HID stack + hidapi read
-    e2e  =  t_report - t_serial_write     + the USB-serial round-trip
+    e2e  =  t_report - t_before_write    USB-serial write + firmware + BLE air +
+                                          macOS HID stack + hidapi read
+    ble  =  t_report - t_after_write     the same, minus the host's write call
 
 The firmware's `T <micros>` is on a different clock, so it's recorded for
 reference only, not used in the maths.
@@ -75,11 +79,12 @@ def button_latency(dut, dev, n=100, button=1, settle=0.03, timeout_ms=400):
     ble, e2e, dropped = [], [], 0
     for i in range(n):
         want_down = i % 2 == 0
+        cmd = f"TPRESS {button}" if want_down else f"TRELEASE {button}"
         t0 = time.perf_counter()
-        dut.tpress(button, down=want_down)  # firmware replies "T <micros>"
-        t_reply = time.perf_counter()
+        dut.send(cmd)  # firmware replies "T <micros>"; read after the timing, below
+        t_sent = time.perf_counter()
 
-        deadline = t_reply + timeout_ms / 1000
+        deadline = t_sent + timeout_ms / 1000
         while True:
             budget_ms = int((deadline - time.perf_counter()) * 1000)
             if budget_ms <= 0:
@@ -88,9 +93,10 @@ def button_latency(dut, dev, n=100, button=1, settle=0.03, timeout_ms=400):
             r = dev.read(64, budget_ms)
             if r and _button_down(bytes(r), button) == want_down:
                 t_report = time.perf_counter()
-                ble.append((t_report - t_reply) * 1000)
+                ble.append((t_report - t_sent) * 1000)
                 e2e.append((t_report - t0) * 1000)
                 break
+        dut.reply(cmd)
         time.sleep(settle)
 
     return {"n": n, "dropped": dropped, "ble": stats(ble), "e2e": stats(e2e)}

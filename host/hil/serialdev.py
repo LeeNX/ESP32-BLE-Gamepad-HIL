@@ -135,6 +135,13 @@ class SerialDev:
         raise last
 
     def _command_once(self, cmd, timeout, prefixes):
+        self.send(cmd)
+        return self.reply(cmd, timeout, prefixes)
+
+    def send(self, cmd):
+        """Write one command line without waiting for its reply; read that with reply(). For timing an effect of the
+        command: a serial bridge can hold the reply back -- an FTDI's latency timer, up to 16 ms -- well after the
+        effect itself has happened."""
         try:
             self.ser.write((cmd + "\n").encode("ascii"))
             self.ser.flush()
@@ -142,6 +149,9 @@ class SerialDev:
             self._reopen()
             self.ser.write((cmd + "\n").encode("ascii"))
             self.ser.flush()
+
+    def reply(self, cmd="", timeout=6.0, prefixes=REPLY_PREFIXES):
+        """The reply to the command last sent with send(): the first line with a known prefix."""
         deadline = time.time() + timeout
         while time.time() < deadline:
             line = self._readline(timeout=max(0.1, deadline - time.time()))
