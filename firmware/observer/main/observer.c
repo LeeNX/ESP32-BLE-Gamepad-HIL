@@ -21,8 +21,12 @@
 //   allow <addr>|any    only pair with this Bluetooth address (any = clear the filter)
 //
 // Pairing filter: with an allowed address set, only that device is accepted. Otherwise devices whose name starts
-// with "HILpad" (the rig's gamepads) are ignored, so the observer only takes the gamepad bp32_hil.py allows. A default
-// address can be baked in with -DHIL_ALLOW_ADDR="AA:BB:..".
+// with "HILpad" (the rig's gamepads), or that advertise no name at all (which a rig gamepad can do before its scan
+// response arrives), are ignored, so the observer only takes the gamepad bp32_hil.py allows. A default address can be
+// baked in with -DHIL_ALLOW_ADDR="AA:BB:..".
+//
+// Device names are printed with '"', '\' and non-printable characters replaced by '?', so a nearby device's name
+// can't break a line or inject one. The observer is a BLE central only: it doesn't enable Bluepad32's BLE service.
 
 #include <math.h>
 #include <stdio.h>
@@ -34,6 +38,8 @@
 #include <uni.h>
 
 #include <esp_app_desc.h>
+
+#include "sdkconfig.h"
 
 #include "parser/uni_hid_parser_sinput.h"
 
@@ -48,17 +54,39 @@ static uni_hid_device_t* g_dev;  // first ready device, for console commands
 static char g_line[HIL_LINE_MAX];
 static size_t g_line_len;
 
+// Last printed controller state per device slot, so a "HIL state" line is only printed on a change. Cleared on
+// connect and disconnect: a reconnected device's first report always prints.
+static uni_controller_t g_prev[CONFIG_BLUEPAD32_MAX_DEVICES];
+static bool g_prev_valid[CONFIG_BLUEPAD32_MAX_DEVICES];
+
+static void forget_state(uni_hid_device_t* d) {
+    int idx = uni_hid_device_get_idx_for_instance(d);
+    if (idx >= 0 && idx < CONFIG_BLUEPAD32_MAX_DEVICES)
+        g_prev_valid[idx] = false;
+}
+
+// A device name, safe inside name="...": '"', '\\' and non-printable characters become '?'.
+static const char* safe_name(const char* in, char* out, size_t n) {
+    size_t i = 0;
+    for (; in && in[i] && i < n - 1; i++) {
+        unsigned char ch = (unsigned char)in[i];
+        out[i] = (ch < 0x20 || ch > 0x7e || ch == '"' || ch == '\\') ? '?' : (char)ch;
+    }
+    out[i] = '\0';
+    return out;
+}
+
 static void hil_init(int argc, const char** argv) {
     ARG_UNUSED(argc);
     ARG_UNUSED(argv);
     logi("HIL host: init\n");
 }
 
-static void print_features(void) {
+static void print_features(uni_hid_device_t* d) {
     uint16_t proto, poll_us = 0, accel_g = 0, gyro_dps = 0;
     uint8_t caps0, caps1;
-    if (g_dev && uni_hid_parser_sinput_get_features(g_dev, &proto, &caps0, &caps1)) {
-        uni_hid_parser_sinput_get_imu_config(g_dev, &poll_us, &accel_g, &gyro_dps);
+    if (d && uni_hid_parser_sinput_get_features(d, &proto, &caps0, &caps1)) {
+        uni_hid_parser_sinput_get_imu_config(d, &poll_us, &accel_g, &gyro_dps);
         printf("HIL features proto=%u caps0=0x%02x caps1=0x%02x poll=%u accel=%u gyro=%u\n", proto, caps0, caps1,
                poll_us, accel_g, gyro_dps);
     } else
@@ -89,7 +117,7 @@ static void handle_command(char* line) {
     } else if (strcmp(line, "version?") == 0) {
         printf("HIL version %s\n", esp_app_get_description()->version);
     } else if (strcmp(line, "features?") == 0) {
-        print_features();
+        print_features(g_dev);
     } else if (sscanf(line, "led %u", &a) == 1 && a <= 4) {
         if (!g_dev || !g_dev->report_parser.set_player_leds) {
             printf("HIL err no device\n");
@@ -147,7 +175,6 @@ static void hil_on_init_complete(void) {
     uni_bt_start_scanning_and_autoconnect_unsafe();
     uni_bt_allow_incoming_connections(true);
     btstack_stdin_setup(hil_stdin);
-    uni_bt_enable_service_safe(true);
     printf("HIL init-complete\n");
 }
 
@@ -158,37 +185,44 @@ static uni_error_t hil_on_device_discovered(bd_addr_t addr, const char* name, ui
     if (g_allow_addr[0]) {
         if (strcasecmp(bd_addr_to_str(addr), g_allow_addr) != 0)
             return UNI_ERROR_IGNORE_DEVICE;
-    } else if (name && strncmp(name, HIL_IGNORE_NAME_PREFIX, strlen(HIL_IGNORE_NAME_PREFIX)) == 0) {
+    } else if (!name || !name[0] || strncmp(name, HIL_IGNORE_NAME_PREFIX, strlen(HIL_IGNORE_NAME_PREFIX)) == 0) {
         return UNI_ERROR_IGNORE_DEVICE;
     }
-    printf("HIL discovered addr=%s name=\"%s\"\n", bd_addr_to_str(addr), name ? name : "");
+    char safe[64];
+    printf("HIL discovered addr=%s name=\"%s\"\n", bd_addr_to_str(addr), safe_name(name, safe, sizeof(safe)));
     return UNI_ERROR_SUCCESS;
 }
 
 static void hil_on_device_connected(uni_hid_device_t* d) {
+    forget_state(d);
     printf("HIL connected idx=%d\n", uni_hid_device_get_idx_for_instance(d));
 }
 
 static void hil_on_device_disconnected(uni_hid_device_t* d) {
     if (d == g_dev)
         g_dev = NULL;
+    forget_state(d);
     printf("HIL disconnected idx=%d\n", uni_hid_device_get_idx_for_instance(d));
 }
 
 static uni_error_t hil_on_device_ready(uni_hid_device_t* d) {
     if (!g_dev)
         g_dev = d;
+    char safe[64];
     printf("HIL ready idx=%d type=%d vid=0x%04x pid=0x%04x name=\"%s\"\n", uni_hid_device_get_idx_for_instance(d),
-           (int)d->controller_type, d->vendor_id, d->product_id, d->name);
-    print_features();
+           (int)d->controller_type, d->vendor_id, d->product_id, safe_name(d->name, safe, sizeof(safe)));
+    print_features(d);
     return UNI_ERROR_SUCCESS;
 }
 
 static void hil_on_controller_data(uni_hid_device_t* d, uni_controller_t* ctl) {
-    static uni_controller_t prev;
-    if (memcmp(&prev, ctl, sizeof(*ctl)) == 0)
-        return;
-    prev = *ctl;
+    int idx = uni_hid_device_get_idx_for_instance(d);
+    if (idx >= 0 && idx < CONFIG_BLUEPAD32_MAX_DEVICES) {
+        if (g_prev_valid[idx] && memcmp(&g_prev[idx], ctl, sizeof(*ctl)) == 0)
+            return;
+        g_prev[idx] = *ctl;
+        g_prev_valid[idx] = true;
+    }
 
     if (ctl->klass != UNI_CONTROLLER_CLASS_GAMEPAD)
         return;

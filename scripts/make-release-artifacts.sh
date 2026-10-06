@@ -53,6 +53,8 @@ for m in sorted([*root.glob("*/manifest.json"), *root.glob("matrix/*/manifest.js
 # Observer bundles (matrix/<board>-bp32obs-*) are Bluepad32 builds: their lib_sha is the Bluepad32 commit, not the
 # ESP32-BLE-Gamepad library's, so it gets its own provenance entry.
 obs = [b for b in bundles if b["profile"] == "bp32obs"]
+if len({b["lib_sha"] for b in obs}) > 1:
+    sys.exit("observer bundles from more than one Bluepad32 commit: " + ", ".join(sorted(b["dir"] for b in obs)))
 bluepad32 = {"sha": obs[0]["lib_sha"], "describe": obs[0]["lib_describe"]} if obs else None
 print(json.dumps({
     "rig_version": tag.lstrip("v"),

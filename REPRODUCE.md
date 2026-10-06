@@ -62,8 +62,9 @@ is built from the rig's `firmware/observer/` against Bluepad32, whose commit
 `lib_sha`, plus the rig commit as `rig_sha`). The `-dirty` in its describe is
 the BTstack patch Bluepad32 ships in `external/patches`, applied at build time.
 
-`tester/test-matrix.sh` takes these bundles as they are: point
-`HIL_BUNDLE_DIR` at `firmware-bundles/`. To rebuild one, run
+`tester/test-matrix.sh` takes these bundles as they are: from `suite/` (as in
+the steps above), point `HIL_BUNDLE_DIR` at them with
+`HIL_BUNDLE_DIR="$PWD/../firmware-bundles"`. To rebuild one, run
 `builder/build-observers.sh` from a full rig checkout; with no
 `[observer].bluepad32_dir` set it fetches the pinned Bluepad32
 (`[observer].bluepad32_repo` @ `bluepad32_ref`) itself.

@@ -25,7 +25,11 @@ What a bump means:
   firmware (leenx-foss/antBot-hil `host/`) minus NuS, OTA, the access gate and
   the OTA chord, which the observer never used; every `HIL ...` line and
   command `tester/bp32_hil.py` relies on is unchanged, as is the partition
-  layout. Bluepad32 stays external: `[observer].bluepad32_dir`, as
+  layout. Compared with the 0.3.0 observers it no longer enables Bluepad32's
+  BLE service, ignores nameless devices until an address is allowed, escapes
+  device names in its output, prints the features of the device that just
+  became ready, and tracks the last printed state per device (cleared on
+  connect and disconnect). Bluepad32 stays external: `[observer].bluepad32_dir`, as
   `[builder].lib_dir` is for the library.
 - **`rig_sha` / `rig_describe` in every bundle manifest**: the rig commit the
   firmware source came from, next to the library's `lib_sha`.

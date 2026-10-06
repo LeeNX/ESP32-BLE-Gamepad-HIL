@@ -21,12 +21,6 @@ path() { python3 -c 'import os,sys; print(os.path.expanduser(sys.argv[1]))' "$1"
 
 HOST_DIR=$REPO/firmware/observer
 BP32_DIR=${HIL_BLUEPAD32_DIR:-$(cfg observer.bluepad32_dir)}
-if [[ -z $BP32_DIR ]]; then
-  # No checkout of your own: fetch the pinned one ([observer].bluepad32_repo @ bluepad32_ref).
-  BP32_DIR=$REPO/.cache/bluepad32
-  builder/fetch-bluepad32.sh "$BP32_DIR"
-fi
-BP32_DIR=$(path "$BP32_DIR")
 PIO=${HIL_OBSERVER_PIO:-$(cfg observer.pio)}; PIO=${PIO:-$(cfg rig.pio)}; PIO=$(path "${PIO:-pio}")
 OUT_ROOT=${HIL_BUNDLES:-$REPO/bundles}
 # SC2206: BOARDS is a space-separated list we deliberately word-split.
@@ -40,6 +34,12 @@ while [[ $# -gt 0 ]]; do
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
+if [[ -z $BP32_DIR ]]; then
+  # No checkout of your own: fetch the pinned one ([observer].bluepad32_repo @ bluepad32_ref).
+  BP32_DIR=$REPO/.cache/bluepad32
+  builder/fetch-bluepad32.sh "$BP32_DIR"
+fi
+BP32_DIR=$(path "$BP32_DIR")
 [[ -d "$BP32_DIR/src/components/bluepad32" ]] || { echo "[observer].bluepad32_dir: not a Bluepad32 checkout: '$BP32_DIR'" >&2; exit 2; }
 
 board_env() { case "$1" in
