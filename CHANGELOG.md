@@ -18,6 +18,8 @@ What a bump means:
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-10-06
+
 ### Added
 
 - **`firmware/observer/`**: the Bluepad32 observer firmware now lives in the
@@ -676,7 +678,8 @@ descriptor + latency suite, and the Tailscale-based CI. Plus:
   `HIL_RIG_ENABLED=true` is set — so a fork with no tester wired gets a clean
   skipped run, not a failure on the missing Tailscale secret.
 
-[Unreleased]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.3.1
 [0.3.0]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.3.0
 [0.2.6]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.2.6
 [0.2.5]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.2.5
