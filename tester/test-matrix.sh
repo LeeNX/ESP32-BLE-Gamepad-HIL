@@ -181,6 +181,7 @@ for obs in "${ROTATIONS[@]}"; do
     bz_bundle=$(bundle "$bz" "$p"); bp_bundle=$(bundle "$bp" "$p")
     if [[ -z $bz_bundle || -z $bp_bundle ]]; then
       echo "SKIP $obs/$p: missing bundle (bluez=$bz_bundle bp32=$bp_bundle)" | tee -a "$VERDICTS"
+      fail=1  # the run can't do what it was asked: don't let it pass
       continue
     fi
     echo "== $obs/$p: flashing $bz and $bp"

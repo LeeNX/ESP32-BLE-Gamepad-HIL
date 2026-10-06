@@ -166,7 +166,17 @@ jobs:
           lib_dir = "$HOME/ci-lib"
           pio = "$(command -v pio)"
           EOF
-          ./builder/build.sh --boards "$BOARDS" --profiles "$PROFILES"
+          # Plus whatever the observer matrix needs, so a dispatch's `profiles` can't leave it without bundles: quick
+          # wants sinput (under matrix/, which the suite skips), full wants minimal maxfeat sinput (the suite runs the
+          # top-level ones too).
+          case "$HIL_MATRIX" in
+            quick) need="sinput" ;;
+            full) need="minimal maxfeat sinput" ;;
+            *) need="" ;;
+          esac
+          # shellcheck disable=SC2086  # word-split the profile lists on purpose
+          build_profiles=$(printf '%s\n' $PROFILES $need | awk '!seen[$0]++' | xargs)
+          ./builder/build.sh --boards "$BOARDS" --profiles "$build_profiles"
 
       # The observer matrix's Bluepad32 observers (firmware/observer), against the Bluepad32 pinned in
       # hil_config.toml; build-observers.sh fetches it into .cache/bluepad32. Bundles land in bundles/matrix/.

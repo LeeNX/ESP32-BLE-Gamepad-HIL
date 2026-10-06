@@ -47,10 +47,11 @@ class HidrawBit:
 
 
 class EvdevKey:
-    """An evdev node: arrived on an EV_KEY event with the wanted value (1 press, 0 release)."""
+    """An evdev node: arrived on an EV_KEY event with the wanted value (1 press, 0 release) -- for key `code` only,
+    when given (the measured button's), so another key's event can't stand in for it."""
 
-    def __init__(self, label, dev):
-        self.label, self.dev = label, dev
+    def __init__(self, label, dev, code=None):
+        self.label, self.dev, self.code = label, dev, code
 
     def fileno(self):
         return self.dev.fd
@@ -71,14 +72,15 @@ class EvdevKey:
                 return False
             if ev is None:
                 return False
-            if ev.type == ecodes.EV_KEY and ev.value == want:
+            if ev.type == ecodes.EV_KEY and ev.value == want and self.code in (None, ev.code):
                 return True
 
 
 def measure(stim, sources, n=100, settle=0.03, timeout=1.0):
     """`stim(want)` applies a press (want=1) or release (want=0); alternates, starting with a press. It must only
     send the command, not wait for a reply: a serial bridge can hold the reply back (an FTDI's 16 ms latency timer)
-    well past the report's arrival, and timing starts only once `stim` returns.
+    well past the report's arrival. Timing starts just before `stim` runs, so each latency includes the call itself
+    (a serial write: microseconds).
     Returns {label: {"latency": Stats (ms), "dropped": int, "n": int}}."""
     samples = {s.label: [] for s in sources}
     dropped = {s.label: 0 for s in sources}

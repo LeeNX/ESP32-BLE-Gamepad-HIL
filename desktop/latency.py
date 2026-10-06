@@ -27,6 +27,8 @@ import time
 
 from hidgamepad import BUTTON_BYTE, button_bytes
 
+from hil.serialdev import SerialError  # ../host is on pytest's pythonpath
+
 
 def stats(samples):
     """min / p50 / p90 / p99 / max / mean over a sample, in ms, JSON-friendly."""
@@ -98,7 +100,11 @@ def button_latency(dut, dev, n=100, button=1, settle=0.03, timeout_ms=400):
                 ble.append((t_report - t_sent) * 1000)
                 e2e.append((t_report - t0) * 1000)
                 break
-        dut.reply(cmd)
+        try:
+            dut.reply(cmd)
+        except SerialError:
+            # A lost reply: resync on PING's PONG (skipping a late reply) so the next stimulus reads its own.
+            dut.command("PING", prefixes=("PONG",), retries=0)
         time.sleep(settle)
 
     return {"n": n, "dropped": dropped, "ble": stats(ble), "e2e": stats(e2e)}

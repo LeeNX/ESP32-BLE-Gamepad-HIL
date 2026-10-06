@@ -561,11 +561,32 @@ print("     ", out.replace("\n", " | "))
 latency = {}  # driver -> pathlatency.measure() result
 
 
+def key_code(evdev_dev):
+    """The key code button 1 produces on this node -- hid-generic and the sinput driver map it differently -- from a
+    probe press, so the timing only counts that key."""
+    src = pl.EvdevKey("probe", evdev_dev)
+    src.drain()
+    cmd("PRESS 1")
+    code, end = None, time.monotonic() + 1.0
+    while code is None and time.monotonic() < end:
+        if select.select([evdev_dev.fd], [], [], 0.05)[0]:
+            for ev in evdev_dev.read():
+                if ev.type == e.EV_KEY and ev.value == 1:
+                    code = ev.code
+                    break
+    cmd("RELEASE 1")
+    time.sleep(0.1)
+    src.drain()
+    return code
+
+
 def time_paths(driver, raw, evdev_dev):
     """Button 1 (SInput bit 0: report 0x01, byte 3, bit 0) on hidraw and on `driver`'s evdev node, per press."""
+    code = key_code(evdev_dev)
+    print(f"      evdev/{driver}: button 1 = key {code}")
     sources = [
         pl.HidrawBit(f"hidraw/{driver}", raw.fd, 0x01, 3, 0),
-        pl.EvdevKey(f"evdev/{driver}", evdev_dev),
+        pl.EvdevKey(f"evdev/{driver}", evdev_dev, code=code),
     ]
     cmd("RESET")
     # Send without waiting for the OK: a bridge's reply delay (the esp32c3's FTDI holds input up to 16 ms) would

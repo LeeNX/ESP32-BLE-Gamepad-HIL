@@ -20,6 +20,8 @@ import time
 
 from evdev import ecodes
 
+from .serialdev import SerialError
+
 
 def _wait_event(dev, want_types, timeout=1.5):
     """Block until an event of one of want_types arrives; return it or None."""
@@ -34,6 +36,16 @@ def _wait_event(dev, want_types, timeout=1.5):
         for e in dev.read():
             if e.type in want_types:
                 return e
+
+
+def _consume_reply(dev, cmd):
+    """Read the reply to `cmd`; if it never comes (a dropped byte on a cheap bridge), resynchronise on a PING -- its
+    PONG, skipping any late reply -- so the sweep goes on and no stale line passes for the next command's reply."""
+    try:
+        dev.reply(cmd)
+    except SerialError:
+        if dev.command("PING", prefixes=("PONG",), retries=0) != "PONG":
+            raise
 
 
 class Stats(dict):
@@ -103,7 +115,7 @@ def input_latency(dev, cap, kind, cfg, n=200, settle=0.03):
         t_sent = time.perf_counter()
         ev = _wait_event(cap.dev, want)
         t_evt = time.perf_counter()
-        dev.reply(line(i))  # consumed after the timing, so a bridge's reply delay stays out of it
+        _consume_reply(dev, line(i))  # after the timing, so a bridge's reply delay stays out of it
         if ev is None:
             dropped += 1
             continue

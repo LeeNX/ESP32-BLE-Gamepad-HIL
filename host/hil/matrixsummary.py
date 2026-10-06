@@ -24,10 +24,13 @@ def last_run(verdicts_md):
     return lines[starts[-1] :] if starts else []
 
 
-def gaps(matrix_dir):
-    """{profile: [gap text, ...]} from the Bluepad32 lanes, deduplicated across boards and rotations."""
+def gaps(matrix_dir, logs=None):
+    """{profile: [gap text, ...]} from the Bluepad32 lanes, deduplicated across boards and rotations. `logs` (file
+    names) limits it to one run's cells: results/matrix/ can still hold an earlier run's logs."""
     found = {}
     for log in sorted(pathlib.Path(matrix_dir).glob("obs-*-bp32-*.log")):
+        if logs is not None and log.name not in logs:
+            continue
         profile = log.name.split("-")[2]
         for ln in log.read_text(errors="replace").splitlines():
             if ln.startswith("GAP "):
@@ -49,11 +52,12 @@ def render(results_dir):
         )
 
     out = ["## Observer matrix", "", f"`{run[0][3:].strip()}`", ""]
-    rows, aborts, failed = [], [], False
+    rows, aborts, failed, logs = [], [], False, set()
     for ln in run[1:]:
         m = _VERDICT.match(ln)
         if m:
             failed |= m["verdict"] == "FAIL"
+            logs.add(f"obs-{m['obs']}-{m['profile']}-{m['lane']}-{m['pad']}.log")
             icon = "✅" if m["verdict"] == "PASS" else "❌"
             detail = re.sub(r"\s*\[.*\]$", "", m["rest"])  # the VERSIONS tag
             # test.sh's status line, "== [hh:mm:ss] PASS  board/profile  37 passed,31 skipped  (40s, ...)": keep the counts
@@ -74,7 +78,7 @@ def render(results_dir):
         ]
     out += [f"> ⚠️ {a}" for a in aborts] + ([""] if aborts else [])
 
-    found = gaps(results / "matrix")
+    found = gaps(results / "matrix", logs)
     if found:
         out += [
             "### Bluepad32 gaps",
