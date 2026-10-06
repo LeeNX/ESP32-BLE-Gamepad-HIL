@@ -18,6 +18,27 @@ What a bump means:
 
 ## [Unreleased]
 
+### Added
+
+- **The observer matrix runs in CI** (`hil.yml`), after the suite and under the
+  same rig lock: a quick matrix (one rotation, `sinput`, BlueZ + Bluepad32
+  lanes) on every push and `repository_dispatch`, the full matrix (every
+  rotation × `minimal maxfeat sinput`) on the weekly schedule, and a `matrix`
+  dispatch input (`quick` / `full` / `none`). The build job builds the
+  observers; a failed lane fails the job.
+- **`host/hil/matrixsummary.py`**: the matrix verdicts and Bluepad32's gaps
+  (inputs it doesn't expose) as Markdown, appended to CI's job summary.
+
+### Changed
+
+- **Everyday profiles are `minimal maxfeat sinput`** (`[builder].profiles`
+  and CI pushes; `sinput` through the observer matrix). The weekly schedule
+  adds `specials`; `default` and `maxbtn` are release-only. Releases still
+  ship every profile, and RELEASE.md's validation dispatch names them all
+  plus `matrix=full`. With CI no longer staging `default` bundles,
+  `test-matrix.sh --restore` and `tester/bp32_swap.sh` need them built by
+  hand on a CI-run rig.
+
 ## [0.3.1] — 2026-10-06
 
 ### Added

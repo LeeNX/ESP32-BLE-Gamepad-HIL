@@ -478,8 +478,10 @@ self-hosted runner, no inbound ports on your network:
 
 - **build** — `pip install platformio`, `builder/build.sh`, upload the bundles.
   All 3 boards (`esp32dev` + `esp32c3` + `esp32s3`) × the profiles for this
-  trigger: `default specials maxbtn` on a push, `+ minimal` on the weekly
-  schedule, or whatever a `profiles` dispatch input asks for.
+  trigger: `minimal maxfeat sinput` on a push, `+ specials` on the weekly
+  schedule, or whatever a `profiles` dispatch input asks for. Plus the
+  Bluepad32 observer bundles (`builder/build-observers.sh`) unless the
+  observer matrix is off.
 - **hil-test** — brings up an **ephemeral Tailscale node** for the job
   (`tailscale/github-action`), `rsync`s the bundles to the tester over the
   tailnet, `ssh`es in to **`git reset --hard`** the tester's own checkout to the
@@ -513,9 +515,10 @@ loose, so gating every push on it wasn't worth the rig time. Regenerate
 | input | effect |
 |---|---|
 | `boards` | space-separated subset to build + test (blank = all three) |
-| `profiles` | space-separated profile subset (blank = `default specials maxbtn`; the weekly schedule also builds `minimal`) |
+| `profiles` | space-separated profile subset (blank = `minimal maxfeat sinput`; the weekly schedule adds `specials`) |
 | `test_filter` | a pytest `-k` expression, e.g. `feature_report` or `battery or descriptor` (blank = whole suite) |
 | `bench` | run the sequential `--bench` sweep instead of the parallel functional matrix (~40 min) |
+| `matrix` | the observer matrix after the suite: `quick` (one rotation, `sinput`, ~5 min; the default), `full` (every rotation × `minimal maxfeat sinput`, ~35 min; the weekly schedule), `none` |
 
 Narrowing `boards` / `profiles` narrows the build matrix, and only the built
 bundles are pushed, so the flash + test set shrinks with it. So
@@ -531,8 +534,9 @@ red test. Locally the same:
 lane flashes + tests its own profiles sequentially, but the boards overlap. On
 the 3-board reference rig the old 18-bundle functional matrix ran in **~12 min**
 (measured, `-k "buttons or descriptor"`) versus ~35 min sequential — about 3x,
-bounded by the slowest board's lane. Every push now builds 3 profiles (9
-bundles), so it's quicker still.
+bounded by the slowest board's lane. Every push now runs 2 suite profiles
+(`minimal maxfeat`, 6 bundles), so it's quicker still, plus a quick observer
+matrix for `sinput`.
 
 Only the timing-insensitive checks parallelise. `--by-board` **refuses
 `--bench`**: the latency / throughput sweep stays sequential and as close to solo
