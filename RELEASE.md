@@ -43,8 +43,9 @@ GitHub Release, and two attached tarballs:
    # or: scripts/release.sh 0.2.0 --push
    ```
 
-   `scripts/release.sh` refuses a dirty tree, an existing tag, or an empty
-   `[Unreleased]` section.
+   `scripts/release.sh` refuses a dirty tree, an existing tag, an empty
+   `[Unreleased]` section, a branch other than `main` (`--allow-branch` to
+   override), or a `main` that's behind the remote's.
 4. Pushing the `v*` tag triggers [`.github/workflows/release.yml`](.github/workflows/release.yml):
    it checks `VERSION` matches the tag, builds the firmware matrix against the
    library (repo variable `HIL_LIB_REF`, else `master` — override with the
