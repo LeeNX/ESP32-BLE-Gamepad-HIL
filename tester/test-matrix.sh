@@ -72,7 +72,11 @@ for r in "${ROTATIONS[@]}"; do
 done
 flash_port() { local p; p=$(cfg "board.$1.flash_port"); echo "${p:-$(port "$1")}"; }
 # Most recently built (rsync keeps the build's mtime): names end in shas, so sorting them says nothing about age.
-newest() { [[ -d $1 ]] && ls -1dt "$@" | head -1; }
+newest() {
+  local d best=""
+  for d in "$@"; do [[ -d $d && ( -z $best || $d -nt $best ) ]] && best=$d; done
+  [[ -n $best ]] && echo "$best"
+}
 bundle() {  # <board> <profile>
   if [[ $2 == sinput || $2 == bp32obs ]]; then newest "$BUNDLE_DIR/matrix/$1-$2"-*; else newest "$BUNDLE_DIR/$1-$2"-*; fi
 }
