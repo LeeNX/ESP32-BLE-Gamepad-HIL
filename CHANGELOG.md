@@ -35,9 +35,24 @@ What a bump means:
   the CI board lists.
 - **`[matrix].boards`** (and `test-matrix.sh --boards`): the matrix's boards,
   3 or more, separate from the CI build list.
+- **Releases ship the observer firmware**: `release.yml` builds the `bp32obs`
+  bundles for the CI boards into `firmware-bundles/matrix/`, and `index.json`
+  records the Bluepad32 commit under `bluepad32`. A new **`observer.yml`**
+  workflow builds them on every push or PR that touches their sources and
+  uploads them as the `observer-bundles` artifact.
+- **`builder/fetch-bluepad32.sh`** checks out the pinned Bluepad32
+  (`[observer].bluepad32_repo` @ `bluepad32_ref`, new keys) with its BTstack
+  submodule and patches; `build-observers.sh` uses it when no
+  `[observer].bluepad32_dir` is set.
 
 ### Changed
 
+- **The observer builds against upstream Bluepad32 5.0.0-beta0**, the first
+  release with the SInput parser (ricardoquesada/bluepad32#234), instead of
+  the LeeNX/bluepad32 `feature/sinput` branch. Its `src/` is identical to the
+  fork commit the 0.3.0 observer matrix ran with (`6f603c7`).
+- **`firmware/observer` pins its pioarduino platform** to the commit the
+  verified observers were built with, instead of the moving `#develop`.
 - **`builder/build-observers.sh` builds `firmware/observer`**:
   `[observer].host_dir` and `HIL_OBSERVER` are gone. Observer bundles are
   named `<board>-bp32obs-<bluepad32 sha8>-<rig sha8>` and report the same in

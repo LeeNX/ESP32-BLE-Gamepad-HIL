@@ -1,0 +1,65 @@
+# Build the Bluepad32 observer firmware (firmware/observer) whenever its sources change, so a break shows up on the
+# push rather than at release time. Builds only -- the observer matrix runs on the rig (tester/test-matrix.sh). The
+# bundles are uploaded as the `observer-bundles` artifact, flashable as-is.
+name: Observer firmware
+
+on:
+  push:
+    paths:
+      - firmware/observer/**
+      - builder/build-observers.sh
+      - builder/fetch-bluepad32.sh
+      - builder/make_bundle.py
+      - hil_config.toml
+      - .github/workflows/observer.yml
+  pull_request:
+    paths:
+      - firmware/observer/**
+      - builder/build-observers.sh
+      - builder/fetch-bluepad32.sh
+      - builder/make_bundle.py
+      - hil_config.toml
+      - .github/workflows/observer.yml
+  workflow_dispatch:
+
+env:
+  BOARDS: esp32dev esp32c3 esp32s3
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # make_bundle.py records `git describe` as rig_describe
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v5
+        with:
+          path: ~/.platformio
+          key: pio-observer-${{ runner.os }}-${{ hashFiles('firmware/observer/platformio.ini') }}
+
+      - name: Bluepad32 ref
+        id: bp32
+        run: echo "ref=$(python3 host/hil/config.py observer.bluepad32_ref)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Bluepad32
+        uses: actions/cache@v5
+        with:
+          path: .cache/bluepad32
+          key: bluepad32-${{ steps.bp32.outputs.ref }}
+
+      - name: Build the observer bundles
+        run: ./builder/build-observers.sh --boards "$BOARDS"
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: observer-bundles
+          path: bundles/matrix/

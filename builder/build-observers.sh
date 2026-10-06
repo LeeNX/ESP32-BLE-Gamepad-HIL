@@ -10,8 +10,9 @@
 # runs top-level bundles) never flashes one as a gamepad. Each carries a blank NVS image, so an observer always
 # starts without stale bonds, and puts the app in the host's factory slot (PlatformIO's idedata would pick ota_0).
 #
-# Needs: a PlatformIO >= 6.2 (firmware/observer uses the pioarduino platform) and a Bluepad32 checkout (LeeNX/bluepad32 feature/sinput until ricardoquesada/bluepad32#234 merges, then upstream develop) with
-# its BTstack submodule and l2cap patch applied (see that repo's external/patches).
+# Needs: a PlatformIO >= 6.2 (firmware/observer uses the pioarduino platform) and a Bluepad32 checkout with its
+# BTstack submodule and patches applied: [observer].bluepad32_dir / $HIL_BLUEPAD32_DIR, or else
+# builder/fetch-bluepad32.sh fetches the pinned one ([observer].bluepad32_repo @ bluepad32_ref) into .cache/bluepad32.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO=$(pwd)
@@ -19,7 +20,13 @@ cfg() { python3 host/hil/config.py "$1"; }
 path() { python3 -c 'import os,sys; print(os.path.expanduser(sys.argv[1]))' "$1"; }
 
 HOST_DIR=$REPO/firmware/observer
-BP32_DIR=$(path "${HIL_BLUEPAD32_DIR:-$(cfg observer.bluepad32_dir)}")
+BP32_DIR=${HIL_BLUEPAD32_DIR:-$(cfg observer.bluepad32_dir)}
+if [[ -z $BP32_DIR ]]; then
+  # No checkout of your own: fetch the pinned one ([observer].bluepad32_repo @ bluepad32_ref).
+  BP32_DIR=$REPO/.cache/bluepad32
+  builder/fetch-bluepad32.sh "$BP32_DIR"
+fi
+BP32_DIR=$(path "$BP32_DIR")
 PIO=${HIL_OBSERVER_PIO:-$(cfg observer.pio)}; PIO=${PIO:-$(cfg rig.pio)}; PIO=$(path "${PIO:-pio}")
 OUT_ROOT=${HIL_BUNDLES:-$REPO/bundles}
 # SC2206: BOARDS is a space-separated list we deliberately word-split.
@@ -29,7 +36,7 @@ while [[ $# -gt 0 ]]; do
   case $1 in
     --boards) read -r -a BOARDS <<<"$2"; shift 2 ;;
     --out) OUT_ROOT=$2; shift 2 ;;
-    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done

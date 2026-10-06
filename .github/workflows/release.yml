@@ -47,6 +47,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0  # make_bundle.py records `git describe` as each manifest's rig_describe
 
       - name: Verify VERSION matches the tag
         id: v
@@ -74,7 +75,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.platformio
-          key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini') }}
+          key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini', 'firmware/observer/platformio.ini') }}
 
       - name: Checkout the library
         run: |
@@ -95,6 +96,22 @@ jobs:
           pio = "$(command -v pio)"
           EOF
           ./builder/build.sh --boards "$BOARDS" --profiles "$PROFILES"
+
+      # The Bluepad32 observer firmware (firmware/observer) for the observer matrix: built against the Bluepad32 pinned
+      # in hil_config.toml ([observer].bluepad32_repo @ bluepad32_ref), which build-observers.sh fetches into
+      # .cache/bluepad32. Its bundles land in bundles/matrix/ and ship in the firmware tarball.
+      - name: Bluepad32 ref
+        id: bp32
+        run: echo "ref=$(python3 host/hil/config.py observer.bluepad32_ref)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Bluepad32
+        uses: actions/cache@v5
+        with:
+          path: .cache/bluepad32
+          key: bluepad32-${{ steps.bp32.outputs.ref }}
+
+      - name: Build the observer bundles
+        run: ./builder/build-observers.sh --boards "$BOARDS"
 
       - name: Assemble release artifacts
         run: scripts/make-release-artifacts.sh "$TAG"
