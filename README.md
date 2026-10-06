@@ -276,11 +276,16 @@ From the v0.3.0 snapshot in [`docs/bench/`](docs/bench/README.md) (library
 - **Connection interval 8.75 ms on the esp32c3/esp32s3, 43.75 ms on the
   esp32dev, MTU 255.** With library 0.8.0 it's no longer 48.75 ms everywhere
   (the v0.2.6 numbers).
-- Single button press → host: **~4.9 ms** median on the esp32s3, **~13.6 ms**
-  on the esp32dev, **~17.8 ms** on the esp32c3. **0 dropped** across 200 paced
-  presses per profile. In that run the boards benched with 3, 2 and 1 BLE
-  links up (C3, esp32dev, S3), so the C3's figure carries the most contention:
-  compare a board with itself across snapshots, not boards with each other.
+- Single button press → host: **~4.9 ms** median on the esp32s3 and **~13.6
+  ms** on the esp32dev. **0 dropped** across 200 paced presses per profile.
+  The snapshot's **~17.8 ms on the esp32c3 is a measurement artifact**: the
+  bench timed from the firmware's serial reply, which the esp32c3's FTDI bridge
+  holds up to 16 ms. With that fixed (rig 0.3.2) it measures ~7.5 ms; see the
+  correction in [`docs/bench/`](docs/bench/README.md).
+- **The kernel driver doesn't change latency.** `sinput_hil.py --latency`
+  times the same report on hidraw and evdev, under hid-generic and under the
+  `sinput` driver: evdev adds 0.003–0.1 ms over hidraw, and the two drivers
+  sit within ~0.1 ms of each other.
 - **Latency is flat vs HID report size** (5–28 B) within a board. p99 is
   connection-interval jitter and swings run to run; p50 is the signal. The
   interval bounds *latency*, not paced *rate*: NimBLE sends several packets per

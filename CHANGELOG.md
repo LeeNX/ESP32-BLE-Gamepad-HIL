@@ -28,6 +28,14 @@ What a bump means:
   observers; a failed lane fails the job.
 - **`host/hil/matrixsummary.py`**: the matrix verdicts and Bluepad32's gaps
   (inputs it doesn't expose) as Markdown, appended to CI's job summary.
+- **`tester/sinput_hil.py --latency N`** (`host/hil/pathlatency.py`): times
+  the same report on every input path at once -- hidraw and evdev, under
+  hid-generic and under the `sinput` driver -- and writes
+  `results/latency-<board>-sinput-*.json`. First result (esp32c3): evdev adds
+  0.003-0.1 ms over hidraw, and the two drivers are within ~0.1 ms of each
+  other, at ~4.7-4.9 ms p50.
+- **`SerialDev.send()` / `reply()`**: `command()` split in two, for timing an
+  effect without waiting on the reply.
 
 ### Changed
 
@@ -38,6 +46,21 @@ What a bump means:
   plus `matrix=full`. With CI no longer staging `default` bundles,
   `test-matrix.sh --restore` and `tester/bp32_swap.sh` need them built by
   hand on a CI-run rig.
+
+### Fixed
+
+- **Bench latency timed from the serial reply.** `bench.py` (and
+  `desktop/latency.py`) started the clock only after `SerialDev.command()`
+  returned -- after the firmware's reply had crossed the serial bridge, and
+  after a blocking `tcdrain`. The esp32c3's FTDI holds that reply up to 16 ms,
+  so its benched ~17.8 ms (v0.3.0 snapshot) was mostly the bridge; timed from
+  the write without the drain it measures ~7.5 ms. CH340 boards were much less
+  affected. `e2e` is now from before the write, `ble` from after it; the
+  v0.3.0 snapshot carries a correction until the next full bench.
+- **`tester/test-matrix.sh` resets its observers at the end of a run.** The
+  last observer stayed linked to its last gamepad, so whatever ran next shared
+  that gamepad with it: a bench measured 18 ms instead of 4 ms on the esp32s3,
+  and a gamepad held by an observer doesn't advertise for BlueZ.
 
 ## [0.3.1] — 2026-10-06
 
