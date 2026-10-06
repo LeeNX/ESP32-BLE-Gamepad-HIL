@@ -97,7 +97,9 @@ def input_latency(dev, cap, kind, cfg, n=200, settle=0.03):
     for i in range(n):
         cap.drain()
         t0 = time.perf_counter()
-        dev.send(line(i))
+        dev.send(
+            line(i), flush=False
+        )  # flush() would block until the bridge drains, past the event
         t_sent = time.perf_counter()
         ev = _wait_event(cap.dev, want)
         t_evt = time.perf_counter()

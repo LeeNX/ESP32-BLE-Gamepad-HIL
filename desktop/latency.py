@@ -81,7 +81,9 @@ def button_latency(dut, dev, n=100, button=1, settle=0.03, timeout_ms=400):
         want_down = i % 2 == 0
         cmd = f"TPRESS {button}" if want_down else f"TRELEASE {button}"
         t0 = time.perf_counter()
-        dut.send(cmd)  # firmware replies "T <micros>"; read after the timing, below
+        dut.send(
+            cmd, flush=False
+        )  # replies "T <micros>"; read after the timing. No flush: it blocks on the bridge
         t_sent = time.perf_counter()
 
         deadline = t_sent + timeout_ms / 1000

@@ -138,17 +138,20 @@ class SerialDev:
         self.send(cmd)
         return self.reply(cmd, timeout, prefixes)
 
-    def send(self, cmd):
+    def send(self, cmd, flush=True):
         """Write one command line without waiting for its reply; read that with reply(). For timing an effect of the
         command: a serial bridge can hold the reply back -- an FTDI's latency timer, up to 16 ms -- well after the
-        effect itself has happened."""
+        effect itself has happened. Time with flush=False too: flush() is tcdrain(), which blocks until the bridge
+        has taken the bytes (~8 ms on the esp32c3's FTDI) -- the bytes go out just the same without it."""
         try:
             self.ser.write((cmd + "\n").encode("ascii"))
-            self.ser.flush()
+            if flush:
+                self.ser.flush()
         except (serial.SerialException, OSError):
             self._reopen()
             self.ser.write((cmd + "\n").encode("ascii"))
-            self.ser.flush()
+            if flush:
+                self.ser.flush()
 
     def reply(self, cmd="", timeout=6.0, prefixes=REPLY_PREFIXES):
         """The reply to the command last sent with send(): the first line with a known prefix."""
