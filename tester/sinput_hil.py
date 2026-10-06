@@ -568,7 +568,11 @@ def time_paths(driver, raw, evdev_dev):
         pl.EvdevKey(f"evdev/{driver}", evdev_dev),
     ]
     cmd("RESET")
-    res = pl.measure(lambda want: cmd("PRESS 1" if want else "RELEASE 1"), sources, n=args.latency)
+    # Send without waiting for the OK: a bridge's reply delay (the esp32c3's FTDI holds input up to 16 ms) would
+    # otherwise land in every sample. cmd() below resets the input buffer, dropping the unread OKs.
+    res = pl.measure(
+        lambda want: ser.write(b"PRESS 1\n" if want else b"RELEASE 1\n"), sources, n=args.latency
+    )
     cmd("RESET")
     for line in pl.describe(res, baseline=f"hidraw/{driver}"):
         print(f"LATENCY {line}", flush=True)
