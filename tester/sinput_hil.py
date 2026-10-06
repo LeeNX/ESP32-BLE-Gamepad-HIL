@@ -11,7 +11,9 @@ with an `sinput` bundle and the driver installed (tester/bootstrap-sinput.sh + `
 
 import argparse
 import glob
+import json
 import os
+import pathlib
 import re
 import select
 import struct
@@ -24,11 +26,21 @@ import serial
 from evdev import ecodes as e
 
 from hil import bluetooth as bt
+from hil import pathlatency as pl
+from hil.evdev_utils import find_gamepad
 
 ap = argparse.ArgumentParser()
 ap.add_argument("port")
 ap.add_argument("name")
 ap.add_argument("--cycles", type=int, default=5)
+ap.add_argument(
+    "--latency",
+    type=int,
+    default=0,
+    metavar="N",
+    help="also time N presses/releases per driver on every input path at once -- hidraw and evdev under hid-generic, "
+    "then under sinput -- and write results/latency-<board>-sinput-*.json (0 = skip)",
+)
 args = ap.parse_args()
 
 results = []
@@ -546,6 +558,33 @@ ok, out = driver_ctl("status")
 print("     ", out.replace("\n", " | "))
 
 
+latency = {}  # driver -> pathlatency.measure() result
+
+
+def time_paths(driver, raw, evdev_dev):
+    """Button 1 (SInput bit 0: report 0x01, byte 3, bit 0) on hidraw and on `driver`'s evdev node, per press."""
+    sources = [
+        pl.HidrawBit(f"hidraw/{driver}", raw.fd, 0x01, 3, 0),
+        pl.EvdevKey(f"evdev/{driver}", evdev_dev),
+    ]
+    cmd("RESET")
+    res = pl.measure(lambda want: cmd("PRESS 1" if want else "RELEASE 1"), sources, n=args.latency)
+    cmd("RESET")
+    for line in pl.describe(res, baseline=f"hidraw/{driver}"):
+        print(f"LATENCY {line}", flush=True)
+    latency[driver] = res
+
+
+def ping_ms(n=20):
+    """Serial PING round trip: the share of every figure that is the command path, not BLE or the host stack."""
+    out = []
+    for _ in range(n):
+        t = time.perf_counter()
+        if cmd("PING") == "PONG":
+            out.append((time.perf_counter() - t) * 1000)
+    return pl.Stats.of(out)
+
+
 def versions():
     """One VERSIONS line for the report: what this run actually tested against."""
 
@@ -605,6 +644,8 @@ check("BLE link stayed up", bt.is_connected(mac))
 raw = Raw()
 print(f"      {raw.node}")
 raw_checks(raw)
+if args.latency:
+    time_paths("hid-generic", raw, find_gamepad(args.name))
 raw.close()
 
 section("B: load sinput while connected")
@@ -616,6 +657,10 @@ check(
 check("BLE link stayed up", bt.is_connected(mac))
 dev = sinput_inputs()
 driver_checks(dev)
+if args.latency and "pad" in dev:
+    raw = Raw()
+    time_paths("sinput", raw, dev["pad"])
+    raw.close()
 for d in dev.values():
     d.close()
 
@@ -671,6 +716,21 @@ alarms = [
 ]
 check("dmesg: no warnings/oopses during the run", not alarms, " | ".join(alarms[:5]))
 print(f"      dmesg: {len(new)} new lines, {sum('sinput' in ln for ln in new)} from sinput")
+
+if latency:
+    board = args.name.split()[-1]
+    rec = {
+        "board": board,
+        "profile": "sinput",
+        "stimulus": "button 1 press/release over serial; timed from just before the write",
+        "versions": versions(),
+        "ping_ms": ping_ms(),
+        "paths": {label: r for res in latency.values() for label, r in res.items()},
+    }
+    out = pathlib.Path("results") / f"latency-{board}-sinput-{time.strftime('%Y%m%d-%H%M%S')}.json"
+    out.parent.mkdir(exist_ok=True)
+    out.write_text(json.dumps(rec, indent=2) + "\n")
+    print(f"      latency -> {out}")
 
 cmd("RESET")
 print(f"\nMAC {mac}")
