@@ -7,7 +7,7 @@
 lib_dir = "~/src/ESP32-BLE-Gamepad"   # library checkout the builder compiles against
 device_name = "HILpad"                # firmware advertises "<device_name> <board>"
 health_iface = "eth0"                 # hil.usbhealth: must have carrier if present ("" = skip)
-health_dwc_burst = 5                  # hil.usbhealth: this many new dwc_otg timeouts since baseline = unhealthy
+health_dwc_burst = 12                 # hil.usbhealth: this many new dwc_otg timeouts since baseline = unhealthy
 pio = "pio"                           # or an absolute path, e.g. ~/.venvs/pio/bin/pio
 # local_device_name -- override the advertised BLE name for `--profiles local`
 # builds on THIS box (<= 18 chars), so a dev board doesn't collide with the rig
@@ -42,12 +42,21 @@ boards = "esp32dev esp32c3 esp32s3"    # space separated
 profiles = "default specials maxbtn"  # see note above
 
 # OBSERVER builds -- builder/build-observers.sh: Bluepad32 "observer" bundles (bundles/matrix/<board>-bp32obs-*)
-# for the SInput / observer matrix. Set the paths in hil_config.local.toml (or $HIL_OBSERVER_HOST_DIR /
+# for the SInput / observer matrix, from firmware/observer. Set the paths in hil_config.local.toml (or
 # $HIL_BLUEPAD32_DIR / $HIL_OBSERVER_PIO). Boards default to [builder].boards.
 [observer]
-host_dir = ""        # host/ of a leenx-foss/antBot-hil checkout (the Bluepad32 HIL host firmware)
-bluepad32_dir = ""   # Bluepad32 checkout: LeeNX/bluepad32 feature/sinput until upstream #234 merges, then develop
+bluepad32_dir = ""   # your own Bluepad32 checkout; blank = builder/fetch-bluepad32.sh's, at the pin below
+# The pinned Bluepad32 source (CI and blank bluepad32_dir build this): upstream release 5.0.0-beta0, the first with
+# the SInput parser (#234). Pinned by commit, as tags can move; its src/ is identical to LeeNX/bluepad32 6f603c7, which
+# the observer matrix was verified with. Bump the ref deliberately, then re-run the matrix.
+bluepad32_repo = "https://github.com/ricardoquesada/bluepad32.git"
+bluepad32_ref = "80d6314e46f871719fbb4b721a2cc02227c4f369"   # tag 5.0.0-beta0
 pio = ""             # PlatformIO >= 6.2 (pioarduino platform); blank = [rig].pio
+
+# OBSERVER MATRIX -- tester/test-matrix.sh. Its boards (3 or more; each rotation uses three and leaves the rest
+# idle), separate from [builder].boards so a board can join the matrix without joining CI.
+[matrix]
+boards = "esp32dev esp32c3 esp32s3"   # e.g. add "esp32dev2" in hil_config.local.toml
 
 # TESTER role -- the Raspberry Pi + ESP32(s) + BLE adapter. builder/build.sh
 # --push rsyncs bundles here; the library repo's scripts/hil.sh and the CI job
@@ -108,3 +117,12 @@ profile = "default"
 # $HIL_CONN_LED_PIN_ESP32S3.
 # led_pin = <gpio>
 # conn_led_pin = <gpio>
+
+[board.esp32dev2]
+# A second classic ESP32 DevKit (the rig's original esp32dev, onboard CP2102 with
+# the auto-reset circuit). Observer matrix only: add it to [matrix].boards, not
+# [builder].boards. Same chip as esp32dev; its own firmware name, so it
+# advertises "HILpad esp32dev2".
+pio_env = "esp32dev2"
+port = "/dev/serial/by-id/CHANGE-ME"
+profile = "default"

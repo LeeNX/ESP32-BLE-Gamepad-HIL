@@ -18,6 +18,66 @@ What a bump means:
 
 ## [Unreleased]
 
+### Added
+
+- **`firmware/observer/`**: the Bluepad32 observer firmware now lives in the
+  rig repo, next to `hil_runner`. It comes from the Bluepad32 HIL rig's host
+  firmware (leenx-foss/antBot-hil `host/`) minus NuS, OTA, the access gate and
+  the OTA chord, which the observer never used; every `HIL ...` line and
+  command `tester/bp32_hil.py` relies on is unchanged, as is the partition
+  layout. Compared with the 0.3.0 observers it no longer enables Bluepad32's
+  BLE service, ignores nameless devices until an address is allowed, escapes
+  device names in its output, prints the features of the device that just
+  became ready, and tracks the last printed state per device (cleared on
+  connect and disconnect). Bluepad32 stays external: `[observer].bluepad32_dir`, as
+  `[builder].lib_dir` is for the library.
+- **`rig_sha` / `rig_describe` in every bundle manifest**: the rig commit the
+  firmware source came from, next to the library's `lib_sha`.
+- **`esp32dev2` board**: a second classic ESP32 DevKit (the rig's original
+  esp32dev, onboard CP2102), with its own firmware envs so it advertises
+  `HILpad esp32dev2`. Observer matrix only: it isn't in `[builder].boards` or
+  the CI board lists.
+- **`[matrix].boards`** (and `test-matrix.sh --boards`): the matrix's boards,
+  3 or more, separate from the CI build list.
+- **Releases ship the observer firmware**: `release.yml` builds the `bp32obs`
+  bundles for the CI boards into `firmware-bundles/matrix/`, and `index.json`
+  records the Bluepad32 commit under `bluepad32`. A new **`observer.yml`**
+  workflow builds them on every push or PR that touches their sources and
+  uploads them as the `observer-bundles` artifact.
+- **`builder/fetch-bluepad32.sh`** checks out the pinned Bluepad32
+  (`[observer].bluepad32_repo` @ `bluepad32_ref`, new keys) with its BTstack
+  submodule and patches; `build-observers.sh` uses it when no
+  `[observer].bluepad32_dir` is set.
+
+### Changed
+
+- **The observer builds against upstream Bluepad32 5.0.0-beta0**, the first
+  release with the SInput parser (ricardoquesada/bluepad32#234), instead of
+  the LeeNX/bluepad32 `feature/sinput` branch. Its `src/` is identical to the
+  fork commit the 0.3.0 observer matrix ran with (`6f603c7`).
+- **`firmware/observer` pins its pioarduino platform** to the commit the
+  verified observers were built with, instead of the moving `#develop`.
+- **`builder/build-observers.sh` builds `firmware/observer`**:
+  `[observer].host_dir` and `HIL_OBSERVER` are gone. Observer bundles are
+  named `<board>-bp32obs-<bluepad32 sha8>-<rig sha8>` and report the same in
+  `version?`, so two builds from the same Bluepad32 commit can be told apart
+  (`make_bundle.py --name-suffix`).
+- **`tester/test-matrix.sh` runs on 3 or more boards**: each rotation uses the
+  observer and the next two boards, and resets any other board first. That
+  board is the previous observer, which would otherwise keep its allow filter
+  and bonds and could take a gamepad another lane is pairing.
+- **Board names match exactly** (`hil.names.name_matches`) in BlueZ pairing and
+  evdev lookups: a substring test let `HILpad esp32dev` match
+  `HILpad esp32dev2`.
+- **`tester/test-matrix.sh` picks the most recently built bundle** (by mtime)
+  rather than the last by name, which ends in a sha and says nothing about age.
+- **`[rig].health_dwc_burst` defaults to 12** (was 5). A single board reset
+  can leave a burst of 6–9 `dwc_otg` timeouts even through a UART bridge (the
+  0.3.0 notes said ~2), and at 5 the guard kept aborting healthy runs; a real
+  wedge is dozens.
+- **README findings** follow the v0.3.0 bench snapshot (library 0.8.0's faster
+  connection interval) instead of the v0.2.6 numbers.
+
 ## [0.3.0] — 2026-10-05
 
 ### Added

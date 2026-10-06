@@ -14,6 +14,7 @@ prebuilt. You need a Linux box, an ESP32, a BLE adapter, and Python.
 |---|---|
 | `firmware-bundles/<board>-<profile>-<libsha8>/` | flashable `.bin` parts + `manifest.json` (chip, offsets, sha256s) |
 | `firmware-bundles/matrix/<board>-sinput-<libsha8>/` | the `sinput` profile, which the pytest suite doesn't run (see below) |
+| `firmware-bundles/matrix/<board>-bp32obs-<bp32sha8>-<rigsha8>/` | the Bluepad32 observer firmware for the observer matrix (see below) |
 | `golden/<profile>.hiddesc` | the HID report descriptor each profile is expected to generate |
 | `suite/` | the pytest suite, `tester/` scripts, `conftest.py`, `hil_config.toml` |
 | `index.json` | provenance: rig + library commit, board/profile list |
@@ -55,18 +56,15 @@ suite. Two scripts test them:
 - **`tester/test-matrix.sh`** runs the observer matrix. It needs three boards,
   with one at a time acting as a Bluepad32 *observer*.
 
-**Observer firmware isn't in this archive.** It is built with
-`builder/build-observers.sh` from two checkouts outside the rig repo. For this
-release they were:
+**The observer firmware ships in this archive** as the `bp32obs` bundles. It
+is built from the rig's `firmware/observer/` against Bluepad32, whose commit
+`index.json` records under `bluepad32` (each observer manifest also has it as
+`lib_sha`, plus the rig commit as `rig_sha`). The `-dirty` in its describe is
+the BTstack patch Bluepad32 ships in `external/patches`, applied at build time.
 
-| Source | Ref |
-|---|---|
-| Bluepad32 with the SInput parser: [LeeNX/bluepad32](https://github.com/LeeNX/bluepad32) `feature/sinput` | `6f603c7`, BTstack submodule with Bluepad32's l2cap patch applied (`external/patches`) |
-| HIL host firmware: leenx-foss/antBot-hil `host/`, built with `HIL_OBSERVER=1` | `observer-build` @ `e1ebe64` |
-
-Point `[observer].host_dir` and `[observer].bluepad32_dir` in
-`hil_config.local.toml` at those checkouts, run `builder/build-observers.sh`,
-and pass the output to `test-matrix.sh` with `HIL_BUNDLE_DIR`. The bundle
-manifest records only the Bluepad32 commit, and its `-dirty` suffix is the
-BTstack patch. A later rig release moves the observer firmware into this repo
-and ships its bundles.
+`tester/test-matrix.sh` takes these bundles as they are: from `suite/` (as in
+the steps above), point `HIL_BUNDLE_DIR` at them with
+`HIL_BUNDLE_DIR="$PWD/../firmware-bundles"`. To rebuild one, run
+`builder/build-observers.sh` from a full rig checkout; with no
+`[observer].bluepad32_dir` set it fetches the pinned Bluepad32
+(`[observer].bluepad32_repo` @ `bluepad32_ref`) itself.

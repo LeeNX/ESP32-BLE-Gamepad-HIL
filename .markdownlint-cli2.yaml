@@ -13,4 +13,6 @@ ignores:
   - "bundles/**"
   - "results/**"
   - "firmware/.pio/**"
+  - "firmware/observer/.pio/**"
+  - ".cache/**"           # builder/fetch-bluepad32.sh's Bluepad32 checkout
   - "**/.venv/**"

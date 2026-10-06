@@ -6,6 +6,8 @@ import time
 import evdev
 from evdev import ecodes
 
+from hil.names import name_matches
+
 # ABS_HAT0X..ABS_HAT3Y -- the 8 hat axis codes, kept separate from stick axes.
 HAT_ABS_CODES = {
     ecodes.ABS_HAT0X,
@@ -38,7 +40,7 @@ def find_gamepad(name_contains, timeout=25.0):
             dev = _open(path)
             if dev is None:
                 continue
-            if name_contains in dev.name:
+            if name_matches(dev.name, name_contains):
                 last_seen.append(dev.name)
                 caps = dev.capabilities()
                 abs_codes = {c for c, _ in caps.get(ecodes.EV_ABS, [])}
@@ -69,7 +71,7 @@ def find_all_nodes(name_contains):
         dev = _open(path)
         if dev is None:
             continue
-        if name_contains in dev.name:
+        if name_matches(dev.name, name_contains):
             out.append(dev)
         else:
             dev.close()

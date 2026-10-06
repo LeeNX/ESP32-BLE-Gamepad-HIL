@@ -50,10 +50,17 @@ for m in sorted([*root.glob("*/manifest.json"), *root.glob("matrix/*/manifest.js
     bundles.append({k: d[k] for k in ("board", "chip", "profile", "pio_env",
                                       "lib_sha", "lib_describe")}
                    | {"dir": str(m.parent.relative_to(root))})
+# Observer bundles (matrix/<board>-bp32obs-*) are Bluepad32 builds: their lib_sha is the Bluepad32 commit, not the
+# ESP32-BLE-Gamepad library's, so it gets its own provenance entry.
+obs = [b for b in bundles if b["profile"] == "bp32obs"]
+if len({b["lib_sha"] for b in obs}) > 1:
+    sys.exit("observer bundles from more than one Bluepad32 commit: " + ", ".join(sorted(b["dir"] for b in obs)))
+bluepad32 = {"sha": obs[0]["lib_sha"], "describe": obs[0]["lib_describe"]} if obs else None
 print(json.dumps({
     "rig_version": tag.lstrip("v"),
     "rig_sha": rig_sha,
     "library": {"repo": lib_repo, "sha": lib_sha, "describe": lib_describe},
+    **({"bluepad32": bluepad32} if bluepad32 else {}),
     "built_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
     "boards": sorted({b["board"] for b in bundles}),
     "profiles": sorted({b["profile"] for b in bundles}),

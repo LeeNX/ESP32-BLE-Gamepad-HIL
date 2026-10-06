@@ -1,4 +1,9 @@
 firmware/.pio/
+firmware/observer/.pio/
+firmware/observer/sdkconfig.*
+!firmware/observer/sdkconfig.defaults
+firmware/observer/dependencies.lock
+firmware/observer/managed_components/
 results/
 bundles/
 dist/
@@ -8,3 +13,4 @@ __pycache__/
 .venv/
 .pytest_cache/
 .ruff_cache/
+.cache/

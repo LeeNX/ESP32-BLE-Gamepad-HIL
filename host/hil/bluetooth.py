@@ -28,6 +28,8 @@ import threading
 import time
 from collections import deque
 
+from hil.names import name_matches
+
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 
@@ -258,7 +260,7 @@ class BtCtl:
         last_kick = 0.0
         while time.time() < deadline:
             for mac, nm in known_devices().items():
-                if name_contains in nm:
+                if name_matches(nm, name_contains):
                     return mac
             if time.time() - last_kick > 10:
                 self._ensure_scanning()
@@ -336,7 +338,7 @@ def ensure_paired(btctl, name_contains, known_mac=None, want_fresh=False):
     mac = known_mac
     if mac is None:
         for m, n in known_devices().items():
-            if name_contains in n:
+            if name_matches(n, name_contains):
                 mac = m
                 break
 

@@ -1,0 +1,62 @@
+#
+# ESP32 options
+#
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+CONFIG_ESP32_XTAL_FREQ_AUTO=y
+CONFIG_XTAL_FREQ_AUTO=y
+
+# Bluetooth
+CONFIG_BT_ENABLED=y
+CONFIG_BT_CONTROLLER_ONLY=y
+# Dual mode (BLE and BR/EDR) on the classic ESP32; the C3/S3 are BLE only.
+CONFIG_BTDM_CTRL_MODE_BTDM=y
+# At least one more than CONFIG_BLUEPAD32_MAX_DEVICES. See https://gitlab.com/ricardoquesada/bluepad32/-/issues/11
+CONFIG_BTDM_CTRL_BR_EDR_MAX_ACL_CONN=3
+CONFIG_BTDM_CTRL_BLE_MAX_CONN=5
+CONFIG_BTDM_CTRL_BR_EDR_MAX_SYNC_CONN=0
+CONFIG_BTDM_CTRL_AUTO_LATENCY=y
+CONFIG_BTDM_CTRL_MODEM_SLEEP=n
+
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+
+#
+# FreeRTOS
+#
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS=y
+
+#
+# Bluepad32
+#
+CONFIG_BLUEPAD32_MAX_DEVICES=2
+CONFIG_BLUEPAD32_PLATFORM_CUSTOM=y
+# Bluepad32's own console owns the UART: turn it off so main.c initialises BTstack's stdio, which observer.c reads
+# commands from.
+CONFIG_BLUEPAD32_USB_CONSOLE_ENABLE=n
+
+#
+# BTstack. Needs to be disabled for ESP32-C6, see https://github.com/bluekitchen/btstack/issues/599
+#
+CONFIG_BTSTACK_AUDIO=n
+
+#
+# Partitions: the layout of the v0.3.0 observer bundles (factory app at 0x20000), kept so their offsets don't move.
+# The OTA slots and rollback are unused here.
+#
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# The BTstack loop runs in the "main" task; ESP-IDF 5.5 needs more stack than the default.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+#
+# Console input on UART0 on every chip. On the ESP32-C3/S3 the native USB-Serial/JTAG is by default a *secondary*
+# console, and BTstack's btstack_stdio_init() then reads stdin from it instead of UART0 -- so commands sent over the
+# UART bridge (the rig's `port`) were ignored while output still showed on both. No secondary console: stdin and
+# stdout are UART0. (The classic ESP32 has no USB-Serial/JTAG, so this changes nothing there.)
+#
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y

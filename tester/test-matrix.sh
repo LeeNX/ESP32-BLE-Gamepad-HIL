@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# TESTER role: the observer matrix. Every rotation makes one board a Bluepad32 observer and the other two
-# gamepads; each profile then runs two lanes in parallel:
+# TESTER role: the observer matrix. Every rotation makes one board a Bluepad32 observer and the next two (in
+# [matrix].boards order) gamepads; any further boards sit that rotation out. Each profile then runs two lanes:
 #
 #   BlueZ lane      gamepad A, observed by the Pi:   tester/test.sh (pytest suite) for minimal/maxbtn,
 #                                                    tester/sinput_hil.py (hid-generic + sinput driver) for sinput
 #   Bluepad32 lane  gamepad B, observed by the observer board: tester/bp32_hil.py --profile <p>
 #
 # Rotating the observer through every board means each board is observed by both BlueZ and Bluepad32, and each
-# board runs Bluepad32 once (esp32: BR/EDR + BLE; esp32c3/esp32s3: BLE only).
+# board runs Bluepad32 once (esp32: BR/EDR + BLE; esp32c3/esp32s3: BLE only). A board sitting a rotation out is
+# reset first: it is the previous observer, and would otherwise keep its allow filter and bonds.
 #
 #   tester/test-matrix.sh                                   # all rotations, minimal maxfeat sinput
+#   tester/test-matrix.sh --boards "esp32dev esp32c3 esp32s3 esp32dev2"   # default: [matrix].boards
 #   tester/test-matrix.sh --rotations esp32c3 --profiles sinput
 #   tester/test-matrix.sh --max-cells 1 --lanes serial      # ramp up: one cell, lanes one after the other
 #   tester/test-matrix.sh --restore                         # finish with every board on its default bundle
@@ -27,8 +29,8 @@
 # then restore by hand or rerun.
 #
 # Bundles: the profile bundles <board>-<profile>-* (sinput ones under matrix/) and the observer bundles
-# matrix/<board>-bp32obs-* (builder/build-observers.sh), newest by name. Ends by dropping the HILpad BlueZ bonds,
-# so the normal suite pairs fresh. Results go to results/matrix/ (one log per lane) and results/matrix-verdicts.md;
+# matrix/<board>-bp32obs-* (builder/build-observers.sh), the most recently built of each. Ends by dropping the
+# HILpad BlueZ bonds, so the normal suite pairs fresh. Results go to results/matrix/ (one log per lane) and results/matrix-verdicts.md;
 # each verdict line carries the lane's VERSIONS (kernel, sinput driver, firmware/library, Bluepad32 build).
 set -u
 cd "$(dirname "$0")/.." || exit 2
@@ -40,28 +42,41 @@ rig_lock_acquire || exit $?
 VENV=${HIL_VENV:-$HOME/.venvs/hil}
 PY="$VENV/bin/python"
 BUNDLE_DIR=${HIL_BUNDLE_DIR:-$HOME/hil-bundles}
-BOARDS=(esp32dev esp32c3 esp32s3)
-ROTATIONS=("${BOARDS[@]}")
+BOARDS=()
+ROTATIONS=()
 PROFILES=(minimal maxfeat sinput)
 LANES=serial
 MAX_CELLS=0
 RESTORE=0
 while [[ $# -gt 0 ]]; do
   case $1 in
+    --boards) read -r -a BOARDS <<<"$2"; shift 2 ;;
     --rotations) read -r -a ROTATIONS <<<"$2"; shift 2 ;;
     --profiles) read -r -a PROFILES <<<"$2"; shift 2 ;;
     --lanes) LANES=$2; shift 2 ;;
     --max-cells) MAX_CELLS=$2; shift 2 ;;
     --restore) RESTORE=1; shift ;;
-    -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,34p' "$0"; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
 
 cfg() { python3 host/hil/config.py "$1"; }
 port() { cfg "board.$1.port"; }
+((${#BOARDS[@]})) || read -r -a BOARDS <<<"$(cfg matrix.boards)"
+((${#BOARDS[@]})) || BOARDS=(esp32dev esp32c3 esp32s3)
+((${#BOARDS[@]} >= 3)) || { echo "the matrix needs 3 or more boards, got: ${BOARDS[*]}" >&2; exit 2; }
+((${#ROTATIONS[@]})) || ROTATIONS=("${BOARDS[@]}")
+for r in "${ROTATIONS[@]}"; do
+  [[ " ${BOARDS[*]} " == *" $r "* ]] || { echo "rotation $r is not one of the boards: ${BOARDS[*]}" >&2; exit 2; }
+done
 flash_port() { local p; p=$(cfg "board.$1.flash_port"); echo "${p:-$(port "$1")}"; }
-newest() { local d=("$@"); [[ -d "${d[-1]}" ]] && echo "${d[-1]}"; }  # globs sort: last = newest name
+# Most recently built (rsync keeps the build's mtime): names end in shas, so sorting them says nothing about age.
+newest() {
+  local d best=""
+  for d in "$@"; do [[ -d $d && ( -z $best || $d -nt $best ) ]] && best=$d; done
+  [[ -n $best ]] && echo "$best"
+}
 bundle() {  # <board> <profile>
   if [[ $2 == sinput || $2 == bp32obs ]]; then newest "$BUNDLE_DIR/matrix/$1-$2"-*; else newest "$BUNDLE_DIR/$1-$2"-*; fi
 }
@@ -92,12 +107,33 @@ flash() {  # <board> <bundle>
   return 0
 }
 health() { PYTHONPATH=host python3 -m hil.usbhealth "${@:-check}"; }
+# Restart a board this rotation doesn't use, like bp32_hil.py resets the observer: through its native USB when it has
+# one, else RTS -> EN on its console bridge. It is the previous observer: on boot it drops its allow filter and
+# bonds, so it can't hold on to (or be reconnected by) a gamepad another lane is pairing.
+idle_reset() {  # <board>
+  local p
+  p=$(cfg "board.$1.flash_port"); p=${p:-$(port "$1")}
+  [[ -e $p ]] || { echo "idle $1: no port ($p), not reset" >&2; return 0; }
+  "$PY" - "$p" <<'PY'
+import sys, time
+import serial
+s = serial.Serial()
+s.port, s.dtr, s.rts = sys.argv[1], False, True
+s.open()
+time.sleep(0.1)
+try:
+    s.rts = False
+    s.close()
+except (OSError, serial.SerialException):  # a native USB port re-enumerates as the chip resets
+    pass
+PY
+}
 # Stop at the first unhealthy check: more flashing on a wedged bus only makes it worse.
 guard() {  # <where>
   local out
   # Re-baseline after every passing check, so a guard counts the dwc_otg warnings of *this* step: a wedge comes
-  # as one burst (dozens), while each ESP32-S3 flash leaves ~2 even through its UART bridge, which would add up
-  # past the threshold over a run.
+  # as one burst (dozens), while a board's reset can leave a burst of 6-9 even through a UART bridge, and those
+  # would add up past the threshold over a run.
   out=$(health check) && { health baseline >/dev/null; return 0; }
   echo "ABORT at $1: $out -- reboot the host, then restore the boards" | tee -a "$VERDICTS"
   printf '%s\n' "${summary[@]}"
@@ -121,15 +157,19 @@ health check --ignore-dwc || { echo "USB unhealthy before the run: not starting"
 health baseline
 
 for obs in "${ROTATIONS[@]}"; do
-  # The other two boards, in a fixed cyclic order: the first is observed by BlueZ, the second by Bluepad32.
+  # The next two boards, in a fixed cyclic order: the first is observed by BlueZ, the second by Bluepad32.
+  n=${#BOARDS[@]}
   i=0; for b in "${BOARDS[@]}"; do [[ $b == "$obs" ]] && break; i=$((i + 1)); done
-  bz=${BOARDS[$(((i + 1) % 3))]}; bp=${BOARDS[$(((i + 2) % 3))]}
+  bz=${BOARDS[$(((i + 1) % n))]}; bp=${BOARDS[$(((i + 2) % n))]}
+  idle=()
+  for b in "${BOARDS[@]}"; do [[ $b == "$obs" || $b == "$bz" || $b == "$bp" ]] || idle+=("$b"); done
   obs_bundle=$(bundle "$obs" bp32obs) || { echo "no observer bundle for $obs" >&2; fail=1; continue; }
   # bp32_hil.py resets the observer at the start of each lane; through its native USB when it has one, since a
   # console bridge may lack RTS -> EN.
   obs_rst=$(cfg "board.$obs.flash_port")
-  echo; echo "==== rotation: observer=$obs  BlueZ<-$bz  Bluepad32<-$bp"
+  echo; echo "==== rotation: observer=$obs  BlueZ<-$bz  Bluepad32<-$bp${idle[*]:+  idle: ${idle[*]}}"
   unbond
+  for b in "${idle[@]}"; do idle_reset "$b"; done
   flash "$obs" "$obs_bundle"
   guard "flash observer $obs"
 
