@@ -7,19 +7,27 @@
 #   scripts/release.sh 0.2.0                 # bump + commit + tag, print push cmds
 #   scripts/release.sh 0.2.0 --push          # ... and push branch + tag
 #   scripts/release.sh 0.2.0 --dry-run
+#   scripts/release.sh 0.2.0 --allow-branch  # not on main: release this branch anyway
 #   RELEASE_VERSION=0.2.0 scripts/release.sh  # version via env
 #
 # --remote may be repeated (or RELEASE_REMOTE set to a space/comma-separated
 # list) to push the branch + tag to more than one remote, e.g. GitHub and a
 # Gitea mirror:  scripts/release.sh 0.2.0 --push --remote origin --remote gitea
 #
-# Requires a clean working tree so the release commit is only the bump.
+# Requires a clean working tree so the release commit is only the bump, and the
+# release branch (main, or $RELEASE_BRANCH) checked out and not behind the
+# remote's: a release cut on a feature branch tags a commit main never gets, and
+# main keeps the old VERSION and an [Unreleased] that re-lists what shipped
+# (v0.3.0 and v0.3.1 both had to be merged back by hand). --allow-branch (or
+# RELEASE_ALLOW_BRANCH=1) releases from the current branch anyway.
 set -euo pipefail
 
-usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; }
 
 push=false
 dry_run=false
+allow_branch="${RELEASE_ALLOW_BRANCH:-}"
+release_branch="${RELEASE_BRANCH:-main}"
 version="${RELEASE_VERSION:-}"
 # RELEASE_REMOTE may hold several remotes, space- or comma-separated.
 remotes=()
@@ -29,6 +37,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --push) push=true; shift ;;
     --dry-run) dry_run=true; shift ;;
+    --allow-branch) allow_branch=1; shift ;;
     --remote) remotes+=("${2:?--remote needs a value}"); shift 2 ;;
     --remote=*) remotes+=("${1#*=}"); shift ;;
     -h|--help) usage; exit 0 ;;
@@ -63,6 +72,36 @@ done
 
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "error: working tree not clean:" >&2; git status --short >&2; exit 1
+fi
+
+branch="$(git rev-parse --abbrev-ref HEAD)"
+if [[ "$branch" != "$release_branch" ]]; then
+  if [[ -z "$allow_branch" ]]; then
+    {
+      echo "error: on '$branch', not '$release_branch'. A release cut here tags a commit $release_branch doesn't have,"
+      echo "       and $release_branch keeps the old VERSION and an [Unreleased] listing what already shipped."
+      echo "       Merge to $release_branch and release from there, or pass --allow-branch to release from '$branch'."
+    } >&2
+    exit 1
+  fi
+  echo "warning: releasing from '$branch', not '$release_branch' (--allow-branch): merge the release commit back to" \
+    "$release_branch afterwards, keeping the tagged commit (a merge commit, not a squash)." >&2
+else
+  # Not behind the remote's release branch: a stale checkout would tag without what's been merged since.
+  remote="${remotes[0]}"
+  if git fetch -q "$remote" "$release_branch" 2>/dev/null; then
+    behind="$(git rev-list --count "HEAD..FETCH_HEAD")"
+    ahead="$(git rev-list --count "FETCH_HEAD..HEAD")"
+    if [[ "$behind" -gt 0 && -z "$allow_branch" ]]; then
+      echo "error: $release_branch is $behind commit(s) behind $remote/$release_branch -- pull first" \
+        "(or --allow-branch to release this checkout as it is)" >&2
+      exit 1
+    fi
+    [[ "$ahead" -gt 0 ]] && echo "note: $release_branch is $ahead commit(s) ahead of $remote/$release_branch;" \
+      "they go out with the release" >&2
+  else
+    echo "warning: couldn't fetch $remote/$release_branch to check this checkout is current" >&2
+  fi
 fi
 
 if ! grep -q '^## \[Unreleased\]' CHANGELOG.md; then
@@ -101,7 +140,6 @@ PY
 git add VERSION CHANGELOG.md
 git commit -m "Release $tag"
 git tag -a "$tag" -m "$tag"
-branch="$(git rev-parse --abbrev-ref HEAD)"
 echo "Committed + tagged $tag on $branch."
 
 if $push; then
