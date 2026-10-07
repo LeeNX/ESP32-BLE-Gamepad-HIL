@@ -32,6 +32,13 @@ Raspberry Pi) that can't build firmware in reasonable time:
 - Command injection is over USB serial, **not** BLE — an independent channel,
   so the harness never depends on the thing under test being up.
 
+BlueZ on the Pi is one host. The **observer matrix** adds a second: another rig
+ESP32 running [Bluepad32](https://github.com/ricardoquesada/bluepad32), the
+controller library many ESP32 projects use as their host, pairs with a gamepad
+board and reports what it parsed. Each board takes turns as that observer, so
+every board is checked by both hosts — see
+[Observer matrix](#observer-matrix-bluepad32).
+
 The library repo drives this end to end with its `scripts/hil.sh` (build,
 push to the tester, run, pull results). One box can be both roles
 (`./run.sh` does builder then tester locally).
@@ -42,37 +49,42 @@ push to the tester, run, pull results). One box can be both roles
 |---|---|
 | `firmware/` | PlatformIO project — `hil_runner` serial-command firmware, `hil_profile.h` layout profiles (see below) |
 | `builder/build.sh` `builder/make_bundle.py` | compile → firmware bundle(s) → optional `--push` rsync to the tester. Library path comes from `$HIL_LIB_DIR` (exported from `rig.lib_dir`) |
+| `firmware/observer/` | the Bluepad32 **observer** firmware — an ESP-IDF project whose `observer.c` prints what Bluepad32 parsed as `HIL ...` lines; Bluepad32 itself stays outside the repo (see [Observer matrix](#observer-matrix-bluepad32)) |
+| `builder/build-observers.sh` `builder/fetch-bluepad32.sh` | build the observer bundles (`bundles/matrix/<board>-bp32obs-*`) against the Bluepad32 pinned in `[observer]`, fetching it when no checkout of your own is configured |
 | `tester/bootstrap-host.sh` (root) `tester/bootstrap.sh` (user) | tester provisioning, split: privileged half (apt / bluetooth / groups / udev) vs unprivileged half (venv / config / health check) |
 | `tester/flash.py` `tester/test.sh` | flash a bundle with esptool, run the suite + benchmark, write `results/`; SKIPs a board the tester doesn't have |
 | `tester/test-all.sh` | loop `tester/test.sh` over every bundle in `~/hil-bundles`, retrying a failed bundle up to `$HIL_RETRY_COUNT` times (default 3, doubling `$HIL_RETRY_PAUSE`-second pause between each, default 15s — both overridable); a solo/sequential retry (including `--bench`) also restarts the BT adapter first (unsafe during `--by-board`'s parallel phase 2, so that path skips it — see `recover_adapter` in the script); `--by-board` runs the boards as parallel lanes (functional only, what CI runs by default); `--bench` is the sequential sweep (weekly + at release) |
+| `tester/test-matrix.sh` | the observer matrix: rotations of one observer + two gamepads, BlueZ and Bluepad32 lanes, USB health guards per step; writes `results/matrix-verdicts.md` |
+| `tester/sinput_hil.py` `tester/bp32_hil.py` | the `sinput` profile under hid-generic and under the `sinput` kernel driver (`--latency` times every input path); what a Bluepad32 observer parses from a gamepad |
 | `tester/rig-lock.sh` `tester/rig-status.sh` `tester/rig-kill.sh` `host/hil/riglock.py` | one-rig `flock` + run-status file — serialise CI and local runs; `rig-status.sh` shows who/what is running, `rig-kill.sh` aborts it (see [CI](#rig-lock--status)) |
-| `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite. Helpers: `serialdev`, `evdev_utils`, `bluetooth`, `gatt` (DIS/PnP/battery over BlueZ D-Bus), `hidraw` (Feature/Output reports + descriptor), `latency`+`bench`, `sysinfo`, `detect` (present boards), `charts`, `summarize` |
+| `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite. Helpers: `serialdev`, `evdev_utils`, `bluetooth`, `gatt` (DIS/PnP/battery over BlueZ D-Bus), `hidraw` (Feature/Output reports + descriptor), `latency`+`bench`, `pathlatency` (one report timed on several input paths), `sysinfo`, `detect` (present boards), `usbhealth` (USB bus guard), `names` (exact board-name matching), `charts`, `summarize`, `matrixsummary` |
 | `hil_config.toml` (+ gitignored `hil_config.local.toml`) | per-machine ports, ssh host, builder board/profile matrix, per-board `enabled` |
 | `run.sh` | one-box: build all bundles then flash+test each |
 | `scripts/release.sh` `scripts/make-release-artifacts.sh` | cut a rig release (`VERSION` + `CHANGELOG.md` → tag → `release.yml`); see [RELEASE.md](RELEASE.md) |
 | `scripts/update-goldens.py` | rebuild + reflash a board per profile, read `RMAP?` over serial, rewrite `firmware/golden/<profile>.hiddesc` — after an intentional descriptor change |
-| `.github/workflows/hil.yml` `release.yml` | CI: build → SSH-to-tester test; tag → firmware/suite release |
+| `.github/workflows/hil.yml` `release.yml` `observer.yml` | CI: build the firmware and the observers in parallel → SSH-to-tester suite + observer matrix; tag → firmware/suite release; `observer.yml` also builds the observers on its own whenever their sources change |
 | [`docs/TODO.md`](docs/TODO.md) | parking lot for coverage gaps + infra ideas — nothing planned, pick up if the data's wanted |
 
 ### Compile profiles (`firmware/include/hil_profile.h`)
 
 | Profile | Layout | Why it's there | In CI |
 |---|---|---|---|
-| `default` | 64 btn, 4 hat, 8 axis (0..32767) | what most people run — the known-good baseline (mirrors `TestAll.ino`) | every push |
-| `specials` | 16 btn, X/Y axis (**−32767..32767**), 8 special buttons, **Output + Feature reports** | the fragile, least-exercised surface in one flash: special usages, signed axes (`test_ranges` negative rail), and the O/F report plumbing (`setEnable{Output,Feature}Report`) | every push |
-| `maxbtn` | 128 btn, no hats/axes | the largest layout the HID transport currently supports — the library's 128-button ceiling | every push |
-| `minimal` | 2 btn, X/Y axis | smallest input report — the latency-curve low-end anchor, and nothing else depends on it | weekly + release |
-| `maxfeat` | 16 btn, 1 hat, 6 axis (x/y/z/rx/ry/rz), accelerator + brake, home + back | max *features* rather than max buttons: everything Bluepad32's generic HID parser maps, in one descriptor (button 16 is the first it drops). The observer matrix's "max" profile; `maxbtn` still pins the library's 128-button ceiling | not yet |
-| `sinput` | SInput mode: 25 btn, 1 hat, sticks x/y + z/rz, triggers rx/ry, start/select/home, IMU, RGB, rumble, touchpad; VID/PID `2E8A:10C6` | for SInput-aware observers (SDL3 with the SInput hint, Bluepad32). Drives the SInput-only commands (`MOTION`, `TOUCH`, `RUMBLE?`, `RGB?`, `PLED?`). **Needs a library with `GamepadMode::SInput`** (upstream `master`; the rig's pinned checkout is older). BlueZ/evdev tests don't know SInput yet | not yet |
+| `default` | 64 btn, 4 hat, 8 axis (0..32767) | what most people run — the known-good baseline (mirrors `TestAll.ino`) | release |
+| `specials` | 16 btn, X/Y axis (**−32767..32767**), 8 special buttons, **Output + Feature reports** | the fragile, least-exercised surface in one flash: special usages, signed axes (`test_ranges` negative rail), and the O/F report plumbing (`setEnable{Output,Feature}Report`) | weekly + release |
+| `maxbtn` | 128 btn, no hats/axes | the largest layout the HID transport currently supports — the library's 128-button ceiling | release |
+| `minimal` | 2 btn, X/Y axis | smallest input report — the latency-curve low-end anchor | every push |
+| `maxfeat` | 16 btn, 1 hat, 6 axis (x/y/z/rx/ry/rz), accelerator + brake, home + back | max *features* rather than max buttons: everything Bluepad32's generic HID parser maps, in one descriptor (button 16 is the first it drops). The observer matrix's "max" profile; `maxbtn` still pins the library's 128-button ceiling | every push |
+| `sinput` | SInput mode: 25 btn, 1 hat, sticks x/y + z/rz, triggers rx/ry, start/select/home, IMU, RGB, rumble, touchpad; VID/PID `2E8A:10C6` | for SInput-aware observers (SDL3 with the SInput hint, Bluepad32). Drives the SInput-only commands (`MOTION`, `TOUCH`, `RUMBLE?`, `RGB?`, `PLED?`). Needs a library with `GamepadMode::SInput` (0.8.0+). The pytest suite doesn't run it: [`tester/sinput_hil.py`](#sinput-sinput-profile-testersinput_hilpy) and the observer matrix do | every push (quick observer matrix) |
 | `local` | 4 btn, 1 hat, 2 axis | **ad-hoc, not built by CI** — for local developer smoke tests ([`desktop/`](desktop/)). Advertises as `HILdev <board>`, not `HILpad <board>`, so a dev board doesn't clash with the rig | never |
 
-Four CI profiles, each folding in more than one concern so a matrix run stays
-small. `default`, `specials`, `maxbtn` run on every push/PR (3 flashes per
-board); `minimal` joins them on the weekly `schedule` and at release. `specials`
-absorbed the old `signed-axes` and `reports` profiles (signed range + O/F reports
-cost descriptor bytes, not input-report bytes) and is trimmed to X/Y with no hat
-to stay clear of the fixed 150-byte descriptor buffer. `local` is a fifth,
-developer-only profile — never built by CI or a release.
+Every push runs `minimal` and `maxfeat` through the suite and `sinput` through
+a quick observer matrix; the weekly `schedule` adds `specials` (plus the bench
+and the full matrix); `default` and `maxbtn` are built at release, which ships
+every profile and validates them all first ([RELEASE.md](RELEASE.md)).
+`specials` absorbed the old `signed-axes` and `reports` profiles (signed range +
+O/F reports cost descriptor bytes, not input-report bytes) and is trimmed to X/Y
+with no hat to stay clear of the fixed 150-byte descriptor buffer. `local` is
+developer-only — never built by CI or a release.
 
 Each profile is a distinct HID report descriptor; the host caches the descriptor
 at bond time, so switching profiles on a board makes the old bond stale and the
@@ -215,29 +227,95 @@ Afterwards, reflash the board's usual bundle and remove its BLE bond (the
 gaps: the IMU input device has no vendor/product, and SInput's paddle,
 touchpad-click, power and misc buttons have no evdev codes.
 
-#### Bluepad32 as the observer (`tester/bp32_swap.sh`, `tester/bp32_hil.py`)
+`--latency N` also times the same report on every input path at once — hidraw
+and evdev, under hid-generic and under the `sinput` driver — and writes
+`results/latency-<board>-sinput-*.json`. On the esp32c3 (2026-10-06) evdev adds
+0.003–0.1 ms over hidraw and the two drivers are within ~0.1 ms of each other
+(~4.7–4.9 ms p50): the driver choice doesn't change latency.
 
-The third SInput observer, with no extra hardware: for one run the rig's
-`esp32dev` becomes a [Bluepad32](https://github.com/ricardoquesada/bluepad32)
-host and the `esp32c3` runs the `sinput` profile. `bp32_hil.py` drives the
-C3 over serial and reads what Bluepad32's SInput parser reports from the
-host's `HIL ...` console lines: buttons, D-pad, sticks, triggers, IMU in SI
-units, the feature response, and player LED / RGB / rumble sent back to the
-gamepad. `bp32_swap.sh` flashes both boards, runs it, and restores both to
-their current `default` bundles (dropping their BlueZ bonds so CI pairs fresh).
+## Observer matrix (Bluepad32)
 
-```bash
-tester/rig-lock.sh -- tester/bp32_swap.sh <bluepad32 host image dir> <esp32c3 sinput bundle dir>
+BlueZ on the Pi is one host. The observer matrix adds a second: another rig
+ESP32 running [Bluepad32](https://github.com/ricardoquesada/bluepad32). Flashed
+with the **observer** firmware, a board pairs with a gamepad board over BLE and
+prints what Bluepad32 parsed — buttons, D-pad, sticks, triggers, IMU, the SInput
+feature response — as `HIL ...` lines on its serial console.
+`tester/bp32_hil.py` drives the gamepad over serial, checks those lines, and
+sends player LED, RGB and rumble back through Bluepad32.
+
+```text
+ gamepad A (hil_runner) ──BLE──► BlueZ on the Pi ──────────────► test.sh / sinput_hil.py   BlueZ lane
+ gamepad B (hil_runner) ──BLE──► observer board (Bluepad32) ─USB─► bp32_hil.py              Bluepad32 lane
+       ▲ both gamepads are driven over USB serial from the Pi
 ```
 
-The host image is the Bluepad32 HIL rig's `host/` firmware
-(`leenx-foss/antBot-hil`), built without NuS/OTA and with
-`HIL_ALLOW_ADDR=<esp32c3 BLE address>` so it pairs only with the C3 (it
-ignores `HILpad*` names otherwise). Keep both directories outside
-`~/hil-bundles`, which `builder/build.sh --push` syncs with `--delete`.
-First run, 2026-10-04 (Bluepad32 PR #234 `6f603c7`, library `80a0d7c`):
-51/51 checks pass; gaps: Bluepad32 has no fields for SInput's paddle,
-touchpad-click, power and misc buttons, and no touchpad API.
+**Rotations.** `tester/test-matrix.sh` makes each board in turn the observer and
+the next two (in `[matrix].boards` order) the gamepads, then runs each profile
+(`minimal maxfeat sinput`) as those two lanes. Over a run every board is
+observed by both hosts and runs Bluepad32 once. With more than three boards the
+rest sit each rotation out. The four-board rig:
+
+| Observer | BlueZ lane | Bluepad32 lane | Idle |
+|---|---|---|---|
+| esp32dev | esp32c3 | esp32s3 | esp32dev2 |
+| esp32c3 | esp32s3 | esp32dev2 | esp32dev |
+| esp32s3 | esp32dev2 | esp32dev | esp32c3 |
+| esp32dev2 | esp32dev | esp32c3 | esp32s3 |
+
+**Keeping a run clean.**
+
+- Flashing is serialised (the rig-wide flash lock) and only rewrites a board
+  that doesn't already hold the bundle.
+- A board's settings region (its BLE bonds) is wiped only when it changes
+  firmware family, gamepad ↔ observer, so a gamepad keeps the bond its observer
+  holds across profiles.
+- The observer is reset when each Bluepad32 lane starts, and wipes its bonds and
+  `allow` filter on boot. The reset uses RTS → EN on its console bridge, or the
+  board's native USB when the bridge has no EN wiring (the esp32c3's FTDI). A
+  board sitting a rotation out is reset first, since it's the previous observer,
+  and every observer is reset when the run ends. Otherwise an observer can stay
+  linked to a gamepad that another lane, or the next bench, is using.
+- `hil.usbhealth` checks the USB bus before the run and after every flash and
+  cell; the first unhealthy check stops the run (see
+  [ESP32-S3 dual-USB-C setup](#esp32-s3-dual-usb-c-setup)).
+
+**Running it.** With the bundles in `~/hil-bundles` (or `$HIL_BUNDLE_DIR`):
+
+```bash
+tester/test-matrix.sh                                          # every rotation, minimal maxfeat sinput
+tester/test-matrix.sh --rotations esp32dev --profiles sinput --lanes parallel
+tester/test-matrix.sh --boards "esp32dev esp32c3 esp32s3 esp32dev2"
+```
+
+Each lane logs to `results/matrix/`, and `results/matrix-verdicts.md` gets one
+verdict line per lane carrying its `VERSIONS` (kernel, `sinput` driver,
+firmware/library, Bluepad32 build); `python3 host/hil/matrixsummary.py results/`
+renders them as Markdown. CI runs the matrix after the suite: a quick one (one
+rotation, `sinput`) on every push, the full one weekly — see [CI](#ci).
+
+**Gaps.** A Bluepad32 lane reports inputs Bluepad32 doesn't expose as `GAP`
+lines, not failures. Today's are by design. For an unrecognised BLE gamepad
+Bluepad32 picks its Android parser, which follows Android's layout: the right
+stick is `Z`/`Rz`, so `maxfeat`'s `Rx`/`Ry` aren't read, and there are no C or Z
+buttons. Bluepad32's `uni_gamepad_t` has no fields for SInput's paddles,
+touchpad clicks, power and misc buttons, and no touchpad.
+
+**The observer firmware.** `firmware/observer/` is an ESP-IDF/PlatformIO
+project: Bluepad32 with `observer.c` as its platform, derived from the Bluepad32
+HIL rig's host firmware (leenx-foss/antBot-hil) minus its NuS and OTA. Bluepad32
+stays outside the repo, like the ESP32-BLE-Gamepad library:
+`builder/build-observers.sh` builds against `[observer].bluepad32_dir` when set,
+otherwise `builder/fetch-bluepad32.sh` checks out the pinned
+`[observer].bluepad32_repo` @ `bluepad32_ref` (upstream 5.0.0-beta0, the first
+release with the SInput parser) and applies Bluepad32's own BTstack patch. The
+bundles are `bundles/matrix/<board>-bp32obs-<bluepad32 sha8>-<rig sha8>/`; CI
+and releases build them in parallel with the gamepad firmware, and releases ship
+them.
+
+**The fourth board.** `esp32dev2` is a second classic ESP32 DevKit (onboard
+CP2102) with its own firmware name, `HILpad esp32dev2`. It runs in the matrix
+only: add it to `[matrix].boards` in `hil_config.local.toml`. It isn't in
+`[builder].boards` or CI's board lists.
 
 ## Benchmarking (`--bench`)
 
@@ -246,9 +324,11 @@ recording a JSON blob with an environment fingerprint (distro / kernel / arch /
 BlueZ version, load average + CPU temp/freq sampled around the measurement):
 
 - `ping_rtt` — serial PING/PONG baseline (USB-serial + parse overhead).
-- `input_latency` — per-event latency for button / axis / hat, host-side, split
-  into `t_evdev − t_serial_reply` (BLE + host stack) and `t_evdev − t_serial_write`
-  (end to end). p50 / p90 / p99 / max, plus a dropped count.
+- `input_latency` — per-event latency for button / axis / hat, host-side, timed
+  from the command's serial write: `e2e` from just before it, `ble` from just
+  after. Never from the reply, which a serial bridge can hold back well after
+  the event (the esp32c3's FTDI, up to 16 ms; before rig 0.4.0 the bench timed
+  from it). p50 / p90 / p99 / max, plus a dropped count.
 - `clean_rate` — fastest paced rate at which **every** distinct state change
   still reaches the host (≥95% delivery).
 - `burst` — `BURST` a few hundred toggles at decreasing gaps; shows where
@@ -280,7 +360,7 @@ From the v0.3.0 snapshot in [`docs/bench/`](docs/bench/README.md) (library
   ms** on the esp32dev. **0 dropped** across 200 paced presses per profile.
   The snapshot's **~17.8 ms on the esp32c3 is a measurement artifact**: the
   bench timed from the firmware's serial reply, which the esp32c3's FTDI bridge
-  holds up to 16 ms. With that fixed (rig 0.3.2) it measures ~7.5 ms; see the
+  holds up to 16 ms. With that fixed (rig 0.4.0) it measures ~7.5 ms; see the
   correction in [`docs/bench/`](docs/bench/README.md).
 - **The kernel driver doesn't change latency.** `sinput_hil.py --latency`
   times the same report on hidraw and evdev, under hid-generic and under the
@@ -471,12 +551,18 @@ an external 3.3 V USB-UART adapter on UART0 — check your board's pinout for th
 
 ## CI
 
-Two workflows:
+The workflows:
 
 - **`.github/workflows/lint.yml`** — formatting + linting (ruff, shellcheck,
   markdownlint, taplo, actionlint) via `pre-commit`. Runs on every push and PR,
   no hardware. See [CONTRIBUTING.md](CONTRIBUTING.md).
-- **`.github/workflows/hil.yml`** — the hardware suite, below.
+- **`.github/workflows/hil.yml`** — the hardware suite and the observer matrix,
+  below.
+- **`.github/workflows/observer.yml`** — builds the observer firmware on any
+  push or PR touching it, and is the reusable workflow `hil.yml` and
+  `release.yml` call to build it.
+- **`.github/workflows/release.yml`** — a `v*` tag → the release (see
+  [Releases](#releases)).
 
 `.github/workflows/hil.yml` runs entirely on **GitHub-hosted runners** — no
 self-hosted runner, no inbound ports on your network:
@@ -484,15 +570,18 @@ self-hosted runner, no inbound ports on your network:
 - **build** — `pip install platformio`, `builder/build.sh`, upload the bundles.
   All 3 boards (`esp32dev` + `esp32c3` + `esp32s3`) × the profiles for this
   trigger: `minimal maxfeat sinput` on a push, `+ specials` on the weekly
-  schedule, or whatever a `profiles` dispatch input asks for. Plus the
-  Bluepad32 observer bundles (`builder/build-observers.sh`) unless the
-  observer matrix is off.
-- **hil-test** — brings up an **ephemeral Tailscale node** for the job
+  schedule, or whatever a `profiles` dispatch input asks for.
+- **observers** — the Bluepad32 observer bundles, via `observer.yml`, **in
+  parallel with build**: they share nothing, and building them after the
+  firmware held the rig back ~5 min. Skipped when the observer matrix is off.
+- **hil-test** — once both are done, brings up an **ephemeral Tailscale node** for the job
   (`tailscale/github-action`), `rsync`s the bundles to the tester over the
   tailnet, `ssh`es in to **`git reset --hard`** the tester's own checkout to the
   rig commit under test (`git clean -ffdx` keeps only the gitignored
-  `hil_config.local.toml`, so the checkout never drifts), runs the test batch,
-  pulls `results/` back (even on failure), and publishes the report.
+  `hil_config.local.toml`, so the checkout never drifts), runs the test batch
+  and then the observer matrix under the same rig lock, pulls `results/` back
+  (even on failure), and publishes the report — the Summary tab carries the
+  matrix verdicts and Bluepad32's gaps too.
 
 The **run page's Summary tab** gets a rolled-up view
 (`host/hil/summarize.py results/junit-*.xml`): a board × profile matrix with
@@ -644,6 +733,10 @@ PYTHONPATH=host python3 -m hil.detect            # table of present / absent + w
 PYTHONPATH=host python3 -m hil.detect --json
 ```
 
+The observer matrix has its own board list, `[matrix].boards` (3 or more), so a
+board can join it without joining CI's build — the reference rig's `esp32dev2`
+does exactly that (see [Observer matrix](#observer-matrix-bluepad32)).
+
 The tester is a plain **SSH target** on the tailnet, not a runner — nothing
 untrusted executes on it directly, and its own `hil_config.local.toml` (real
 serial ports) is never overwritten.
@@ -727,8 +820,9 @@ The rig is versioned independently of the library — [SemVer](https://semver.or
 tags, a [CHANGELOG](CHANGELOG.md), and a GitHub Release per tag carrying:
 
 - **`…-firmware-vX.Y.Z.tar.gz`** — the whole `board × profile` bundle set
-  (prebuilt `.bin`s + manifests), `golden/*.hiddesc`, and `index.json` (rig +
-  library commit). Flash it and run the suite with no PlatformIO — see
+  (prebuilt `.bin`s + manifests), the Bluepad32 observer bundles
+  (`firmware-bundles/matrix/`), `golden/*.hiddesc`, and `index.json` (rig,
+  library and Bluepad32 commits). Flash it and run the suite with no PlatformIO — see
   [REPRODUCE.md](REPRODUCE.md).
 - **`…-suite-vX.Y.Z.tar.gz`** — a standalone copy of the pytest suite.
 

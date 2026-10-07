@@ -142,7 +142,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.platformio
-          key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini', 'firmware/observer/platformio.ini') }}
+          key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini') }}
 
       - name: Cache PlatformIO build artifacts
         if: github.event_name != 'repository_dispatch'
@@ -178,33 +178,31 @@ jobs:
           build_profiles=$(printf '%s\n' $PROFILES $need | awk '!seen[$0]++' | xargs)
           ./builder/build.sh --boards "$BOARDS" --profiles "$build_profiles"
 
-      # The observer matrix's Bluepad32 observers (firmware/observer), against the Bluepad32 pinned in
-      # hil_config.toml; build-observers.sh fetches it into .cache/bluepad32. Bundles land in bundles/matrix/.
-      - name: Bluepad32 ref
-        if: env.HIL_MATRIX != 'none'
-        id: bp32
-        run: echo "ref=$(python3 host/hil/config.py observer.bluepad32_ref)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache Bluepad32
-        if: env.HIL_MATRIX != 'none'
-        uses: actions/cache@v5
-        with:
-          path: .cache/bluepad32
-          key: bluepad32-${{ steps.bp32.outputs.ref }}
-
-      - name: Build observer bundles
-        if: env.HIL_MATRIX != 'none'
-        run: ./builder/build-observers.sh --boards "$BOARDS"
-
       - uses: actions/upload-artifact@v6
         with:
           name: hil-bundles
           path: bundles/
           retention-days: 7
 
+  # The observer matrix's Bluepad32 observers (firmware/observer, against the Bluepad32 pinned in hil_config.toml), built
+  # by observer.yml in parallel with `build` -- they share nothing, and building them after the firmware added ~5 min
+  # before the rig could start. Skipped when the matrix is off. (`with:` can't read env, hence the expressions.)
+  observers:
+    if: >-
+      (github.repository == 'LeeNX/ESP32-BLE-Gamepad-HIL' || vars.HIL_RIG_ENABLED == 'true')
+      && (inputs.matrix || 'quick') != 'none'
+    uses: ./.github/workflows/observer.yml
+    with:
+      boards: ${{ inputs.boards || 'esp32dev esp32c3 esp32s3' }}
+
   hil-test:
-    needs: build
-    if: github.repository == 'LeeNX/ESP32-BLE-Gamepad-HIL' || vars.HIL_RIG_ENABLED == 'true'
+    needs: [build, observers]
+    # Runs once the firmware is built and the observers are built or skipped (matrix off) -- never after a failure.
+    if: >-
+      always()
+      && (github.repository == 'LeeNX/ESP32-BLE-Gamepad-HIL' || vars.HIL_RIG_ENABLED == 'true')
+      && needs.build.result == 'success'
+      && (needs.observers.result == 'success' || needs.observers.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout harness            # for the test-reporter source links
@@ -214,6 +212,12 @@ jobs:
         with:
           name: hil-bundles
           path: bundles/
+
+      - uses: actions/download-artifact@v7
+        if: env.HIL_MATRIX != 'none'
+        with:
+          name: observer-bundles
+          path: bundles/matrix/
 
       - name: Join tailnet (ephemeral)
         uses: tailscale/github-action@v4

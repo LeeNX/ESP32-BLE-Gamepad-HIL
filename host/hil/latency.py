@@ -6,7 +6,7 @@ for reference but not used in the latency maths.
 
 Two latencies per input event, both timed from the command's serial write --
 never from its reply, which a bridge can hold back well after the event (an
-FTDI's latency timer, up to 16 ms; before rig 0.3.2 the timing started at the
+FTDI's latency timer, up to 16 ms; before rig 0.4.0 the timing started at the
 reply, so a board on an FTDI measured ~16 ms whatever its BLE latency):
   * e2e    = t_evdev - t_before_write   (USB-serial write + firmware parse +
                                          BLE + host input stack)
