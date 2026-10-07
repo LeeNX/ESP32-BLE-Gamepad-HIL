@@ -582,12 +582,18 @@ def key_code(evdev_dev):
 
 def time_paths(driver, raw, evdev_dev):
     """Button 1 (SInput bit 0: report 0x01, byte 3, bit 0) on hidraw and on `driver`'s evdev node, per press."""
+    sources = [pl.HidrawBit(f"hidraw/{driver}", raw.fd, 0x01, 3, 0)]
     code = key_code(evdev_dev)
-    print(f"      evdev/{driver}: button 1 = key {code}")
-    sources = [
-        pl.HidrawBit(f"hidraw/{driver}", raw.fd, 0x01, 3, 0),
-        pl.EvdevKey(f"evdev/{driver}", evdev_dev, code=code),
-    ]
+    if code is None:
+        # No key event from the probe press: an EvdevKey without a code would time any key, so leave evdev out.
+        print(f"      evdev/{driver}: button 1 produced no key event -- evdev not timed")
+        gap(
+            f"latency: evdev/{driver} not measured",
+            "the probe press of button 1 produced no key event",
+        )
+    else:
+        print(f"      evdev/{driver}: button 1 = key {code}")
+        sources.append(pl.EvdevKey(f"evdev/{driver}", evdev_dev, code=code))
     cmd("RESET")
     # Send without waiting for the OK: a bridge's reply delay (the esp32c3's FTDI holds input up to 16 ms) would
     # otherwise land in every sample. cmd() below resets the input buffer, dropping the unread OKs.
