@@ -14,52 +14,43 @@ cp results/bench-table.md results/*.svg <this repo>/docs/bench/
 
 ## This snapshot
 
-- **2026-10-05** — ESP32-BLE-Gamepad `80a0d7c` (0.8.0, library `master`), all 3
+- **2026-10-07** — ESP32-BLE-Gamepad `80a0d7c` (0.8.0, library `master`), all 3
   boards × the 5 suite profiles (`default specials minimal maxbtn maxfeat`) on
   the reference rig (Raspberry Pi 3B+, kernel 6.18.50, BlueZ 5.82), from the
-  full-matrix + `--bench` CI run for the v0.3.0 release
-  ([run 37295281897](https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/actions/runs/37295281897)).
-  Replaces the 2026-09-18 v0.2.6 snapshot (library `9282be1`). `sinput` isn't
-  in the suite, so it has no row: the observer matrix covers it.
+  `--bench` + full observer matrix validation run for the v0.4.0 release
+  ([run 37613401913](https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/actions/runs/37613401913)).
+  The first snapshot timed from the serial write (rig 0.4.0); it replaces the
+  2026-10-05 v0.3.0 one. `sinput` isn't in the suite, so it has no row: the
+  observer matrix and `sinput_hil.py --latency` cover it.
 
 | | |
 |---|---|
 | [`latency-vs-reportsize.svg`](latency-vs-reportsize.svg) | button latency (BLE-only + end-to-end p50) vs HID report size, per board |
-| [`polling-rate.svg`](polling-rate.svg) | clean paced rate vs the connection-interval ceiling, per profile/board |
+| [`polling-rate.svg`](polling-rate.svg) | clean paced rate vs one report per connection interval, per profile/board |
 | [`latency-distribution.svg`](latency-distribution.svg) | p50 / p90 / p99 spread per profile/board |
 
-> **Correction (2026-10-06, rig 0.4.0):** the esp32c3's latency in this
-> snapshot is a measurement artifact, not BLE. The bench started timing only
-> after the firmware's serial reply (and a blocking `tcdrain`), and the
-> esp32c3's FTDI bridge holds that reply up to 16 ms, so its ~17.8 ms is mostly
-> the bridge. With the timing fixed (from the serial write, no drain) a quick
-> bench measures the esp32c3 at **~7.5 ms** p50 (`minimal`, 8.75 ms interval),
-> and the same report times at ~4.7–4.9 ms on hidraw and evdev
-> (`sinput_hil.py --latency`). The contention explanation below doesn't hold
-> for it. The esp32c3's clean rate is probably bridge-bound for the same
-> reason. The CH340 boards (esp32dev, esp32s3) reply in ~2.6 ms and are much
-> less affected. A full re-bench with the fix replaces this snapshot.
+**Reading it:** every row ran solo (`links` 1) and dropped nothing. Button e2e
+p50 is **~4.2–4.5 ms** on the esp32s3 and **~8.0–8.5 ms** on the esp32c3, both
+on an 8.75 ms connection interval, and **~17.7 ms** on the esp32dev, whose
+interval negotiated to 48.75 ms this run (43.75 ms in the v0.3.0 snapshot:
+BlueZ settles it per connection). Latency still doesn't track report size
+(5–28 B) within a board. p99 is connection-interval jitter, so treat p50 as the
+signal.
 
-**Reading it:** the connection interval moved since v0.2.6. It was 48.75 ms on
-every board then; now it is **8.75 ms** on the esp32c3 and esp32s3 and
-**43.75 ms** on the esp32dev. The rig itself didn't change (same kernel and
-BlueZ), so this follows the library update (`9282be1` → `80a0d7c`). Button e2e
-p50 follows suit: **~4.9 ms** on the esp32s3 (was ~18.6 ms everywhere), **~13.6 ms**
-on the esp32dev, and **~17.8 ms** on the esp32c3. As before, latency doesn't track
-report size (5–28 B) within a board. p99 is dominated by connection-interval
-jitter, so treat p50 as the signal. Zero dropped events in every row.
+**Not comparable with earlier snapshots.** Until rig 0.4.0 the bench timed from
+the firmware's serial reply, after a blocking `tcdrain`, and the esp32c3's FTDI
+bridge holds that reply up to 16 ms: the v0.3.0 snapshot's ~17.8 ms for the
+esp32c3 was mostly the bridge. Timed from the write it's ~8 ms. Why it's still
+~4 ms behind the esp32s3 on the same interval isn't settled: the same board
+times at ~4.7 ms under `sinput_hil.py --latency` (the `sinput` profile, which
+streams reports continuously). The esp32c3's **~63 Hz clean rate** is set by
+its serial bridge, not BLE: paced commands wait for their replies (~16 ms PING
+round trip, against ~2.6–3.9 ms on the CH340 boards).
 
-**Contention differs per board in this snapshot**: the `links` column is **3**
-for the esp32c3, **2** for the esp32dev and **1** for the esp32s3. The boards bench
-in that order after the functional `--by-board` matrix, with one fewer link
-live each time: the first benches with all three up, the last alone. That
-confounds the comparison between boards: the esp32c3 and esp32s3
-negotiate the same 8.75 ms interval, yet the esp32c3 (3 links) shows ~17.8 ms p50
-and ~63 Hz clean rate against the esp32s3's ~4.9 ms and 258–276 Hz (1 link) --
-though see the correction above: most of that gap is the esp32c3's FTDI, not
-the links.
-Compare a board with itself across snapshots, not boards with each other; a
-like-for-like comparison needs a `--bench`-only run from an unbonded adapter.
+**Clean rate vs the interval:** the red bar is one report per connection
+interval (1000 ÷ interval). The esp32s3's 258–267 Hz is well above it: NimBLE
+sends several notifications per connection event, so the interval bounds
+latency, not paced rate.
 
 **C3 / S3 `--bench` reliability:** the cheap external USB-UART bridges drop a
 byte now and then under the burst sweep — ~1 run in 5 needed a retry (all
