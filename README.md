@@ -350,18 +350,19 @@ for a clean solo measurement.
 
 ### Findings (3 boards × 5 suite profiles, Raspberry Pi 3B+, kernel 6.18, BlueZ 5.82)
 
-From the v0.3.0 snapshot in [`docs/bench/`](docs/bench/README.md) (library
-0.8.0); its README has the full table and the caveats.
+From the v0.4.0 snapshot in [`docs/bench/`](docs/bench/README.md) (library
+0.8.0), the first timed from the serial write; its README has the full table
+and the caveats.
 
-- **Connection interval 8.75 ms on the esp32c3/esp32s3, 43.75 ms on the
-  esp32dev, MTU 255.** With library 0.8.0 it's no longer 48.75 ms everywhere
-  (the v0.2.6 numbers).
-- Single button press → host: **~4.9 ms** median on the esp32s3 and **~13.6
-  ms** on the esp32dev. **0 dropped** across 200 paced presses per profile.
-  The snapshot's **~17.8 ms on the esp32c3 is a measurement artifact**: the
-  bench timed from the firmware's serial reply, which the esp32c3's FTDI bridge
-  holds up to 16 ms. With that fixed (rig 0.4.0) it measures ~7.5 ms; see the
-  correction in [`docs/bench/`](docs/bench/README.md).
+- **Connection interval 8.75 ms on the esp32c3/esp32s3, 48.75 ms on the
+  esp32dev this run, MTU 255.** BlueZ settles the interval per connection, so
+  it moves between runs (43.75 ms on the esp32dev in the v0.3.0 snapshot).
+- Single button press → host: **~4.2–4.5 ms** median on the esp32s3, **~8.0–8.5
+  ms** on the esp32c3 and **~17.7 ms** on the esp32dev, all solo. **0 dropped**
+  across 200 paced presses per profile. The v0.3.0 snapshot's ~17.8 ms for the
+  esp32c3 was a measurement artifact (the bench timed from the serial reply,
+  which its FTDI bridge holds up to 16 ms); figures from before rig 0.4.0 aren't
+  comparable.
 - **The kernel driver doesn't change latency.** `sinput_hil.py --latency`
   times the same report on hidraw and evdev, under hid-generic and under the
   `sinput` driver: evdev adds 0.003–0.1 ms over hidraw, and the two drivers
@@ -369,7 +370,8 @@ From the v0.3.0 snapshot in [`docs/bench/`](docs/bench/README.md) (library
 - **Latency is flat vs HID report size** (5–28 B) within a board. p99 is
   connection-interval jitter and swings run to run; p50 is the signal. The
   interval bounds *latency*, not paced *rate*: NimBLE sends several packets per
-  connection event, and the esp32s3 paces **~260–275 Hz** clean.
+  connection event, and the esp32s3 paces **~258–267 Hz** clean. The esp32c3's
+  ~63 Hz is its serial bridge, not BLE.
 - **Unpaced `sendReport()` bursts overflow and drop silently** — at gap=0 only
   ~2% of a 500-report burst survives. Don't call `sendReport()` faster than you
   can transmit.

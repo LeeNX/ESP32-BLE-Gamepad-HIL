@@ -56,6 +56,11 @@ What a bump means:
   (Bluepad32)" section (rotations, keeping a run clean, running it, gaps, the
   observer firmware, `esp32dev2`), the current per-profile CI schedule, and
   the corrected bench timing.
+- **New bench snapshot** (`docs/bench/`, from the v0.4.0 validation run): the
+  first timed from the serial write, every board solo. esp32s3 ~4.2-4.5 ms,
+  esp32c3 ~8.0-8.5 ms, esp32dev ~17.7 ms (48.75 ms interval) button e2e p50,
+  0 dropped; not comparable with earlier snapshots. The polling chart's red
+  series is now "one report per interval", not a "ceiling" the esp32s3 beats.
 - **Bench bar charts set their group labels at 45°** (`host/hil/charts.py`):
   15 horizontal `profile board` labels overlapped into an unreadable line.
   Each bar also carries a `<title>` with its value, a tooltip when the SVG is

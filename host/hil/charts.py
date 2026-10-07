@@ -164,7 +164,7 @@ def chart_polling_rate(records):
     return _bar_chart(
         "Fastest rate with 100% delivery",
         groups,
-        ["measured clean Hz", "conn-interval ceiling"],
+        ["measured clean Hz", "one report per interval"],
         "Hz",
         unit=" Hz",
     )
