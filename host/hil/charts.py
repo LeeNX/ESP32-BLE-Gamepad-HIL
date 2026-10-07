@@ -16,6 +16,10 @@ W, H = 720, 420
 PAD_L, PAD_R, PAD_T, PAD_B = 70, 160, 30, 55
 PLOT_W = W - PAD_L - PAD_R
 PLOT_H = H - PAD_T - PAD_B
+# Bar charts label each group ("maxfeat esp32dev") under the axis: horizontal, 15 of them overlap, so they're set at
+# LABEL_ANGLE degrees, right-aligned under their group, with the canvas grown downward to fit (the plot keeps its size).
+LABEL_ANGLE = 45
+BAR_PAD_B = 125
 PALETTE = ["#2563eb", "#dc2626", "#059669", "#d97706", "#7c3aed", "#0891b2"]
 
 _CSS = """
@@ -30,11 +34,11 @@ _CSS = """
 """
 
 
-def _svg(body, title):
+def _svg(body, title, h=H):
     return (
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" '
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {h}" '
         f'font-family="sans-serif"><style>{_CSS}</style>'
-        f'<rect width="{W}" height="{H}" fill="white" '
+        f'<rect width="{W}" height="{h}" fill="white" '
         f'fill-opacity="0" /><text class="ttl" x="{PAD_L}" y="18">{title}</text>'
         f"{body}</svg>\n"
     )
@@ -52,7 +56,7 @@ def _nice_max(v):
     return 10 * mag
 
 
-def _axes(xmax, ymax, xlabel, ylabel, xticks=None):
+def _axes(xmax, ymax, xlabel, ylabel, xticks=None, h=H):
     x0, y0 = PAD_L, PAD_T + PLOT_H
     out = [
         f'<line class="ax" x1="{x0}" y1="{y0}" x2="{x0 + PLOT_W}" y2="{y0}"/>',
@@ -67,7 +71,7 @@ def _axes(xmax, ymax, xlabel, ylabel, xticks=None):
     for xv in ticks:
         x = x0 + PLOT_W * (xv / xmax if xmax else 0)
         out.append(f'<text x="{x:.1f}" y="{y0 + 18}" text-anchor="middle">{xv:g}</text>')
-    out.append(f'<text x="{x0 + PLOT_W / 2}" y="{H - 12}" text-anchor="middle">{xlabel}</text>')
+    out.append(f'<text x="{x0 + PLOT_W / 2}" y="{h - 12}" text-anchor="middle">{xlabel}</text>')
     out.append(
         f'<text transform="translate(16,{PAD_T + PLOT_H / 2}) rotate(-90)" '
         f'text-anchor="middle">{ylabel}</text>'
@@ -124,7 +128,8 @@ def _bar_chart(title, groups, series_names, ylabel, unit=""):
     if not groups:
         return None
     ymax = _nice_max(max((v for _, vs in groups for v in vs if v is not None), default=1))
-    axes, x0, y0 = _axes(1, ymax, "", ylabel, xticks=[])
+    h = PAD_T + PLOT_H + BAR_PAD_B
+    axes, x0, y0 = _axes(1, ymax, "", ylabel, xticks=[], h=h)
     body = [axes]
     gw = PLOT_W / max(1, len(groups))
     bw = gw / (len(series_names) + 1)
@@ -138,13 +143,16 @@ def _bar_chart(title, groups, series_names, ylabel, unit=""):
             bh = PLOT_H * v / ymax
             body.append(
                 f'<rect x="{bx:.1f}" y="{y0 - bh:.1f}" width="{bw * 0.9:.1f}" '
-                f'height="{bh:.1f}" fill="{c}"/>'
+                f'height="{bh:.1f}" fill="{c}"><title>{label}: {series_names[si]} {v:g}{unit}</title></rect>'
             )
+        # Angled, right-aligned at the group's centre just under the axis, so it reads up and away from its bars.
+        lx, ly = gx + gw / 2, y0 + 12
         body.append(
-            f'<text x="{gx + gw / 2:.1f}" y="{y0 + 18}" text-anchor="middle">{label}</text>'
+            f'<text x="{lx:.1f}" y="{ly:.1f}" text-anchor="end" '
+            f'transform="rotate(-{LABEL_ANGLE} {lx:.1f} {ly:.1f})">{label}</text>'
         )
     body.append(_legend(series_names))
-    return _svg("".join(body), title)
+    return _svg("".join(body), title, h=h)
 
 
 def chart_polling_rate(records):
@@ -158,6 +166,7 @@ def chart_polling_rate(records):
         groups,
         ["measured clean Hz", "conn-interval ceiling"],
         "Hz",
+        unit=" Hz",
     )
 
 
@@ -167,7 +176,7 @@ def chart_latency_distribution(records):
         b = r["latency_ms"].get("button", {}).get("e2e", {})
         groups.append((f"{r['profile']} {r['board']}", [b.get("p50"), b.get("p90"), b.get("p99")]))
     return _bar_chart(
-        "Button latency distribution (end-to-end)", groups, ["p50", "p90", "p99"], "ms"
+        "Button latency distribution (end-to-end)", groups, ["p50", "p90", "p99"], "ms", unit=" ms"
     )
 
 

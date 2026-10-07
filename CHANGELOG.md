@@ -46,6 +46,11 @@ What a bump means:
   plus `matrix=full`. With CI no longer staging `default` bundles,
   `test-matrix.sh --restore` and `tester/bp32_swap.sh` need them built by
   hand on a CI-run rig.
+- **Bench bar charts set their group labels at 45°** (`host/hil/charts.py`):
+  15 horizontal `profile board` labels overlapped into an unreadable line.
+  Each bar also carries a `<title>` with its value, a tooltip when the SVG is
+  opened directly. The `docs/bench/` charts are re-rendered from the same v0.3.0
+  data.
 - **`scripts/release.sh` releases from `main` only**: it refuses another branch
   unless `--allow-branch` (or `RELEASE_ALLOW_BRANCH=1`), and a `main` that's
   behind the remote's. v0.3.0 and v0.3.1 were both cut on a feature branch,
