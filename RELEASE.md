@@ -16,21 +16,21 @@ GitHub Release, and two attached tarballs:
 1. Land everything for the release on `main`. Move the `## [Unreleased]` bullets
    in [CHANGELOG.md](CHANGELOG.md) into shape (they become the release body
    alongside GitHub's auto-generated notes).
-2. Full-matrix validation on `main`. Everyday pushes build 3 profiles
-   (`default specials maxbtn`) and skip `--bench`; a release covers all 5
-   suite profiles + bench. Trigger [`hil.yml`](.github/workflows/hil.yml) —
-   always pass `profiles` explicitly (blank means the everyday 3):
+2. Full validation on `main`. Everyday pushes run `minimal maxfeat` through
+   the suite and a quick observer matrix (`sinput`), without `--bench`; a
+   release covers every profile, bench and the full observer matrix. Trigger
+   [`hil.yml`](.github/workflows/hil.yml) — always pass `profiles` explicitly
+   (blank means the everyday set):
 
    ```bash
    gh workflow run hil.yml \
-     -f profiles="default specials minimal maxbtn maxfeat" \
-     -f bench=true
+     -f profiles="default specials minimal maxbtn maxfeat sinput" \
+     -f bench=true -f matrix=full
    ```
 
-   (or take the most recent Monday `schedule` run if `main` hasn't moved — it
-   builds all 5 + bench). The `sinput` profile isn't in the suite: validate it
-   with the observer matrix on the rig, `tester/test-matrix.sh` (all rotations,
-   `minimal maxfeat sinput`), and keep its `results/matrix-verdicts.md`. Confirm it's green, then regenerate
+   (the Monday `schedule` covers `minimal maxfeat specials` + bench + the full
+   matrix, but not `default`/`maxbtn`). The job summary carries the matrix
+   verdicts and Bluepad32's gaps. Confirm it's green, then regenerate
    `docs/bench/bench-table.md` + SVGs from its `results/` if the numbers moved
    (see [`docs/bench/README.md`](docs/bench/README.md)) and commit them —
    `release.yml` inlines whatever's committed at the tag straight into the

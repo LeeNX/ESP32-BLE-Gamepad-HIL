@@ -4,12 +4,14 @@ All timing is host-side (time.perf_counter): the firmware and host clocks
 aren't synced, so the firmware's `T`/`BURST` microsecond values are recorded
 for reference but not used in the latency maths.
 
-Two latencies per input event:
-  * ble    = t_evdev - t_serial_reply   (BLE air time + host input stack)
-  * e2e    = t_evdev - t_serial_write   (adds USB-serial + firmware parse;
-                                         subtract ping_rtt()/2 for a rough
-                                         BLE-only figure independent of the
-                                         reply path)
+Two latencies per input event, both timed from the command's serial write --
+never from its reply, which a bridge can hold back well after the event (an
+FTDI's latency timer, up to 16 ms; before rig 0.3.2 the timing started at the
+reply, so a board on an FTDI measured ~16 ms whatever its BLE latency):
+  * e2e    = t_evdev - t_before_write   (USB-serial write + firmware parse +
+                                         BLE + host input stack)
+  * ble    = t_evdev - t_after_write    (the same, minus the host's own
+                                         write call)
 """
 
 import select
@@ -17,6 +19,8 @@ import statistics
 import time
 
 from evdev import ecodes
+
+from .serialdev import SerialError
 
 
 def _wait_event(dev, want_types, timeout=1.5):
@@ -32,6 +36,16 @@ def _wait_event(dev, want_types, timeout=1.5):
         for e in dev.read():
             if e.type in want_types:
                 return e
+
+
+def _consume_reply(dev, cmd):
+    """Read the reply to `cmd`; if it never comes (a dropped byte on a cheap bridge), resynchronise on a PING -- its
+    PONG, skipping any late reply -- so the sweep goes on and no stale line passes for the next command's reply."""
+    try:
+        dev.reply(cmd)
+    except SerialError:
+        if dev.command("PING", prefixes=("PONG",), retries=0) != "PONG":
+            raise
 
 
 class Stats(dict):
@@ -67,21 +81,21 @@ def ping_rtt(dev, n=50):
     return Stats.of(out)
 
 
-# --- per-kind stimulus: (apply(dev, i), event types it should produce) -----
+# --- per-kind stimulus: (command line for transition i, event types it should produce) -----
 def _button_stim(dev, cfg):
-    return (lambda i: dev.tpress(1, down=(i % 2 == 0)), (ecodes.EV_KEY,))
+    return (lambda i: "TPRESS 1" if i % 2 == 0 else "TRELEASE 1", (ecodes.EV_KEY,))
 
 
 def _axis_stim(dev, cfg):
     lo, hi = cfg["axesMin"], cfg["axesMax"]
     a, b = lo + (hi - lo) // 5, hi - (hi - lo) // 5
     tok = cfg["axes"][0]
-    return (lambda i: dev.axis(tok, b if i % 2 else a), (ecodes.EV_ABS,))
+    return (lambda i: f"AXIS {tok} {b if i % 2 else a}", (ecodes.EV_ABS,))
 
 
 def _hat_stim(dev, cfg):
     hi = cfg["hats"]  # firmware emits hat fields reversed; the last index is the one Linux surfaces
-    return (lambda i: dev.hat(hi, 1 if i % 2 else 5), (ecodes.EV_ABS,))
+    return (lambda i: f"HAT {hi} {1 if i % 2 else 5}", (ecodes.EV_ABS,))
 
 
 _STIM = {"button": _button_stim, "axis": _axis_stim, "hat": _hat_stim}
@@ -90,19 +104,22 @@ _STIM = {"button": _button_stim, "axis": _axis_stim, "hat": _hat_stim}
 def input_latency(dev, cap, kind, cfg, n=200, settle=0.03):
     """Measure `n` transitions of `kind` ('button'|'axis'|'hat').
     Returns {ble: Stats, e2e: Stats, dropped: int, n: int}."""
-    apply, want = _STIM[kind](dev, cfg)
+    line, want = _STIM[kind](dev, cfg)
     ble, e2e, dropped = [], [], 0
     for i in range(n):
         cap.drain()
         t0 = time.perf_counter()
-        apply(i)
-        t_ok = time.perf_counter()
+        dev.send(
+            line(i), flush=False
+        )  # flush() would block until the bridge drains, past the event
+        t_sent = time.perf_counter()
         ev = _wait_event(cap.dev, want)
+        t_evt = time.perf_counter()
+        _consume_reply(dev, line(i))  # after the timing, so a bridge's reply delay stays out of it
         if ev is None:
             dropped += 1
             continue
-        t_evt = time.perf_counter()
-        ble.append((t_evt - t_ok) * 1000)
+        ble.append((t_evt - t_sent) * 1000)
         e2e.append((t_evt - t0) * 1000)
         time.sleep(settle)
     return {"n": n, "dropped": dropped, "ble": Stats.of(ble), "e2e": Stats.of(e2e)}

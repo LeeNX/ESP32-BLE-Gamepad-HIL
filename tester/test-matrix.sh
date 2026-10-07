@@ -107,13 +107,15 @@ flash() {  # <board> <bundle>
   return 0
 }
 health() { PYTHONPATH=host python3 -m hil.usbhealth "${@:-check}"; }
-# Restart a board this rotation doesn't use, like bp32_hil.py resets the observer: through its native USB when it has
-# one, else RTS -> EN on its console bridge. It is the previous observer: on boot it drops its allow filter and
-# bonds, so it can't hold on to (or be reconnected by) a gamepad another lane is pairing.
-idle_reset() {  # <board>
+# Restart a board, like bp32_hil.py resets the observer: through its native USB when it has one, else RTS -> EN on its
+# console bridge. Used on a board a rotation doesn't use (the previous observer) and, at the end, on every board that ran
+# as an observer: on boot the observer drops its allow filter and bonds, so it can't hold on to (or be reconnected by)
+# a gamepad another lane -- or whatever runs after the matrix (a bench, the next CI suite) -- is using. A leftover
+# observer still linked to its last gamepad doubled that gamepad's bench latency and can stop it advertising.
+reset_board() {  # <board>
   local p
   p=$(cfg "board.$1.flash_port"); p=${p:-$(port "$1")}
-  [[ -e $p ]] || { echo "idle $1: no port ($p), not reset" >&2; return 0; }
+  [[ -e $p ]] || { echo "$1: no port ($p), not reset" >&2; return 0; }
   "$PY" - "$p" <<'PY'
 import sys, time
 import serial
@@ -169,7 +171,7 @@ for obs in "${ROTATIONS[@]}"; do
   obs_rst=$(cfg "board.$obs.flash_port")
   echo; echo "==== rotation: observer=$obs  BlueZ<-$bz  Bluepad32<-$bp${idle[*]:+  idle: ${idle[*]}}"
   unbond
-  for b in "${idle[@]}"; do idle_reset "$b"; done
+  for b in "${idle[@]}"; do reset_board "$b"; done
   flash "$obs" "$obs_bundle"
   guard "flash observer $obs"
 
@@ -179,6 +181,7 @@ for obs in "${ROTATIONS[@]}"; do
     bz_bundle=$(bundle "$bz" "$p"); bp_bundle=$(bundle "$bp" "$p")
     if [[ -z $bz_bundle || -z $bp_bundle ]]; then
       echo "SKIP $obs/$p: missing bundle (bluez=$bz_bundle bp32=$bp_bundle)" | tee -a "$VERDICTS"
+      fail=1  # the run can't do what it was asked: don't let it pass
       continue
     fi
     echo "== $obs/$p: flashing $bz and $bp"
@@ -223,6 +226,10 @@ for obs in "${ROTATIONS[@]}"; do
     guard "after cell $tag"
   done
 done
+# Leave no observer linked to a gamepad behind the run (--restore reflashes them anyway).
+if ((!RESTORE)); then
+  for b in "${BOARDS[@]}"; do [[ ${FAMILY[$b]:-} == observer ]] && reset_board "$b"; done
+fi
 
 if ((RESTORE)); then
   echo; echo "==== restore"

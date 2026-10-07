@@ -18,13 +18,59 @@ What a bump means:
 
 ## [Unreleased]
 
+### Added
+
+- **The observer matrix runs in CI** (`hil.yml`), after the suite and under the
+  same rig lock: a quick matrix (one rotation, `sinput`, BlueZ + Bluepad32
+  lanes) on every push and `repository_dispatch`, the full matrix (every
+  rotation × `minimal maxfeat sinput`) on the weekly schedule, and a `matrix`
+  dispatch input (`quick` / `full` / `none`). The build job builds the
+  observers; a failed lane fails the job.
+- **`host/hil/matrixsummary.py`**: the matrix verdicts and Bluepad32's gaps
+  (inputs it doesn't expose) as Markdown, appended to CI's job summary.
+- **`tester/sinput_hil.py --latency N`** (`host/hil/pathlatency.py`): times
+  the same report on every input path at once -- hidraw and evdev, under
+  hid-generic and under the `sinput` driver -- and writes
+  `results/latency-<board>-sinput-*.json`. First result (esp32c3): evdev adds
+  0.003-0.1 ms over hidraw, and the two drivers are within ~0.1 ms of each
+  other, at ~4.7-4.9 ms p50.
+- **`SerialDev.send()` / `reply()`**: `command()` split in two, for timing an
+  effect without waiting on the reply.
+
 ### Changed
 
+- **Everyday profiles are `minimal maxfeat sinput`** (`[builder].profiles`
+  and CI pushes; `sinput` through the observer matrix). The weekly schedule
+  adds `specials`; `default` and `maxbtn` are release-only. Releases still
+  ship every profile, and RELEASE.md's validation dispatch names them all
+  plus `matrix=full`. With CI no longer staging `default` bundles,
+  `test-matrix.sh --restore` and `tester/bp32_swap.sh` need them built by
+  hand on a CI-run rig.
+- **Bench bar charts set their group labels at 45°** (`host/hil/charts.py`):
+  15 horizontal `profile board` labels overlapped into an unreadable line.
+  Each bar also carries a `<title>` with its value, a tooltip when the SVG is
+  opened directly. The `docs/bench/` charts are re-rendered from the same v0.3.0
+  data.
 - **`scripts/release.sh` releases from `main` only**: it refuses another branch
   unless `--allow-branch` (or `RELEASE_ALLOW_BRANCH=1`), and a `main` that's
   behind the remote's. v0.3.0 and v0.3.1 were both cut on a feature branch,
   tagging a commit `main` didn't have. `RELEASE_BRANCH` names another release
   branch.
+
+### Fixed
+
+- **Bench latency timed from the serial reply.** `bench.py` (and
+  `desktop/latency.py`) started the clock only after `SerialDev.command()`
+  returned -- after the firmware's reply had crossed the serial bridge, and
+  after a blocking `tcdrain`. The esp32c3's FTDI holds that reply up to 16 ms,
+  so its benched ~17.8 ms (v0.3.0 snapshot) was mostly the bridge; timed from
+  the write without the drain it measures ~7.5 ms. CH340 boards were much less
+  affected. `e2e` is now from before the write, `ble` from after it; the
+  v0.3.0 snapshot carries a correction until the next full bench.
+- **`tester/test-matrix.sh` resets its observers at the end of a run.** The
+  last observer stayed linked to its last gamepad, so whatever ran next shared
+  that gamepad with it: a bench measured 18 ms instead of 4 ms on the esp32s3,
+  and a gamepad held by an observer doesn't advertise for BlueZ.
 
 ## [0.3.1] — 2026-10-06
 

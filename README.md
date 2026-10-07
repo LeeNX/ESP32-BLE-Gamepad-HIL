@@ -276,11 +276,16 @@ From the v0.3.0 snapshot in [`docs/bench/`](docs/bench/README.md) (library
 - **Connection interval 8.75 ms on the esp32c3/esp32s3, 43.75 ms on the
   esp32dev, MTU 255.** With library 0.8.0 it's no longer 48.75 ms everywhere
   (the v0.2.6 numbers).
-- Single button press → host: **~4.9 ms** median on the esp32s3, **~13.6 ms**
-  on the esp32dev, **~17.8 ms** on the esp32c3. **0 dropped** across 200 paced
-  presses per profile. In that run the boards benched with 3, 2 and 1 BLE
-  links up (C3, esp32dev, S3), so the C3's figure carries the most contention:
-  compare a board with itself across snapshots, not boards with each other.
+- Single button press → host: **~4.9 ms** median on the esp32s3 and **~13.6
+  ms** on the esp32dev. **0 dropped** across 200 paced presses per profile.
+  The snapshot's **~17.8 ms on the esp32c3 is a measurement artifact**: the
+  bench timed from the firmware's serial reply, which the esp32c3's FTDI bridge
+  holds up to 16 ms. With that fixed (rig 0.3.2) it measures ~7.5 ms; see the
+  correction in [`docs/bench/`](docs/bench/README.md).
+- **The kernel driver doesn't change latency.** `sinput_hil.py --latency`
+  times the same report on hidraw and evdev, under hid-generic and under the
+  `sinput` driver: evdev adds 0.003–0.1 ms over hidraw, and the two drivers
+  sit within ~0.1 ms of each other.
 - **Latency is flat vs HID report size** (5–28 B) within a board. p99 is
   connection-interval jitter and swings run to run; p50 is the signal. The
   interval bounds *latency*, not paced *rate*: NimBLE sends several packets per
@@ -478,8 +483,10 @@ self-hosted runner, no inbound ports on your network:
 
 - **build** — `pip install platformio`, `builder/build.sh`, upload the bundles.
   All 3 boards (`esp32dev` + `esp32c3` + `esp32s3`) × the profiles for this
-  trigger: `default specials maxbtn` on a push, `+ minimal` on the weekly
-  schedule, or whatever a `profiles` dispatch input asks for.
+  trigger: `minimal maxfeat sinput` on a push, `+ specials` on the weekly
+  schedule, or whatever a `profiles` dispatch input asks for. Plus the
+  Bluepad32 observer bundles (`builder/build-observers.sh`) unless the
+  observer matrix is off.
 - **hil-test** — brings up an **ephemeral Tailscale node** for the job
   (`tailscale/github-action`), `rsync`s the bundles to the tester over the
   tailnet, `ssh`es in to **`git reset --hard`** the tester's own checkout to the
@@ -513,9 +520,10 @@ loose, so gating every push on it wasn't worth the rig time. Regenerate
 | input | effect |
 |---|---|
 | `boards` | space-separated subset to build + test (blank = all three) |
-| `profiles` | space-separated profile subset (blank = `default specials maxbtn`; the weekly schedule also builds `minimal`) |
+| `profiles` | space-separated profile subset (blank = `minimal maxfeat sinput`; the weekly schedule adds `specials`) |
 | `test_filter` | a pytest `-k` expression, e.g. `feature_report` or `battery or descriptor` (blank = whole suite) |
 | `bench` | run the sequential `--bench` sweep instead of the parallel functional matrix (~40 min) |
+| `matrix` | the observer matrix after the suite: `quick` (one rotation, `sinput`, ~5 min; the default), `full` (every rotation × `minimal maxfeat sinput`, ~35 min; the weekly schedule), `none` |
 
 Narrowing `boards` / `profiles` narrows the build matrix, and only the built
 bundles are pushed, so the flash + test set shrinks with it. So
@@ -531,8 +539,9 @@ red test. Locally the same:
 lane flashes + tests its own profiles sequentially, but the boards overlap. On
 the 3-board reference rig the old 18-bundle functional matrix ran in **~12 min**
 (measured, `-k "buttons or descriptor"`) versus ~35 min sequential — about 3x,
-bounded by the slowest board's lane. Every push now builds 3 profiles (9
-bundles), so it's quicker still.
+bounded by the slowest board's lane. Every push now runs 2 suite profiles
+(`minimal maxfeat`, 6 bundles), so it's quicker still, plus a quick observer
+matrix for `sinput`.
 
 Only the timing-insensitive checks parallelise. `--by-board` **refuses
 `--bench`**: the latency / throughput sweep stays sequential and as close to solo

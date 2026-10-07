@@ -28,6 +28,18 @@ cp results/bench-table.md results/*.svg <this repo>/docs/bench/
 | [`polling-rate.svg`](polling-rate.svg) | clean paced rate vs the connection-interval ceiling, per profile/board |
 | [`latency-distribution.svg`](latency-distribution.svg) | p50 / p90 / p99 spread per profile/board |
 
+> **Correction (2026-10-06, rig 0.3.2):** the esp32c3's latency in this
+> snapshot is a measurement artifact, not BLE. The bench started timing only
+> after the firmware's serial reply (and a blocking `tcdrain`), and the
+> esp32c3's FTDI bridge holds that reply up to 16 ms, so its ~17.8 ms is mostly
+> the bridge. With the timing fixed (from the serial write, no drain) a quick
+> bench measures the esp32c3 at **~7.5 ms** p50 (`minimal`, 8.75 ms interval),
+> and the same report times at ~4.7–4.9 ms on hidraw and evdev
+> (`sinput_hil.py --latency`). The contention explanation below doesn't hold
+> for it. The esp32c3's clean rate is probably bridge-bound for the same
+> reason. The CH340 boards (esp32dev, esp32s3) reply in ~2.6 ms and are much
+> less affected. A full re-bench with the fix replaces this snapshot.
+
 **Reading it:** the connection interval moved since v0.2.6. It was 48.75 ms on
 every board then; now it is **8.75 ms** on the esp32c3 and esp32s3 and
 **43.75 ms** on the esp32dev. The rig itself didn't change (same kernel and
@@ -43,7 +55,9 @@ in that order after the functional `--by-board` matrix, with one fewer link
 live each time: the first benches with all three up, the last alone. That
 confounds the comparison between boards: the esp32c3 and esp32s3
 negotiate the same 8.75 ms interval, yet the esp32c3 (3 links) shows ~17.8 ms p50
-and ~63 Hz clean rate against the esp32s3's ~4.9 ms and 258–276 Hz (1 link).
+and ~63 Hz clean rate against the esp32s3's ~4.9 ms and 258–276 Hz (1 link) --
+though see the correction above: most of that gap is the esp32c3's FTDI, not
+the links.
 Compare a board with itself across snapshots, not boards with each other; a
 like-for-like comparison needs a `--bench`-only run from an unbonded adapter.
 
