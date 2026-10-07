@@ -28,7 +28,7 @@ cp results/bench-table.md results/*.svg <this repo>/docs/bench/
 | [`polling-rate.svg`](polling-rate.svg) | clean paced rate vs the connection-interval ceiling, per profile/board |
 | [`latency-distribution.svg`](latency-distribution.svg) | p50 / p90 / p99 spread per profile/board |
 
-> **Correction (2026-10-06, rig 0.3.2):** the esp32c3's latency in this
+> **Correction (2026-10-06, rig 0.4.0):** the esp32c3's latency in this
 > snapshot is a measurement artifact, not BLE. The bench started timing only
 > after the firmware's serial reply (and a blocking `tcdrain`), and the
 > esp32c3's FTDI bridge holds that reply up to 16 ms, so its ~17.8 ms is mostly

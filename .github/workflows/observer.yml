@@ -1,6 +1,7 @@
-# Build the Bluepad32 observer firmware (firmware/observer) whenever its sources change, so a break shows up on the
-# push rather than at release time. Builds only -- the observer matrix runs on the rig (tester/test-matrix.sh). The
-# bundles are uploaded as the `observer-bundles` artifact, flashable as-is.
+# Build the Bluepad32 observer firmware (firmware/observer): on its own whenever its sources change, so a break shows up
+# on the push rather than at release time, and as a reusable workflow (workflow_call) that hil.yml and release.yml run
+# in parallel with their hil_runner build -- the two builds share nothing. Builds only -- the observer matrix runs on
+# the rig (tester/test-matrix.sh). The bundles are uploaded as the `observer-bundles` artifact, flashable as-is.
 name: Observer firmware
 
 on:
@@ -21,9 +22,19 @@ on:
       - hil_config.toml
       - .github/workflows/observer.yml
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      boards:
+        description: space-separated boards to build observers for
+        type: string
+        default: esp32dev esp32c3 esp32s3
+      ref:
+        description: ref to build (blank = the caller's; release.yml passes its tag, which a manual re-run names)
+        type: string
+        default: ""
 
 env:
-  BOARDS: esp32dev esp32c3 esp32s3
+  BOARDS: ${{ inputs.boards || 'esp32dev esp32c3 esp32s3' }}
 
 jobs:
   build:
@@ -31,6 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: ${{ inputs.ref }}
           fetch-depth: 0  # make_bundle.py records `git describe` as rig_describe
 
       - uses: actions/setup-python@v6

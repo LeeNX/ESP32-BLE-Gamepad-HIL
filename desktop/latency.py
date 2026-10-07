@@ -5,7 +5,7 @@
 DUT's HID report reflects the new state, and time the gap. The reply is read
 only afterwards: a serial bridge can hold it back well after the report (an
 FTDI's latency timer, up to 16 ms), so timing from it clamped every sample to
-the bridge's delay (fixed in rig 0.3.2).
+the bridge's delay (fixed in rig 0.4.0).
 
 Two figures per transition (host clock, `time.perf_counter`):
 

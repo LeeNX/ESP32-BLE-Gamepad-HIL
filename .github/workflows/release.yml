@@ -40,9 +40,23 @@ env:
   PROFILES: default specials minimal maxbtn maxfeat sinput
 
 jobs:
-  release:
+  # Two builds in parallel -- they share nothing -- then `release` assembles and publishes:
+  #   firmware   the hil_runner matrix (every board x profile) against the library
+  #   observers  the Bluepad32 observer firmware (firmware/observer, against the Bluepad32 pinned in hil_config.toml),
+  #              via observer.yml, from the release tag. Same boards as BOARDS (`with:` can't read env).
+  observers:
+    if: github.repository == 'LeeNX/ESP32-BLE-Gamepad-HIL' || vars.HIL_RIG_ENABLED == 'true'
+    uses: ./.github/workflows/observer.yml
+    with:
+      boards: esp32dev esp32c3 esp32s3
+      ref: ${{ inputs.tag || github.ref_name }}
+
+  firmware:
     if: github.repository == 'LeeNX/ESP32-BLE-Gamepad-HIL' || vars.HIL_RIG_ENABLED == 'true'
     runs-on: ubuntu-latest
+    outputs:
+      lib_sha: ${{ steps.lib.outputs.sha }}
+      lib_describe: ${{ steps.lib.outputs.describe }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -50,7 +64,7 @@ jobs:
           fetch-depth: 0  # make_bundle.py records `git describe` as each manifest's rig_describe
 
       - name: Verify VERSION matches the tag
-        id: v
+        # here too, so a mismatched tag fails before the long build
         run: |
           want="${TAG#v}"
           have="$(cat VERSION)"
@@ -75,18 +89,18 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.platformio
-          key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini', 'firmware/observer/platformio.ini') }}
+          key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini') }}
 
       - name: Checkout the library
+        id: lib
         run: |
           git clone --depth 1 --branch "$LIB_REF" "$LIB_REPO" "$HOME/lib" \
             || git clone "$LIB_REPO" "$HOME/lib"
           git -C "$HOME/lib" checkout "$LIB_REF"
           {
-            echo "LIB_REPO=$LIB_REPO"
-            echo "LIB_SHA=$(git -C "$HOME/lib" rev-parse HEAD)"
-            echo "LIB_DESCRIBE=$(git -C "$HOME/lib" describe --tags --always)"
-          } >> "$GITHUB_ENV"
+            echo "sha=$(git -C "$HOME/lib" rev-parse HEAD)"
+            echo "describe=$(git -C "$HOME/lib" describe --tags --always)"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build the firmware matrix
         run: |
@@ -97,23 +111,53 @@ jobs:
           EOF
           ./builder/build.sh --boards "$BOARDS" --profiles "$PROFILES"
 
-      # The Bluepad32 observer firmware (firmware/observer) for the observer matrix: built against the Bluepad32 pinned
-      # in hil_config.toml ([observer].bluepad32_repo @ bluepad32_ref), which build-observers.sh fetches into
-      # .cache/bluepad32. Its bundles land in bundles/matrix/ and ship in the firmware tarball.
-      - name: Bluepad32 ref
-        id: bp32
-        run: echo "ref=$(python3 host/hil/config.py observer.bluepad32_ref)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache Bluepad32
-        uses: actions/cache@v5
+      - uses: actions/upload-artifact@v6
         with:
-          path: .cache/bluepad32
-          key: bluepad32-${{ steps.bp32.outputs.ref }}
+          name: firmware-bundles
+          path: bundles/
 
-      - name: Build the observer bundles
-        run: ./builder/build-observers.sh --boards "$BOARDS"
+  release:
+    needs: [firmware, observers]
+    if: github.repository == 'LeeNX/ESP32-BLE-Gamepad-HIL' || vars.HIL_RIG_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+
+      - name: Verify VERSION matches the tag
+        id: v
+        run: |
+          want="${TAG#v}"
+          have="$(cat VERSION)"
+          echo "tag=$TAG  VERSION file=$have"
+          if [ "$want" != "$have" ]; then
+            echo "::error::VERSION ($have) != tag $TAG. Bump VERSION, commit, re-tag."
+            exit 1
+          fi
+          case "$want" in
+            *-*) echo "prerelease=true"  >> "$GITHUB_OUTPUT" ;;
+            *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Fetch the firmware bundles
+        uses: actions/download-artifact@v7
+        with:
+          name: firmware-bundles
+          path: bundles/
+
+      # They ship in the firmware tarball, under firmware-bundles/matrix/.
+      - name: Fetch the observer bundles
+        uses: actions/download-artifact@v7
+        with:
+          name: observer-bundles
+          path: bundles/matrix/
 
       - name: Assemble release artifacts
+        env:
+          # the library the firmware job built against (make-release-artifacts.sh reads these for index.json)
+          LIB_SHA: ${{ needs.firmware.outputs.lib_sha }}
+          LIB_DESCRIBE: ${{ needs.firmware.outputs.lib_describe }}
         run: scripts/make-release-artifacts.sh "$TAG"
 
       - name: Assemble bench notes

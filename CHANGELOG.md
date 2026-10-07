@@ -46,6 +46,16 @@ What a bump means:
   plus `matrix=full`. With CI no longer staging `default` bundles,
   `test-matrix.sh --restore` and `tester/bp32_swap.sh` need them built by
   hand on a CI-run rig.
+- **CI builds the firmware and the observers in parallel.** `observer.yml` is
+  now also a reusable workflow; `hil.yml` runs it as an `observers` job beside
+  `build` (skipped when the matrix is off), and `release.yml` splits into
+  `firmware` and `observers` jobs feeding `release`. The observers used to
+  build after the firmware, holding the rig back ~5 min a run.
+- **README covers the observer matrix**: a second host in the intro, the
+  observer and matrix tools in the layout table, a new "Observer matrix
+  (Bluepad32)" section (rotations, keeping a run clean, running it, gaps, the
+  observer firmware, `esp32dev2`), the current per-profile CI schedule, and
+  the corrected bench timing.
 - **Bench bar charts set their group labels at 45°** (`host/hil/charts.py`):
   15 horizontal `profile board` labels overlapped into an unreadable line.
   Each bar also carries a `<title>` with its value, a tooltip when the SVG is
