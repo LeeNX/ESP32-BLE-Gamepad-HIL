@@ -320,8 +320,12 @@ def sinput_inputs(timeout=10):
     return found
 
 
-def settle(*devs, wait=0.4):
-    """Let the kernel apply queued events; absinfo/active_keys read the current state."""
+def settle(*devs, wait=0.4, until=None):
+    """Let the kernel apply queued events; absinfo/active_keys read the current state.
+
+    With until, return as soon as it's true (checked after each drain), else after wait -- for checks that expect a
+    specific value, so a slow link (esp32dev's ~49 ms interval, a retransmit) gets the whole wait, not one read.
+    """
     end = time.monotonic() + wait
     while time.monotonic() < end:
         for d in devs:
@@ -330,6 +334,8 @@ def settle(*devs, wait=0.4):
                     pass
             except (BlockingIOError, OSError):
                 pass
+        if until and until():
+            return
         time.sleep(0.02)
 
 
@@ -453,7 +459,7 @@ def driver_checks(dev):
         ("ry", e.ABS_RZ, 2000),
     ):
         cmd(f"AXIS {axis} {val}")
-        settle(pad)
+        settle(pad, wait=2.0, until=lambda: pad.absinfo(code).value == val)
         got = pad.absinfo(code).value
         check(f"driver: axis {axis} {val} -> {e.ABS[code]}", got == val, f"got {got}")
         cmd(f"AXIS {axis} 0")
@@ -466,13 +472,13 @@ def driver_checks(dev):
             f"{props}",
         )
         cmd("MOTION 100 -200 300 -4096 4096 8192")
-        settle(imu)
-        got = [
-            imu.absinfo(c).value for c in (e.ABS_X, e.ABS_Y, e.ABS_Z, e.ABS_RX, e.ABS_RY, e.ABS_RZ)
-        ]
+        want = [-4096, 4096, 8192, 100, -200, 300]
+        imu_codes = (e.ABS_X, e.ABS_Y, e.ABS_Z, e.ABS_RX, e.ABS_RY, e.ABS_RZ)
+        settle(imu, wait=2.0, until=lambda: [imu.absinfo(c).value for c in imu_codes] == want)
+        got = [imu.absinfo(c).value for c in imu_codes]
         check(
             "driver: IMU accel/gyro values",
-            got == [-4096, 4096, 8192, 100, -200, 300],
+            got == want,
             f"got {got}",
         )
         res = (imu.absinfo(e.ABS_X).resolution, imu.absinfo(e.ABS_RX).resolution)
