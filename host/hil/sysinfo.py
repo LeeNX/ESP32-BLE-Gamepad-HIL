@@ -6,6 +6,7 @@ be checked against 'the box was loaded / throttling at the time'.
 the benchmark (before + after).
 """
 
+import datetime
 import functools
 import glob
 import os
@@ -142,9 +143,51 @@ def _undervoltage_now():
     return None
 
 
+def _uptime_s():
+    try:
+        return round(float(open("/proc/uptime").read().split()[0]))
+    except Exception:
+        return None
+
+
+def _boot_id():
+    """Changes on every boot -- how a report tells a reboot between two samples for sure."""
+    try:
+        return open("/proc/sys/kernel/random/boot_id").read().strip()
+    except Exception:
+        return None
+
+
+def _dwc_warnings():
+    """dwc_otg dequeue timeouts in the kernel log since boot (hil.usbhealth's count), or None."""
+    try:
+        from hil.usbhealth import dwc_warnings
+
+        return dwc_warnings()
+    except Exception:
+        return None
+
+
+def _dwc_burst():
+    """The tester's effective [rig] health_dwc_burst (hil_config.local.toml applied), or None --
+    recorded so a report rendered elsewhere (the CI runner) warns at the tester's threshold."""
+    try:
+        from hil.config import load
+
+        return int(load().get("rig", {}).get("health_dwc_burst", 12))
+    except Exception:
+        return None
+
+
 def dynamic():
-    """A one-shot sample of everything that could skew a timing measurement."""
+    """A one-shot sample of everything that could skew a timing measurement, plus the host's
+    uptime and dwc_otg warning count (a USB bus degrading since the last reboot)."""
     return {
+        "sampled_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+        "uptime_s": _uptime_s(),
+        "boot_id": _boot_id(),
+        "dwc_otg_warnings": _dwc_warnings(),
+        "dwc_otg_burst": _dwc_burst(),
         "loadavg": _loadavg(),
         "cpu_temp_c": _cpu_temp_c(),
         "cpu_freq_mhz": _cpu_freq_mhz(),
