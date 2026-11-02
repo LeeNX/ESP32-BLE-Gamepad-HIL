@@ -18,6 +18,17 @@ What a bump means:
 
 ## [Unreleased]
 
+### Fixed
+
+- **`sinput_hil` driver axis/IMU checks poll until the value lands.** They read
+  the evdev state once after a fixed 400 ms settle, so one late report on a slow
+  link failed the check: the 2026-10-20 scheduled run's
+  `obs-esp32s3-sinput-bluez-esp32dev` lane got `ABS_Z: got 0` while the raw
+  hidraw check of the same report passed (esp32dev's ~49 ms interval, ~67 ms
+  p99). `settle()` now takes an `until=` predicate and returns as soon as it
+  holds, capped at 2 s for those checks: no slower when green. The button
+  checks keep the fixed wait, since some expect no key at all.
+
 ## [0.4.0] — 2026-10-07
 
 ### Added
