@@ -18,6 +18,8 @@ What a bump means:
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-11-02
+
 ### Fixed
 
 - **`sinput_hil` driver axis/IMU checks poll until the value lands.** They read
@@ -760,7 +762,8 @@ descriptor + latency suite, and the Tailscale-based CI. Plus:
   `HIL_RIG_ENABLED=true` is set — so a fork with no tester wired gets a clean
   skipped run, not a failure on the missing Tailscale secret.
 
-[Unreleased]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.4.1
 [0.4.0]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.4.0
 [0.3.1]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.3.1
 [0.3.0]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.3.0
