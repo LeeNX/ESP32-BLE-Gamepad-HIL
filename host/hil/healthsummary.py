@@ -10,8 +10,10 @@ Mostly here for the dwc_otg count: on the Raspberry Pi 3B+ every USB port and th
 dwc_otg controller, and a bus that's degrading since the last reboot shows up as
 `dwc_otg_hcd_urb_dequeue ... Timed out` warnings well before it fails a run. "+N this run" is the
 number to watch -- a quiet run adds ~0, a flash that upsets the bus adds a burst. Uptime says how long
-the count has been accumulating. A burst of at least [rig] health_dwc_burst, a non-zero
-`vcgencmd get_throttled` or an undervoltage alarm at the end renders as a warning.
+the count has been accumulating. A burst of at least [rig] health_dwc_burst (the tester's value,
+recorded in the sample; else this checkout's hil_config.toml), a non-zero `vcgencmd get_throttled`
+or an undervoltage alarm at the end renders as a warning, and so does a count that went down (the
+host rebooted, or the kernel log wrapped).
 """
 
 import datetime
@@ -132,7 +134,18 @@ def render(start, end):
         warnings.append(
             "the dwc_otg count went down (kernel log wrapped): a very noisy bus, this run's delta is unknown"
         )
-    burst = _burst()
+    # the tester's own threshold (its hil_config.local.toml applies there, not here); older samples lack it
+    burst = (
+        next(
+            (
+                x.get("dwc_otg_burst")
+                for x in (end, start)
+                if x and isinstance(x.get("dwc_otg_burst"), int)
+            ),
+            None,
+        )
+        or _burst()
+    )
     if delta is not None and delta >= burst:
         warnings.append(
             f"{delta} new dwc_otg timeouts during the run (>= {burst}): the USB bus is struggling"

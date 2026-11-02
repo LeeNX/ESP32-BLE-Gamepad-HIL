@@ -160,6 +160,17 @@ def _dwc_warnings():
         return None
 
 
+def _dwc_burst():
+    """The tester's effective [rig] health_dwc_burst (hil_config.local.toml applied), or None --
+    recorded so a report rendered elsewhere (the CI runner) warns at the tester's threshold."""
+    try:
+        from hil.config import load
+
+        return int(load().get("rig", {}).get("health_dwc_burst", 12))
+    except Exception:
+        return None
+
+
 def dynamic():
     """A one-shot sample of everything that could skew a timing measurement, plus the host's
     uptime and dwc_otg warning count (a USB bus degrading since the last reboot)."""
@@ -167,6 +178,7 @@ def dynamic():
         "sampled_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "uptime_s": _uptime_s(),
         "dwc_otg_warnings": _dwc_warnings(),
+        "dwc_otg_burst": _dwc_burst(),
         "loadavg": _loadavg(),
         "cpu_temp_c": _cpu_temp_c(),
         "cpu_freq_mhz": _cpu_freq_mhz(),
