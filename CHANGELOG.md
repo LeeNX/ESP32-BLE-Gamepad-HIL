@@ -18,6 +18,20 @@ What a bump means:
 
 ## [Unreleased]
 
+### Added
+
+- **Rig health in the job summary.** `hil.yml` samples the tester host under the
+  rig lock before the suite and after the observer matrix
+  (`results/rig-health-{start,end}.json`), and `host/hil/healthsummary.py`
+  renders them: uptime and boot time, `dwc_otg_hcd_urb_dequeue` timeouts since
+  boot plus this run's delta, CPU temperature, load, throttling and
+  undervoltage. A burst of at least `[rig] health_dwc_burst` in one run, a
+  non-zero `get_throttled` or an undervoltage alarm becomes a warning. Tells
+  "rig degraded since its last reboot" apart from a code failure without
+  pulling the artifact. `hil.sysinfo --dynamic-only` (and so each bundle's
+  `health-before/after-*.json`) now also records `sampled_at`, `uptime_s` and
+  `dwc_otg_warnings`.
+
 ## [0.4.1] — 2026-11-02
 
 ### Fixed

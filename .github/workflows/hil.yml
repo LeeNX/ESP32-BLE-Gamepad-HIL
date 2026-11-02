@@ -289,6 +289,9 @@ jobs:
           fi
           export HIL_RUN_WHAT="flash+test ${mode:-(sequential)}${HIL_TEST_FILTER:+ -k '$HIL_TEST_FILTER'}${HIL_MATRIX:+ + matrix $HIL_MATRIX}"
           tester/rig-lock.sh --status-write busy || true
+          # host health around the whole run (uptime, dwc_otg count, temp, throttling) for the job summary
+          health() { PYTHONPATH=host python3 -m hil.sysinfo --dynamic-only > "results/rig-health-$1.json" 2>/dev/null || true; }
+          health start
           trc=0
           tester/test-all.sh $mode || trc=$?
           echo; cat results/run-verdicts.md || true
@@ -299,6 +302,7 @@ jobs:
             [ "$HIL_MATRIX" = quick ] && margs+=(--rotations esp32dev --profiles sinput)
             tester/test-matrix.sh "${margs[@]}" || mrc=$?
           fi
+          health end
           tester/rig-lock.sh --status-write idle "$((trc ? trc : mrc))" || true
           exit $((trc ? trc : mrc))
           REMOTE
@@ -339,6 +343,8 @@ jobs:
           if [ "$HIL_MATRIX" != none ]; then
             python3 host/hil/matrixsummary.py results/ >> "$GITHUB_STEP_SUMMARY" || true
           fi
+          # The tester host's uptime + dwc_otg warnings (+ this run's delta), temperature, throttling.
+          python3 host/hil/healthsummary.py results/ >> "$GITHUB_STEP_SUMMARY" || true
 
       - uses: actions/upload-artifact@v6
         if: always()

@@ -57,7 +57,7 @@ push to the tester, run, pull results). One box can be both roles
 | `tester/test-matrix.sh` | the observer matrix: rotations of one observer + two gamepads, BlueZ and Bluepad32 lanes, USB health guards per step; writes `results/matrix-verdicts.md` |
 | `tester/sinput_hil.py` `tester/bp32_hil.py` | the `sinput` profile under hid-generic and under the `sinput` kernel driver (`--latency` times every input path); what a Bluepad32 observer parses from a gamepad |
 | `tester/rig-lock.sh` `tester/rig-status.sh` `tester/rig-kill.sh` `host/hil/riglock.py` | one-rig `flock` + run-status file — serialise CI and local runs; `rig-status.sh` shows who/what is running, `rig-kill.sh` aborts it (see [CI](#rig-lock--status)) |
-| `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite. Helpers: `serialdev`, `evdev_utils`, `bluetooth`, `gatt` (DIS/PnP/battery over BlueZ D-Bus), `hidraw` (Feature/Output reports + descriptor), `latency`+`bench`, `pathlatency` (one report timed on several input paths), `sysinfo`, `detect` (present boards), `usbhealth` (USB bus guard), `names` (exact board-name matching), `charts`, `summarize`, `matrixsummary` |
+| `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite. Helpers: `serialdev`, `evdev_utils`, `bluetooth`, `gatt` (DIS/PnP/battery over BlueZ D-Bus), `hidraw` (Feature/Output reports + descriptor), `latency`+`bench`, `pathlatency` (one report timed on several input paths), `sysinfo`, `detect` (present boards), `usbhealth` (USB bus guard), `names` (exact board-name matching), `charts`, `summarize`, `matrixsummary`, `healthsummary` (rig health for the job summary) |
 | `hil_config.toml` (+ gitignored `hil_config.local.toml`) | per-machine ports, ssh host, builder board/profile matrix, per-board `enabled` |
 | `run.sh` | one-box: build all bundles then flash+test each |
 | `scripts/release.sh` `scripts/make-release-artifacts.sh` | cut a rig release (`VERSION` + `CHANGELOG.md` → tag → `release.yml`); see [RELEASE.md](RELEASE.md) |
@@ -593,6 +593,12 @@ look like a real gap (missing golden, unreadable hidraw, absent dep) — the
 routine "this profile has no rz axis" skips are counted, not listed. Times are
 the pytest phase only (the flash + first pair, in `tester/test.sh`, aren't in
 them). `dorny/test-reporter` still creates the per-test check that gates the job.
+Below it, a **Rig health** block (`host/hil/healthsummary.py results/`) shows the
+tester host at the start and end of the run: uptime and boot time, `dwc_otg`
+dequeue timeouts since boot with **+N this run**, CPU temperature, load and
+throttling. A burst of at least `[rig] health_dwc_burst` in one run is flagged, and
+so is throttling or undervoltage. The count keeps rising until the next reboot, so
+"+N" is the number to compare between runs.
 
 **Two run modes.** Push, `repository_dispatch` (the library's correctness gate),
 and a plain `workflow_dispatch` run `tester/test-all.sh --by-board` — the parallel
