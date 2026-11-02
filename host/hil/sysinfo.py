@@ -150,6 +150,14 @@ def _uptime_s():
         return None
 
 
+def _boot_id():
+    """Changes on every boot -- how a report tells a reboot between two samples for sure."""
+    try:
+        return open("/proc/sys/kernel/random/boot_id").read().strip()
+    except Exception:
+        return None
+
+
 def _dwc_warnings():
     """dwc_otg dequeue timeouts in the kernel log since boot (hil.usbhealth's count), or None."""
     try:
@@ -177,6 +185,7 @@ def dynamic():
     return {
         "sampled_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "uptime_s": _uptime_s(),
+        "boot_id": _boot_id(),
         "dwc_otg_warnings": _dwc_warnings(),
         "dwc_otg_burst": _dwc_burst(),
         "loadavg": _loadavg(),

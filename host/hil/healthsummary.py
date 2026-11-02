@@ -53,12 +53,28 @@ def _duration(s):
     return f"{d}d {h}h" if d else f"{h}h {m}m" if h else f"{m}m"
 
 
-def _booted(sample):
+def _boot_time(sample):
     try:
         at = datetime.datetime.fromisoformat(sample["sampled_at"])
-        return (at - datetime.timedelta(seconds=sample["uptime_s"])).strftime("%Y-%m-%d %H:%M UTC")
+        return at - datetime.timedelta(seconds=sample["uptime_s"])
     except (KeyError, TypeError, ValueError):
         return None
+
+
+def _booted(sample):
+    t = _boot_time(sample)
+    return t.strftime("%Y-%m-%d %H:%M UTC") if t else None
+
+
+def _rebooted(start, end):
+    """Did the host boot between the samples? The kernel's boot_id says for sure; samples without
+    it compare boot times (sampled_at - uptime), with slack for rounding and clock steps."""
+    if not (start and end):
+        return False
+    if start.get("boot_id") and end.get("boot_id"):
+        return start["boot_id"] != end["boot_id"]
+    t_s, t_e = _boot_time(start), _boot_time(end)
+    return bool(t_s and t_e) and abs((t_e - t_s).total_seconds()) > 120
 
 
 def _fmt(v, unit=""):
@@ -105,10 +121,8 @@ def render(start, end):
     dwc_e = (end or {}).get("dwc_otg_warnings")
     delta = dwc_e - dwc_s if isinstance(dwc_s, int) and isinstance(dwc_e, int) else None
     # The count is dmesg lines since boot: it goes down if the host rebooted between the samples
-    # (uptime went down too) or the kernel ring buffer wrapped. Either way there's no usable delta.
-    up_s = (start or {}).get("uptime_s")
-    up_e = (end or {}).get("uptime_s")
-    rebooted = isinstance(up_s, int) and isinstance(up_e, int) and up_e < up_s
+    # (_rebooted) or the kernel ring buffer wrapped. Either way there's no usable delta.
+    rebooted = _rebooted(start, end)
     reset = (
         "host rebooted"
         if rebooted
@@ -127,7 +141,7 @@ def render(start, end):
     warnings = []
     if rebooted:
         warnings.append(
-            "the tester host rebooted during the run (uptime went down) -- a crash or power loss,"
+            "the tester host rebooted during the run -- a crash or power loss,"
             " not a test failure; check its journal"
         )
     elif reset:
@@ -135,17 +149,12 @@ def render(start, end):
             "the dwc_otg count went down (kernel log wrapped): a very noisy bus, this run's delta is unknown"
         )
     # the tester's own threshold (its hil_config.local.toml applies there, not here); older samples lack it
-    burst = (
-        next(
-            (
-                x.get("dwc_otg_burst")
-                for x in (end, start)
-                if x and isinstance(x.get("dwc_otg_burst"), int)
-            ),
-            None,
-        )
-        or _burst()
+    burst = next(
+        (x["dwc_otg_burst"] for x in (end, start) if x and isinstance(x.get("dwc_otg_burst"), int)),
+        None,
     )
+    if burst is None:  # not `or`: a configured 0 is a threshold too
+        burst = _burst()
     if delta is not None and delta >= burst:
         warnings.append(
             f"{delta} new dwc_otg timeouts during the run (>= {burst}): the USB bus is struggling"

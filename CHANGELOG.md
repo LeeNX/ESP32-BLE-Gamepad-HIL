@@ -29,8 +29,9 @@ What a bump means:
   non-zero `get_throttled` or an undervoltage alarm becomes a warning. Tells
   "rig degraded since its last reboot" apart from a code failure without
   pulling the artifact. `hil.sysinfo --dynamic-only` (and so each bundle's
-  `health-before/after-*.json`) now also records `sampled_at`, `uptime_s` and
-  `dwc_otg_warnings`.
+  `health-before/after-*.json`) now also records `sampled_at`, `uptime_s`,
+  `boot_id` (a reboot between the samples is reported as one, not as a delta),
+  `dwc_otg_warnings` and the tester's effective `dwc_otg_burst`.
 
 ## [0.4.1] — 2026-11-02
 
