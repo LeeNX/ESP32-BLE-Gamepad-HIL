@@ -40,8 +40,9 @@ FLASH_LOCK = pathlib.Path(
 )
 
 
-# NVS / otadata / phy on both layouts the rig flashes (hil_runner: nvs 0x9000+0x5000, otadata 0xe000; the
-# Bluepad32 observer: nvs 0x9000+0x6000, otadata 0xf000, phy 0x11000), up to the first app offset.
+# NVS / otadata / phy on both layouts the rig flashes (hil_runner: nvs 0x9000+0x5000, otadata 0xe000, app at 0x10000;
+# the Bluepad32 observer: nvs 0x9000+0x6000, otadata 0xf000, phy 0x11000, app at 0x20000). The erase stops at the
+# bundle's app (firmware.bin) when that comes first -- the runner's -- so it never touches application bytes.
 SETTINGS_REGION = ("0x9000", "0x9000")
 
 
@@ -82,8 +83,8 @@ def main():
     ap.add_argument(
         "--wipe-settings",
         action="store_true",
-        help=f"erase the settings region ({SETTINGS_REGION[0]}+{SETTINGS_REGION[1]}: NVS -- BLE bonds --, otadata, "
-        "phy) and write the bundle's images in it; done even when the app is already on the chip (only those "
+        help=f"erase the settings region ({SETTINGS_REGION[0]}+{SETTINGS_REGION[1]}, or up to the app if that's "
+        "lower: NVS -- BLE bonds --, otadata, phy) and write the bundle's images in it; done even when the app is already on the chip (only those "
         "images are rewritten then) -- for a board changing role, or whose stored bonds are unknown",
     )
     args = ap.parse_args()
@@ -94,7 +95,8 @@ def main():
 
     write_args, verify_args, settings_args = [], [], []
     lo = int(SETTINGS_REGION[0], 16)
-    hi = lo + int(SETTINGS_REGION[1], 16)
+    app = [int(i["offset"], 16) for i in manifest["images"] if i["file"] == "firmware.bin"]
+    hi = min([lo + int(SETTINGS_REGION[1], 16), *(a for a in app if a > lo)])
     for img in manifest["images"]:
         path = args.bundle / img["file"]
         if not path.is_file():
@@ -132,7 +134,7 @@ def main():
             what = "already on the chip (verified) -- settings wiped, app not rewritten"
     if args.wipe_settings:
         r = subprocess.run(
-            base + ["erase_region", *SETTINGS_REGION], capture_output=True, text=True
+            base + ["erase_region", hex(lo), hex(hi - lo)], capture_output=True, text=True
         )
         if r.returncode != 0:
             # Writing anyway would report success with the old settings (bonds) still in place.

@@ -426,7 +426,8 @@ def driver_checks(dev):
             until=lambda: (
                 pad.active_keys() == [want]
                 if want is not None
-                else click and e.BTN_LEFT in touch.active_keys()
+                # the whole state: BTN_LEFT can land while the previous button's release is still in flight
+                else click and not pad.active_keys() and e.BTN_LEFT in touch.active_keys()
             ),
         )
         keys = pad.active_keys()

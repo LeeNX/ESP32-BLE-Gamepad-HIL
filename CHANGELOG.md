@@ -66,7 +66,10 @@ What a bump means:
   matrix right after CI's (boards still on sinput) failed 3 of 4 BlueZ lanes
   while pairing, every one a gamepad that kept its NVS. The wipe now happens
   either way; with the app already there only the bundle's images inside the
-  settings region (otadata, the observer's blank NVS) are rewritten.
+  settings region (otadata, the observer's blank NVS) are rewritten. The
+  erased region now ends at the bundle's app when that comes first: the
+  runner's app starts at 0x10000, inside the fixed 0x9000+0x9000, so every
+  wipe used to erase (and need to rewrite) its first 8 KiB.
 
 ## [0.4.1] — 2026-11-02
 
