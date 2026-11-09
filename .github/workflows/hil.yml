@@ -160,6 +160,7 @@ jobs:
           # line per board/LED as they get wired; unset -> that LED compiles
           # out only when the env var and board config are both unset.
           HIL_LED_PIN_ESP32DEV: ${{ vars.HIL_LED_PIN_ESP32DEV || secrets.HIL_LED_PIN_ESP32DEV || '' }}
+          HIL_LED_PIN_ESP32C3: ${{ vars.HIL_LED_PIN_ESP32C3 || secrets.HIL_LED_PIN_ESP32C3 || '' }}
         run: |
           cat > hil_config.local.toml <<EOF
           [rig]
