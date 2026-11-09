@@ -203,6 +203,40 @@ def legacy(args, manifest, base, rec):
     return 0
 
 
+def multislot_bootloader(bundle, manifest):
+    """(offset, path) of the bootloader a multi-slot board must have: a hil_runner bundle's (Arduino-ESP32's prebuilt
+    one, identical across profiles) for this chip -- the bundle's own, or the newest sibling runner bundle's when
+    this one is the observer. Under the observer build's bootloader hil_runner boots but its SLOTS? reads every slot
+    as empty (rig, 2026-11-09, esp32c3); under the Arduino one both apps run and answer SLOTS?. None: no bootloader."""
+
+    def own(b, m):
+        img = next((i for i in m["images"] if i["file"] == "bootloader.bin"), None)
+        return (img["offset"], b / "bootloader.bin") if img else None
+
+    if manifest.get("profile") != "bp32obs":
+        return own(bundle, manifest)
+    best = None
+    for d in {bundle.parent, bundle.parent.parent}:
+        for b in d.iterdir() if d.is_dir() else ():
+            try:
+                m = json.loads((b / "manifest.json").read_text())
+            except (OSError, ValueError):
+                continue
+            if m.get("chip") != manifest["chip"] or m.get("profile") == "bp32obs" or "slots" in m:
+                continue
+            got = own(b, m)
+            if got and got[1].is_file() and (not best or b.stat().st_mtime > best[0]):
+                best = (b.stat().st_mtime, got)
+    if best:
+        return best[1]
+    print(
+        f"flash: no hil_runner bundle for {manifest['chip']} next to {bundle} -- converting with the observer's "
+        "bootloader, under which hil_runner can't report its slots",
+        file=sys.stderr,
+    )
+    return own(bundle, manifest)
+
+
 def multislot(args, manifest, base, rec):
     """The slot cache -- see the module docstring."""
     lay = ms.layout()
@@ -310,8 +344,13 @@ def multislot(args, manifest, base, rec):
             p.write_bytes(ms.otadata_bin(slot))
             return str(p)
 
-        # 2. esptool verify, one session: is the table ours, and which slot (if any) holds the app?
-        regions = [hex(ms.TABLE_OFFSET), str(tmp / "partitions.bin")]
+        # 2. esptool verify, one session: is the table ours, the bootloader the runner's, and which slot (if any)
+        # holds the app?
+        boot = multislot_bootloader(args.bundle, manifest)
+        if not boot:
+            raise SystemExit(f"{args.bundle}: no bootloader.bin")
+        boot_off, boot_bin = int(boot[0], 16), boot[1]
+        regions = [hex(ms.TABLE_OFFSET), str(tmp / "partitions.bin"), hex(boot_off), str(boot_bin)]
         for s in slots:
             regions += [hex(s["offset"]), str(fw)]
         # A mismatch is an ordinary answer here (rc != 0); only no answer at all (no connection) is retried.
@@ -329,6 +368,7 @@ def multislot(args, manifest, base, rec):
             print((r.stdout + r.stderr).strip()[-800:], file=sys.stderr)
             return 1
         table_ok = res[ms.TABLE_OFFSET]
+        boot_ok = res.get(boot_off, False)
         hits = [i for i, s in enumerate(slots) if res.get(s["offset"])]
         for i, s in enumerate(slots):
             if not res.get(s["offset"]) and state.get(i, {}).get("sha256") == want:
@@ -337,20 +377,17 @@ def multislot(args, manifest, base, rec):
         fw_size = fw.stat().st_size
         if not table_ok:
             # 3. Convert: the board is on another layout (a legacy bundle, an erased chip).
-            boot = next((i for i in manifest["images"] if i["file"] == "bootloader.bin"), None)
-            if not boot:
-                raise SystemExit(f"{args.bundle}: no bootloader.bin to convert the board with")
             state.clear()
             slot, action, wipe = 0, "convert", True
             writes = [
-                boot["offset"], str(args.bundle / "bootloader.bin"),
+                hex(boot_off), str(boot_bin),
                 hex(ms.TABLE_OFFSET), str(tmp / "partitions.bin"),
                 hex(lay["otadata"]["offset"]), otadata(0),
                 hex(nvs_off), str(tmp / "nvs_blank.bin"),
                 hex(slots[0]["offset"]), str(fw),
             ]  # fmt: skip
             nbytes = (
-                (args.bundle / "bootloader.bin").stat().st_size
+                boot_bin.stat().st_size
                 + ms.TABLE_SIZE
                 + lay["otadata"]["size"]
                 + lay["nvs"]["size"]
@@ -379,6 +416,11 @@ def multislot(args, manifest, base, rec):
         if wipe and action != "convert":
             writes += [hex(nvs_off), str(tmp / "nvs_blank.bin")]
             nbytes += lay["nvs"]["size"]
+        if not boot_ok and action != "convert":
+            # A board converted with another bootloader (an older flash.py, the observer's): put the runner's back.
+            print(f"flash: bootloader at {boot_off:#x} isn't {boot_bin} -- rewriting it")
+            writes += [hex(boot_off), str(boot_bin)]
+            nbytes += boot_bin.stat().st_size
 
         r = run_retried(base + ["write_flash", *writes], args.retries)
         if r.returncode != 0:
