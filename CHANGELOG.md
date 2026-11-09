@@ -32,6 +32,21 @@ What a bump means:
   `health-before/after-*.json`) now also records `sampled_at`, `uptime_s`,
   `boot_id` (a reboot between the samples is reported as one, not as a delta),
   `dwc_otg_warnings` and the tester's effective `dwc_otg_burst`.
+- **Observer matrix names what failed.** A failed lane's verdict was only a
+  count (`FAILED (1 failures of 46)`), and the check that failed was only in
+  the lane log inside the `hil-results` artifact. `test-matrix.sh` now echoes
+  the lane's failure lines (`FAIL <check>`, or pytest's `FAILED`/`ERROR <id>`)
+  under its verdict in the step log, and `matrixsummary.py` adds a
+  **Failures** section to the job summary.
+
+### Fixed
+
+- **`sinput_hil.py` driver button check flake.** Each press was read once after
+  a fixed 400 ms, so one late press failed the whole 30-button check
+  (`bit 10 (PRESS 5)->[]` on esp32c3, while the raw-report and reload-cycle
+  checks in the same lane passed). Bits with a known key now poll until it
+  lands (up to 2 s), like the axis/IMU checks since 0.4.1; optional and
+  unmapped bits still wait out the 400 ms window.
 
 ## [0.4.1] — 2026-11-02
 

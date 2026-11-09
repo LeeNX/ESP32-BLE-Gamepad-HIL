@@ -219,7 +219,15 @@ for obs in "${ROTATIONS[@]}"; do
       line="$verdict observer=$obs profile=$p lane=$name gamepad=$board rc=$rc gaps=$gaps  $result${vers:+  [$vers]}"
       echo "$line" | tee -a "$VERDICTS"
       summary+=("$line")
-      [[ $rc == 0 ]] || fail=1
+      if [[ $rc != 0 ]]; then
+        fail=1
+        # Name what failed here, not just the count: the lane log is only in the hil-results artifact. Same
+        # pattern as host/hil/matrixsummary.py -- the HIL scripts' "FAIL <check>", pytest -ra's "FAILED/ERROR id".
+        while IFS= read -r why; do
+          echo "    $why"
+          summary+=("    $why")
+        done < <(grep -E '^(FAIL |(FAILED|ERROR) [^ ]+::)' "$log" | cut -c1-300 | head -10)
+      fi
     done
     # The two gamepad boards may have bonded with BlueZ; drop that before the next profile's descriptor.
     unbond
