@@ -47,6 +47,13 @@ What a bump means:
   checks in the same lane passed). Bits with a known key now poll until it
   lands (up to 2 s), like the axis/IMU checks since 0.4.1; optional and
   unmapped bits still wait out the 400 ms window.
+- **`bp32_hil.py` observer command lost on the console.** `led 4` got no
+  `HIL ok` within 3 s and the gamepad never saw it (still on LED 3), while
+  every other command in the run went through: the observer's BTstack UART
+  stdin lost the line. The Bluepad32 -> gamepad checks now resend a command
+  once when the observer doesn't ack it, and print what the observer said
+  instead. The observer reader keeps every line, not only `HIL ...` ones, so a
+  garbled line shows up in that note.
 
 ## [0.4.1] — 2026-11-02
 
