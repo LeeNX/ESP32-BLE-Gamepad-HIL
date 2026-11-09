@@ -153,6 +153,13 @@ matrix (`test-matrix.sh --lanes parallel`: 3 rotations × minimal maxfeat sinput
   faster switches exposed or happened to hit, fixed in `bp32_hil.py`: a state line torn by the observer reset
   crashed the reader thread (now skipped), and a lost `SPECIAL RELEASE` left a button held (commands are now resent
   once when no reply comes, as `SerialDev` does).
+- **r4** (after the bootloader rule, on 6bf24a6): suite 6/6, matrix 17/18 — the one FAIL a BlueZ pairing flap on
+  the sinput BlueZ lane (connect / disconnect until the pairing timed out; the same lane passed in r1 and r3). Its
+  21 matrix flashes were all console switches, 0 B written. The suite, though, wrote all six images again: boards
+  that held the observer twice (left by the conversion tests) evicted the profile the suite needed next. Fixed:
+  a duplicate is now evicted first.
+- **Final** (6759c25, the duplicate rule): suite 6/6 (one "GATT services never resolved" pairing retry, the known
+  BlueZ flake) + CI's quick matrix 2/2 — all 17 flashes over the console, 0 B written, no esptool session.
 - Suite `test time` (pairing inside pytest) varied 5 s–3 min per bundle in every round, both modes; six samples
   per round don't separate that from BLE pairing variance.
 
