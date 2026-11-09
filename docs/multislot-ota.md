@@ -105,6 +105,30 @@ hil_runner built on Arduino-ESP32 3.x / IDF 5.5.5, observer IDF 5.5.5; bootloade
 | `flash.py` same bundle again (no `--force`) | "already on the chip (verified) — not rewritten", 5 s, despite the slot switches since |
 | `slot.py verify` at the end | 3/3 digests intact after 9 switches |
 
+### esp32c3 and esp32s3 (same day, same sequence)
+
+Bootloader at 0x0 (from slot 0's bundle); images 0.57–0.66 MB (43–51% of a slot). C3: console = FT232R on UART0,
+flash = native USB-Serial/JTAG. S3: console and flash = the CH340 "UART" port.
+
+| Step | esp32c3 | esp32s3 |
+|---|---|---|
+| full flash, 3 apps @ 115200 | 30 s (native USB runs well above the nominal baud) | 121 s (CH340 at 115200, ~37 s per app) |
+| `verify` after flash | 3/3 | 3/3 |
+| `BOOT 1` → sinput, then reset | 1.3 s, kept slot 1 | 1.2 s, kept slot 1 |
+| `BOOT 2 WIPE` → observer, then reset | 1.5 s (BLE-only init), kept slot 2 | 1.7 s, kept slot 2 |
+| bad args, both firmwares | all rejected as on esp32dev2 | same |
+| `boot 0 --via esptool` | 3.7 s (via the native USB) | 4.7 s |
+| 5 more switches | 1.3 s each | 1.2–1.3 s each |
+| re-flash same bundle | verify skip, 4 s | verify skip, 6 s |
+| final `verify` | 3/3 | 3/3 |
+| new dwc_otg / cp210x warnings | 0 | 7 — see below |
+
+The S3's seven `dwc_otg_hcd_urb_dequeue` warnings line up with the *resets and port open/closes* of its CH340
+(19:00:07 reset, 19:00:20, 19:00:30 ×4 reset + probe, 19:00:58 esptool exit), not with the 121 s, 2.4 MB full flash,
+which logged none (as on esp32dev2's CP2102). So on this Pi the warnings track USB serial session churn (a cancelled
+URB on close), not bytes written: fewer flashes help through fewer esptool sessions (a verify + write today is two),
+and a switch should reuse an open console session rather than open its own.
+
 Lessons from the run, already folded in:
 
 - A `SLOTS?` sent while the chip is still booting (just reset by `flash.py`'s verify or esptool) arrives garbled and
@@ -121,7 +145,6 @@ flash writes per app on esp32dev at 460800 — and several times that on the 115
 1. CI/test wiring: let `test-all.sh` / `test-matrix.sh` take a multi-slot bundle and `slot.py boot` between profiles
    or roles instead of `flash.py` per bundle (and keep the `CONFIG?` libsha check per slot).
 2. A builder entry point (`build.sh --multislot "default specials bp32obs"`?) instead of hand-composing.
-3. Try the C3/S3 (bootloader at 0x0, native-USB flash ports) — expected to work the same; that's where the time win
-   is biggest.
+3. ~~Try the C3/S3~~ — done, above.
 4. Decide whether the observer's `sdkconfig.defaults` should move to the multi-slot table outright (one layout for
    every bundle), or keep both layouts.
