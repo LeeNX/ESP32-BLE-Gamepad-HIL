@@ -51,6 +51,12 @@ pass it):
      blank otadata and NVS, the app in slot 0. A legacy flash later (an older rig commit) simply converts it back.
 3. With a console, check after an esptool write that the board runs that slot with that digest.
 
+**The bootloader is always hil_runner's** (Arduino-ESP32's prebuilt one, identical across profiles): converting with
+an observer bundle, `flash.py` takes the newest runner bundle's for that chip from the bundle's parent directories,
+and its verify session checks the bootloader too, rewriting it (~20 KB) on a board that has another. Under the
+observer build's ESP-IDF 5.5.5 bootloader hil_runner boots and runs, but its `SLOTS?` reads every slot as empty
+(rig, esp32c3, 2026-11-09 — root cause not chased); under the Arduino one both apps run and report their slots.
+
 `--wipe-settings` erases just the nvs partition here (BLE bonds), never otadata. An observer bundle, which carries a
 blank NVS image, gets it whenever it is switched to from another app — as the legacy flash wrote it with the app.
 

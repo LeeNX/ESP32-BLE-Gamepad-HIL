@@ -50,6 +50,8 @@ What a bump means:
 
 ### Changed
 
+- A multi-slot board always gets hil_runner's (Arduino-ESP32's) bootloader, also when an observer bundle converts
+  it — under the observer build's, hil_runner's `SLOTS?` sees no slots — and `flash.py` rewrites a different one.
 - `--wipe-settings` on a multi-slot board erases only the nvs partition (bonds), keeping the slot selection.
 - `hil_runner`'s `ID?` `built=` is now the source commit time (reproducible), not the wall clock of the build.
 - Observer bundle names end in the observer's source commit (`…-bp32obs-<bluepad32>-<observer src>`), not the rig
