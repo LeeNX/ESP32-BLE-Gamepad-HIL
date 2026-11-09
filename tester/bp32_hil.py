@@ -103,10 +103,14 @@ class Bluepad32:
     def _run(self):
         while True:
             line = self.ser.readline().decode(errors="replace").strip()
-            if not line.startswith("HIL "):
+            if not line:
                 continue
             with self.lock:
+                # Every line, not just "HIL ...": a garbled or ESP-IDF log line is what explains a lost command.
+                # Readers match by prefix, so the extra lines don't change what they find.
                 self.log.append(line)
+                if not line.startswith("HIL "):
+                    continue
                 if line.startswith("HIL state"):
                     self.state = {k: int(v, 0) for k, v in re.findall(r"(\w+)=(-?\w+)", line)}
                 elif line.startswith("HIL ready"):
@@ -358,9 +362,24 @@ def run_sinput():
     cmd("PLED?"), cmd("RGB?"), cmd("RUMBLE?")  # clear the received flags
 
     def host(c, ack):
-        m = bp.mark()
-        bp.send(c)
-        return bp.wait_for(ack, m)
+        """Send a console command to the observer; its ack line, or None. One resend if no ack: the observer's console
+        input (BTstack stdio over UART) can lose a line, and the gamepad then never sees the command
+        (2026-11-09: "led 4" -> ack=None, gamepad still on 3, every other command fine). That's the observer's
+        console, not the Bluepad32 -> gamepad path this section tests -- what the gamepad gets is still checked."""
+        for attempt in (1, 2):
+            m = bp.mark()
+            bp.send(c)
+            got = bp.wait_for(ack, m)
+            if got is not None:
+                return got
+            with bp.lock:
+                said = [ln for ln in bp.log[m:] if not ln.startswith("HIL state")][-5:]
+            print(
+                f"      no '{ack}' for '{c}' (attempt {attempt}); observer said: {said or 'nothing but state'}"
+                + ("; resending" if attempt == 1 else ""),
+                flush=True,
+            )
+        return None
 
     for n in (1, 2, 3, 4, 0):
         ack = host(f"led {n}", "HIL ok led")

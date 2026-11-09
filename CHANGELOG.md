@@ -32,6 +32,44 @@ What a bump means:
   `health-before/after-*.json`) now also records `sampled_at`, `uptime_s`,
   `boot_id` (a reboot between the samples is reported as one, not as a delta),
   `dwc_otg_warnings` and the tester's effective `dwc_otg_burst`.
+- **Observer matrix names what failed.** A failed lane's verdict was only a
+  count (`FAILED (1 failures of 46)`), and the check that failed was only in
+  the lane log inside the `hil-results` artifact. `test-matrix.sh` now echoes
+  the lane's failure lines (`FAIL <check>`, pytest's `FAILED`/`ERROR <id>`
+  including collection errors, or a crash's final `SomeError: message`, e.g. a
+  pairing that never resolved GATT) under its verdict in the step log, and
+  `matrixsummary.py` adds a **Failures** section to the job summary. Lane logs
+  are grepped with `-a`, so observer console noise (a NUL byte) can't make
+  grep treat one as binary and print nothing.
+
+### Fixed
+
+- **`sinput_hil.py` driver button check flake.** Each press was read once after
+  a fixed 400 ms, so one late press failed the whole 30-button check
+  (`bit 10 (PRESS 5)->[]` on esp32c3, while the raw-report and reload-cycle
+  checks in the same lane passed). Bits with an expected key -- the optional
+  paddle/power/misc ones included, so a late one isn't recorded as an
+  unmapped GAP -- now poll until it lands (up to 2 s), like the axis/IMU
+  checks since 0.4.1; only touchpad 2's click, which must produce nothing,
+  still waits out the 400 ms window.
+- **`bp32_hil.py` observer command lost on the console.** `led 4` got no
+  `HIL ok` within 3 s and the gamepad never saw it (still on LED 3), while
+  every other command in the run went through: the observer's BTstack UART
+  stdin lost the line. The Bluepad32 -> gamepad checks now resend a command
+  once when the observer doesn't ack it, and print what the observer said
+  instead. The observer reader keeps every line, not only `HIL ...` ones, so a
+  garbled line shows up in that note.
+- **`flash.py --wipe-settings` skipped the wipe on an unchanged board.** When
+  the bundle was already on the chip, `flash.py` returned before the erase, so
+  `test-matrix.sh`'s "wipe each board's settings on its first flash of the run"
+  silently kept the bonds of whatever ran before. A rig run of the sinput
+  matrix right after CI's (boards still on sinput) failed 3 of 4 BlueZ lanes
+  while pairing, every one a gamepad that kept its NVS. The wipe now happens
+  either way; with the app already there only the bundle's images inside the
+  settings region (otadata, the observer's blank NVS) are rewritten. The
+  erased region now ends at the bundle's app when that comes first: the
+  runner's app starts at 0x10000, inside the fixed 0x9000+0x9000, so every
+  wipe used to erase (and need to rewrite) its first 8 KiB.
 
 ## [0.4.1] — 2026-11-02
 

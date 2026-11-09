@@ -2,7 +2,8 @@
 
     python3 host/hil/matrixsummary.py results/
 
-Reads results/matrix-verdicts.md (the last `## matrix` section: one verdict line per lane, or an ABORT) and the
+Reads results/matrix-verdicts.md (the last `## matrix` section: one verdict line per lane, or an ABORT), the failed
+lanes' failure lines from their results/matrix/*.log (so the summary names what failed, not just a count), and the
 Bluepad32 lanes' GAP lines from results/matrix/*-bp32-*.log -- inputs Bluepad32 doesn't expose, which aren't failures
 but are the observer's findings. Exits 1 if any lane failed or the run aborted, 2 if there's no matrix result at all.
 """
@@ -15,6 +16,12 @@ _VERDICT = re.compile(
     r"^(?P<verdict>PASS|FAIL) observer=(?P<obs>\S+) profile=(?P<profile>\S+) lane=(?P<lane>\S+) "
     r"gamepad=(?P<pad>\S+) rc=\S+ gaps=(?P<gaps>\d+)\s*(?P<rest>.*)$"
 )
+
+# The HIL scripts' (sinput_hil.py, bp32_hil.py) "FAIL <check>: detail", pytest -ra's "FAILED/ERROR <id> - msg"
+# (the test.sh lanes; a collection error's id is a bare file, no "::"), and a crash's final "SomeError: message" (a lane that dies pairing has no FAIL line at all).
+# Same pattern as tester/test-matrix.sh's step-log echo.
+_FAILURE = re.compile(r"^(FAIL |(FAILED|ERROR) \S+( - |$)|[A-Za-z_.]*(Error|Exception): )")
+_MAX_FAILURES, _MAX_LEN = 10, 300
 
 
 def last_run(verdicts_md):
@@ -40,6 +47,18 @@ def gaps(matrix_dir, logs=None):
     return found
 
 
+def failures(log):
+    """The failure lines of one lane log (capped), or [] if it's missing."""
+    try:
+        text = pathlib.Path(log).read_text(errors="replace")
+    except OSError:
+        return []
+    found = [ln.rstrip()[:_MAX_LEN] for ln in text.splitlines() if _FAILURE.match(ln)]
+    return found[:_MAX_FAILURES] + (
+        [f"... and {len(found) - _MAX_FAILURES} more"] if len(found) > _MAX_FAILURES else []
+    )
+
+
 def render(results_dir):
     """(markdown, exit code)."""
     results = pathlib.Path(results_dir)
@@ -52,12 +71,15 @@ def render(results_dir):
         )
 
     out = ["## Observer matrix", "", f"`{run[0][3:].strip()}`", ""]
-    rows, aborts, failed, logs = [], [], False, set()
+    rows, aborts, failed, logs, why = [], [], False, set(), []
     for ln in run[1:]:
         m = _VERDICT.match(ln)
         if m:
             failed |= m["verdict"] == "FAIL"
-            logs.add(f"obs-{m['obs']}-{m['profile']}-{m['lane']}-{m['pad']}.log")
+            log = f"obs-{m['obs']}-{m['profile']}-{m['lane']}-{m['pad']}.log"
+            logs.add(log)
+            if m["verdict"] == "FAIL":
+                why.append((f"{m['obs']} · {m['profile']} · {m['lane']} · {m['pad']}", log))
             icon = "✅" if m["verdict"] == "PASS" else "❌"
             detail = re.sub(r"\s*\[.*\]$", "", m["rest"])  # the VERSIONS tag
             # test.sh's status line, "== [hh:mm:ss] PASS  board/profile  37 passed,31 skipped  (40s, ...)": keep the counts
@@ -77,6 +99,14 @@ def render(results_dir):
             "",
         ]
     out += [f"> ⚠️ {a}" for a in aborts] + ([""] if aborts else [])
+
+    if why:
+        out += ["### Failures", ""]
+        for cell, log in why:
+            lines = failures(results / "matrix" / log)
+            out += [f"**{cell}** (`matrix/{log}` in the hil-results artifact)", "", "```"]
+            out += lines or ["(no FAIL line in the log -- see the lane log)"]
+            out += ["```", ""]
 
     found = gaps(results / "matrix", logs)
     if found:

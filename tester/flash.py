@@ -40,8 +40,9 @@ FLASH_LOCK = pathlib.Path(
 )
 
 
-# NVS / otadata / phy on both layouts the rig flashes (hil_runner: nvs 0x9000+0x5000, otadata 0xe000; the
-# Bluepad32 observer: nvs 0x9000+0x6000, otadata 0xf000, phy 0x11000), up to the first app offset.
+# NVS / otadata / phy on both layouts the rig flashes (hil_runner: nvs 0x9000+0x5000, otadata 0xe000, app at 0x10000;
+# the Bluepad32 observer: nvs 0x9000+0x6000, otadata 0xf000, phy 0x11000, app at 0x20000). The erase stops at the
+# bundle's app (firmware.bin) when that comes first -- the runner's -- so it never touches application bytes.
 SETTINGS_REGION = ("0x9000", "0x9000")
 
 
@@ -82,8 +83,9 @@ def main():
     ap.add_argument(
         "--wipe-settings",
         action="store_true",
-        help=f"when writing, first erase the settings region ({SETTINGS_REGION[0]}+{SETTINGS_REGION[1]}: NVS, "
-        "otadata, phy) -- for a board changing role between firmwares that lay it out differently",
+        help=f"erase the settings region ({SETTINGS_REGION[0]}+{SETTINGS_REGION[1]}, or up to the app if that's "
+        "lower: NVS -- BLE bonds --, otadata, phy) and write the bundle's images in it; done even when the app is already on the chip (only those "
+        "images are rewritten then) -- for a board changing role, or whose stored bonds are unknown",
     )
     args = ap.parse_args()
 
@@ -91,7 +93,10 @@ def main():
     chip = manifest["chip"]
     baud = args.baud or (115200 if chip in SLOW_CHIPS else 460800)
 
-    write_args, verify_args = [], []
+    write_args, verify_args, settings_args = [], [], []
+    lo = int(SETTINGS_REGION[0], 16)
+    app = [int(i["offset"], 16) for i in manifest["images"] if i["file"] == "firmware.bin"]
+    hi = min([lo + int(SETTINGS_REGION[1], 16), *(a for a in app if a > lo)])
     for img in manifest["images"]:
         path = args.bundle / img["file"]
         if not path.is_file():
@@ -100,26 +105,36 @@ def main():
         if got != img["sha256"]:
             raise SystemExit(f"sha256 mismatch for {img['file']}: {got} != {img['sha256']}")
         write_args += [img["offset"], str(path)]
+        if lo <= int(img["offset"], 16) < hi:
+            settings_args += [img["offset"], str(path)]
         if img.get("verify", True):
             verify_args += [img["offset"], str(path)]
 
     base = esptool_cmd() + ["--chip", chip, "--port", args.port, "--baud", str(baud)]
     flash_lock()
+    what = f"({chip} @ {baud})"
     if not args.force:
         # Already on the chip? verify_flash compares an on-chip digest of each region: reads only, no wear.
         r = subprocess.run(base + ["verify_flash", *verify_args], capture_output=True, text=True)
         if r.returncode == 0:
-            print(
-                "flash:",
-                manifest["board"],
-                manifest["profile"],
-                manifest["lib_describe"],
-                "already on the chip (verified) -- not rewritten",
-            )
-            return 0
+            if not args.wipe_settings:
+                print(
+                    "flash:",
+                    manifest["board"],
+                    manifest["profile"],
+                    manifest["lib_describe"],
+                    "already on the chip (verified) -- not rewritten",
+                )
+                return 0
+            # The app stays, but the wipe is still owed: a board kept on the same bundle otherwise keeps its bonds
+            # (2026-11-09: sinput gamepads left over from the previous run then failed BlueZ's fresh pairing with
+            # "GATT services never resolved"). Erase, then rewrite just the bundle's images inside the region
+            # (otadata, the observer's blank NVS) -- the write also resets the chip into the erased settings.
+            write_args = settings_args
+            what = "already on the chip (verified) -- settings wiped, app not rewritten"
     if args.wipe_settings:
         r = subprocess.run(
-            base + ["erase_region", *SETTINGS_REGION], capture_output=True, text=True
+            base + ["erase_region", hex(lo), hex(hi - lo)], capture_output=True, text=True
         )
         if r.returncode != 0:
             # Writing anyway would report success with the old settings (bonds) still in place.
@@ -135,16 +150,10 @@ def main():
         args.port,
         "--baud",
         str(baud),
-        "write_flash",
-        *write_args,
+        # "run" when there's nothing to write (no settings image in the bundle): just reboot the chip
+        *(["write_flash", *write_args] if write_args else ["run"]),
     ]
-    print(
-        "flash:",
-        manifest["board"],
-        manifest["profile"],
-        manifest["lib_describe"],
-        f"({chip} @ {baud})",
-    )
+    print("flash:", manifest["board"], manifest["profile"], manifest["lib_describe"], what)
 
     for attempt in range(1, args.retries + 1):
         r = subprocess.run(cmd)
