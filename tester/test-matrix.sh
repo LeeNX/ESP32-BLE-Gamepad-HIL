@@ -222,11 +222,12 @@ for obs in "${ROTATIONS[@]}"; do
       if [[ $rc != 0 ]]; then
         fail=1
         # Name what failed here, not just the count: the lane log is only in the hil-results artifact. Same
-        # pattern as host/hil/matrixsummary.py -- the HIL scripts' "FAIL <check>", pytest -ra's "FAILED/ERROR id".
+        # pattern as host/hil/matrixsummary.py -- the HIL scripts' "FAIL <check>", pytest -ra's "FAILED/ERROR id",
+        # and a crash's final "SomeError: message" (a lane that dies pairing has no FAIL line at all).
         while IFS= read -r why; do
           echo "    $why"
           summary+=("    $why")
-        done < <(grep -E '^(FAIL |(FAILED|ERROR) [^ ]+::)' "$log" | cut -c1-300 | head -10)
+        done < <(grep -E '^(FAIL |(FAILED|ERROR) [^ ]+::|[A-Za-z_.]*(Error|Exception): )' "$log" | cut -c1-300 | head -10)
       fi
     done
     # The two gamepad boards may have bonded with BlueZ; drop that before the next profile's descriptor.

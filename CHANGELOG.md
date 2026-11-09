@@ -35,8 +35,9 @@ What a bump means:
 - **Observer matrix names what failed.** A failed lane's verdict was only a
   count (`FAILED (1 failures of 46)`), and the check that failed was only in
   the lane log inside the `hil-results` artifact. `test-matrix.sh` now echoes
-  the lane's failure lines (`FAIL <check>`, or pytest's `FAILED`/`ERROR <id>`)
-  under its verdict in the step log, and `matrixsummary.py` adds a
+  the lane's failure lines (`FAIL <check>`, pytest's `FAILED`/`ERROR <id>`, or
+  a crash's final `SomeError: message`, e.g. a pairing that never resolved
+  GATT) under its verdict in the step log, and `matrixsummary.py` adds a
   **Failures** section to the job summary.
 
 ### Fixed
