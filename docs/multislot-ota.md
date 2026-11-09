@@ -1,11 +1,16 @@
-# Multi-slot OTA bundles (proof of concept)
+# Multi-slot OTA flashing
 
-One flash, up to three apps — DUT profiles and/or the Bluepad32 observer — each in its own OTA slot behind a shared
-bootloader and partition table. A board changes profile or role with an OTA reboot (`BOOT <n>`) instead of a
-reflash: no ~600 KB write per switch (flash wear, and ~30 s+ on the 115200-baud C3/S3), and the role is picked by a
-4 KB otadata write the chip does itself.
+Every rig board's flash holds **four apps** — the run's hil_runner profiles and the Bluepad32 observer — each in its
+own OTA slot behind a shared bootloader and partition table (`firmware/multislot/partitions.csv`).
+`tester/flash.py` treats the slots as a cache: an app already in a slot is *booted*, not written again; a new one
+is written into the least recently used slot, ~0.6 MB, never a whole board image. A board changes profile or role
+(gamepad ↔ observer) in ~1.3–8 s, and on the C3/S3 — 115200 baud — without minutes of flashing.
 
-Status: **PoC**. Nothing in CI, `test-all.sh`, `test-matrix.sh` or the release uses it yet.
+Why it matters on this rig: flash wear (each write erases whole sectors), run time (an app takes 20 s at 460800 on
+the esp32, 35 s+ on the S3's bridge at 115200), and USB churn on the Pi 3B+, whose single USB controller (shared
+with Ethernet) logs `dwc_otg_hcd_urb_dequeue` warnings — and has wedged — around esptool sessions. On the rig those
+warnings follow serial-port *sessions* (open / reset / close), not bytes: a switch over an already-wired console
+needs no esptool session at all.
 
 ## Why it works
 
@@ -13,50 +18,80 @@ Both firmwares are ESP-IDF 5.x (hil_runner on Arduino-ESP32 3.x — IDF 5.4/5.5 
 either one's bootloader boots the other's app. An app finds its partitions through the table at 0x8000 at run time,
 by label and subtype, never by a baked-in offset, and app images are relocatable across 64 KB-aligned slots (that's
 what OTA is). So an unmodified bundle's `firmware.bin` runs from any slot of a table that has the partitions it
-looks for (`nvs`, `coredump`).
+looks for (`nvs`, `coredump`). Bundles keep their own layout; `flash.py` only takes their app (and, converting a
+board, their bootloader).
 
 | | hil_runner bundle | observer bundle | multi-slot (`firmware/multislot/partitions.csv`) |
 |---|---|---|---|
 | nvs | 0x9000 +0x5000 | 0x9000 +0x6000 | 0x9000 +0x6000 |
 | otadata | 0xe000 | 0xf000 | 0xf000 |
 | phy_init | – | 0x11000 | 0x11000 |
-| apps | ota_0 0x10000, ota_1 0x150000 (1.25 MB) | factory 0x20000, ota_0/1 | ota_0 0x20000, ota_1 0x160000, ota_2 0x2a0000 (1.25 MB each) |
+| apps | ota_0 0x10000, ota_1 0x150000 (1.25 MB) | factory 0x20000, ota_0/1 | ota_0..3 at 0x20000, 0x110000, 0x200000, 0x2f0000 (960 KB each) |
 | other | spiffs, coredump 0x3f0000 | – | coredump 0x3f0000 |
 
-No factory partition: with a blank otadata the bootloader starts ota_0. Images today are 0.6–0.73 MB, under 60% of a
-slot.
+No factory partition: with a blank otadata the bootloader starts ota_0. Images today are 0.57–0.73 MB; the esp32
+observer, the largest, fills ~74% of a slot. `flash.py` refuses an image that doesn't fit.
 
-## Pieces
+## What `tester/flash.py` does
 
-- **`firmware/multislot/partitions.csv`** — the shared table.
-- **`firmware/include/hil_slots.h`** — `SLOTS?` / `BOOT <n> [WIPE]`, shared by both firmwares (hil_runner replies
-  `SLOTS …` / `OK` / `ERR <reason>`; the observer `HIL slots …` / `HIL ok boot <n>` / `HIL err <reason>`).
-  `SLOTS?` reports `running=<n> boot=<n> count=<n>` and per slot `<i>=<sha256>/<state>/<project>/<version>`; the
-  sha256 is `esp_partition_get_sha256()`, i.e. the image's appended digest, verified on the chip.
-  `BOOT` calls `esp_ota_set_boot_partition()` (which validates the image first), optionally erases NVS, restarts.
-- **`builder/make_multislot.py`** — composes a bundle from ordinary ones (slot 0 first). Before writing anything it
-  checks: source files vs their manifests' sha256s, one chip for all; the table (64 KB-aligned apps, no overlaps,
-  inside the flash size from the bootloader header, ota_0..n with no gaps, no factory, one 8 KB otadata, enough
-  slots); each image (ESP magic, chip id, XOR checksum, appended SHA-256, file length == image length, an app
-  descriptor present) and that it fits its slot. Writes `bootloader.bin` (from slot 0's bundle by default),
-  `partitions.bin` (byte-identical to ESP-IDF `gen_esp32part.py`), `otadata.bin` (`--boot <n>`; otatool's crc),
-  `nvs_blank.bin`, `slot<i>.bin`, and a manifest `tester/flash.py` flashes as is, plus a `slots` list (role, profile,
-  source bundle, size, headroom, `image_sha256`, IDF version). otadata and NVS are `verify: false`, so a re-flash of
-  the same bundle after slot switches is still "already on the chip" — no rewrite.
-- **`tester/slot.py`** — `list`, `verify` (exit 1 unless every slot's on-chip digest matches the manifest),
-  `boot <n> [--wipe] [--via serial|esptool]`. It refuses to boot a slot whose digest isn't the bundle's, then polls
-  `SLOTS?` until the new image answers and checks it runs slot n with every digest intact. `--via esptool` writes
-  only the 8 KB otadata, for a slot whose firmware doesn't answer.
+Multi-slot is the default (`HIL_MULTISLOT=0` or `--no-multislot`: the legacy whole-bundle flash; a composed
+multi-slot bundle from `builder/make_multislot.py` is also flashed the legacy way). Given a bundle, `--port` (esptool)
+and `--console-port` (the firmware's console, `hil_config` `[board.*].port` — test.sh, conftest.py and test-matrix.sh
+pass it):
 
-```sh
-builder/build.sh --boards esp32dev2 --profiles "default sinput"
-builder/build-observers.sh --boards esp32dev2
-builder/make_multislot.py bundles/esp32dev2-default-<sha> bundles/matrix/esp32dev2-sinput-<sha> \
-    bundles/matrix/esp32dev2-bp32obs-<sha>-<rig>            # -> bundles/multislot/esp32dev2-ms-…
-tester/flash.py bundles/multislot/esp32dev2-ms-… --port $P --force
-tester/slot.py bundles/multislot/esp32dev2-ms-… --port $P verify
-tester/slot.py bundles/multislot/esp32dev2-ms-… --port $P boot 2 --wipe    # become the observer
-```
+1. **Console.** Ask the running firmware `SLOTS?`: the running / next-boot slot and every slot's image SHA-256,
+   digested on the chip. The bundle's app is in slot *n* → `BOOT <n>` (with `WIPE` when the settings must go) and
+   wait until `SLOTS?` reports slot *n* running with that digest. No esptool, no bulk transfer — on the C3 not even
+   its native USB port is touched. Even "already running" restarts the chip, as a legacy flash's esptool reset did.
+2. **esptool verify** (no console, an old firmware that doesn't know `SLOTS?`, or a miss): one `verify_flash`
+   session checks the partition table and the app against every slot (MD5 on the chip, reads only).
+   - table ours, app in slot *n* → write only otadata (8 KB) selecting *n*;
+   - table ours, app nowhere (or `--force`) → write the app into the least recently used slot, plus otadata;
+   - table not ours (a legacy-flashed or erased board) → **convert**: bundle's bootloader, the multi-slot table, a
+     blank otadata and NVS, the app in slot 0. A legacy flash later (an older rig commit) simply converts it back.
+3. With a console, check after an esptool write that the board runs that slot with that digest.
+
+`--wipe-settings` erases just the nvs partition here (BLE bonds), never otadata. An observer bundle, which carries a
+blank NVS image, gets it whenever it is switched to from another app — as the legacy flash wrote it with the app.
+
+What each slot holds and when it was last used is recorded per esptool port in
+`~/.cache/esp32-hil/slots/<port>.json` (`$HIL_SLOT_STATE_DIR`): it picks the slot to evict and labels
+`slot.py list`. It is only a hint — a slot is trusted after an on-chip digest, and the record is corrected from what
+the chip says.
+
+## Reporting
+
+- `flash.py` prints `flash: <board> <profile> <lib> -> slot <n> (switched via console, 0 B written)` and a
+  machine line `flash-slot: <slot> <action> <method> <bytes>`; actions are `reboot`, `switch`, `write`, `convert`
+  (legacy: `unchanged`, `written`, `wiped`).
+- `$HIL_FLASH_RECORD` gets that as JSON (test.sh: `results/flash-<board>-<profile>.json`), `$HIL_FLASH_LOG` one line
+  per flash (`results/flash-log.jsonl`, `results/matrix/flash-log.jsonl`).
+- The run summary (`hil.summarize`) has a **flash** column — `slot 2 · switch (console)`, `slot 1 · write 617 KB` —
+  and a totals line: flashes by action, how many went over the console, bytes written. The matrix summary
+  (`hil.matrixsummary`) adds a **Slot** column per lane (`pad 1 (switch) · obs 3 (reboot)`, from the verdict line's
+  `slots=` field) and the same totals line.
+
+## Reproducible images
+
+A cache only pays if the same source builds the same image. `builder/build.sh` sets `SOURCE_DATE_EPOCH` (GCC's
+`__DATE__` / `__TIME__`, i.e. `ID?`'s `built=`) to the newer of the library HEAD and the last `firmware/` commit, and
+`builder/build-observers.sh` versions the observer by its own source commit (`firmware/observer`, `firmware/include`,
+the script) instead of the rig HEAD. Two clean hil_runner builds a minute apart are byte-identical; a CI re-run, or
+a rig PR that doesn't touch firmware, finds every image already in a slot.
+
+## Tools for a person at the rig
+
+- `tester/slot.py --port <console> list | verify <bundle>... | boot <n> [--wipe]` — over the console, no esptool.
+- `builder/make_multislot.py <bundle>...` — compose one bundle with apps in fixed slots (the PoC route; flashes as
+  is with `flash.py`). It checks chip, image integrity (XOR checksum, appended SHA-256, exact length), slot fit and
+  the table first, and its `partitions.bin` is byte-identical to ESP-IDF `gen_esp32part.py`'s.
+
+## Firmware side
+
+`firmware/include/hil_slots.h`, shared by both firmwares: `SLOTS?` → `running=<n> boot=<n> count=<n>
+<i>=<sha256>/<state>/<project>/<version> …` (or `<i>=empty`); `BOOT <n> [WIPE]` →
+`esp_ota_set_boot_partition()` (which validates the image), optional NVS erase, restart. hil_runner replies
+`SLOTS …` / `OK` / `ERR <reason>`, the observer `HIL slots …` / `HIL ok boot <n>` / `HIL err <reason>`.
 
 ## Rollback
 
@@ -64,28 +99,27 @@ Both bootloaders have `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`. `BOOT` from a rol
 as *new*; the bootloader starts it as *pending-verify*; unless the app then marks itself valid, the **next reset
 returns to the previous slot**. Arduino-ESP32 3.x does this in `initArduino()`. The observer didn't (its factory app
 never needed to) — it now calls `esp_ota_mark_app_valid_cancel_rollback()` once Bluetooth is up, so an observer
-image that never gets Bluetooth going is rolled back. An observer bundle older than this change put in a slot would
-be rolled back on its second boot. `--via esptool` writes the entry with an undefined state: a plain boot, no
-pending-verify.
+image that never gets Bluetooth going is rolled back. An observer image older than this change, switched to with
+`BOOT`, would be rolled back on its second boot. An esptool otadata write leaves the entry's state undefined: a
+plain boot, no pending-verify.
 
-## Caveats / open points
+## Caveats
 
 - **Shared NVS.** All slots use the one `nvs` partition. NimBLE's bonds and BTstack's keys live in different
-  namespaces, but DUT profiles all use NimBLE's — today each profile is "a distinct host bond" per flash. Use
-  `BOOT <n> WIPE` (or `flash.py --wipe-settings`) on a profile or role change, as the rig does now.
+  namespaces, but every DUT profile uses NimBLE's. The rig wipes on a role change (test-matrix.sh) and the
+  observer drops its keys at boot anyway; between hil_runner profiles nothing is wiped — as before.
 - **Identity.** Every runner image's app descriptor says `arduino-lib-builder` + the core's version, so slots are
-  told apart by digest (manifest `slots[].image_sha256`) — `ID?` / `CONFIG?` after the switch still give the profile
-  and libsha.
-- **One board name per image.** A slot keeps the name it was built with; mixed-board bundles are allowed (with a
-  note) but rarely what you want.
-- **Bundle provenance.** `CONFIG?`'s `libsha=` check (conftest.py `dut` fixture) still applies per slot; a
-  multi-slot bundle's manifest has `lib_sha` empty at the top level, with per-slot `lib_sha`.
-- **First flash** must write the whole bundle (`--force`): it replaces the old layout (whose otadata at 0xe000 now
-  sits inside nvs, which the blank NVS image overwrites). The coredump partition isn't erased.
-- **Wear.** A switch erases and writes one 4 KB otadata sector (the two sectors alternate) and, with WIPE, the 24 KB
-  NVS; a reflash writes ~0.6–2.5 MB.
+  told apart by digest; `ID?` / `CONFIG?` (and the `libsha=` check in conftest.py's `dut` fixture) still say which
+  profile and library build is running.
+- **Older images** (built before `SLOTS?`) still go into a slot; `flash.py` then uses esptool for that board (their
+  console doesn't answer `SLOTS?`) and skips the after-write console check.
+- **4 MB flash** assumed (every rig board). The coredump partition isn't erased on conversion.
+- **Wear.** A console switch erases one 4 KB otadata sector (the two alternate); an esptool switch writes both
+  (8 KB); `WIPE` adds the 24 KB NVS. A legacy flash wrote 0.6–0.7 MB per app, every time the app changed.
 
-## Results (2026-11-09, rig esp32dev2 — ESP32-D0WD-V3 rev 3.1, CP2102, 4 MB)
+## PoC results (2026-11-09, the first 3 × 1.25 MB layout, composed bundles + `slot.py`)
+
+### esp32dev2 — ESP32-D0WD-V3 rev 3.1, CP2102, 4 MB
 
 Bundle: slot 0 `default` (629 KB, 48% of the slot), slot 1 `sinput` (630 KB, 48%), slot 2 `bp32obs` (725 KB, 55%);
 hil_runner built on Arduino-ESP32 3.x / IDF 5.5.5, observer IDF 5.5.5; bootloader from slot 0's bundle.
@@ -139,12 +173,3 @@ Lessons from the run, already folded in:
 
 So: switching costs ~2 s (DUT) / ~8 s (observer) and one 4 KB otadata sector, against 20–22 s and ~0.6–0.7 MB of
 flash writes per app on esp32dev at 460800 — and several times that on the 115200-baud C3/S3.
-
-## Next steps (not done)
-
-1. CI/test wiring: let `test-all.sh` / `test-matrix.sh` take a multi-slot bundle and `slot.py boot` between profiles
-   or roles instead of `flash.py` per bundle (and keep the `CONFIG?` libsha check per slot).
-2. A builder entry point (`build.sh --multislot "default specials bp32obs"`?) instead of hand-composing.
-3. ~~Try the C3/S3~~ — done, above.
-4. Decide whether the observer's `sdkconfig.defaults` should move to the multi-slot table outright (one layout for
-   every bundle), or keep both layouts.
