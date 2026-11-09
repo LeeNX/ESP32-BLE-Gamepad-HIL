@@ -111,16 +111,21 @@ class Bluepad32:
                 self.log.append(line)
                 if not line.startswith("HIL "):
                     continue
-                if line.startswith("HIL state"):
-                    self.state = {k: int(v, 0) for k, v in re.findall(r"(\w+)=(-?\w+)", line)}
-                elif line.startswith("HIL ready"):
-                    self.ready = line
-                elif line.startswith("HIL features"):
-                    self.features = (
-                        {k: int(v, 0) for k, v in re.findall(r"(\w+)=(\w+)", line)}
-                        if "none" not in line
-                        else None
-                    )
+                # A line torn by the observer's reset ("... dpad=0x0ESP-ROM:esp32c3-...", 2026-11-09) doesn't parse:
+                # skip it -- an exception here would kill this reader thread and fail every later check of the lane.
+                try:
+                    if line.startswith("HIL state"):
+                        self.state = {k: int(v, 0) for k, v in re.findall(r"(\w+)=(-?\w+)", line)}
+                    elif line.startswith("HIL ready"):
+                        self.ready = line
+                    elif line.startswith("HIL features"):
+                        self.features = (
+                            {k: int(v, 0) for k, v in re.findall(r"(\w+)=(\w+)", line)}
+                            if "none" not in line
+                            else None
+                        )
+                except ValueError:
+                    continue
 
     def release_reset(self):
         self.ser.rts = False

@@ -84,14 +84,16 @@ export HIL_RUN_WHAT="${HIL_RUN_WHAT:-$what}"
 rig_lock_acquire "${LOCK_ARGS[@]}" || exit $?
 
 mkdir -p results
+# Every flash of the run -- this script's, conftest.py's (pytest flashes the bundle again), a retry's -- appended to one
+# log for the summary's flash totals (hil.summarize).
+export HIL_FLASH_LOG="${HIL_FLASH_LOG:-$PWD/results/flash-log.jsonl}"
 flash_elapsed=0
 if [[ $FLASH == 1 ]]; then
   say "flash (esptool)"
   flash_start=$(date +%s)
   # --console-port: a multi-slot board whose slots already hold this app switches over the console -- no esptool.
   # HIL_FLASH_RECORD: what flash.py did (slot, action, bytes written), for the run summary (hil.summarize).
-  # HIL_FLASH_LOG: every flash of the run appended (a retry's too), for the summary's totals.
-  HIL_FLASH_RECORD="results/flash-${BOARD}-${PROFILE}.json" HIL_FLASH_LOG="${HIL_FLASH_LOG:-results/flash-log.jsonl}" \
+  HIL_FLASH_RECORD="results/flash-${BOARD}-${PROFILE}.json" \
     "$VENV/bin/python" tester/flash.py "$BUNDLE" --port "$FLASH_PORT" --console-port "$PORT"
   flash_elapsed=$(( $(date +%s) - flash_start ))
 fi
