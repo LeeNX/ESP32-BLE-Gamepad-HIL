@@ -18,9 +18,9 @@ _VERDICT = re.compile(
 )
 
 # The HIL scripts' (sinput_hil.py, bp32_hil.py) "FAIL <check>: detail", pytest -ra's "FAILED/ERROR <id> - msg"
-# (the test.sh lanes), and a crash's final "SomeError: message" (a lane that dies pairing has no FAIL line at all).
+# (the test.sh lanes; a collection error's id is a bare file, no "::"), and a crash's final "SomeError: message" (a lane that dies pairing has no FAIL line at all).
 # Same pattern as tester/test-matrix.sh's step-log echo.
-_FAILURE = re.compile(r"^(FAIL |(FAILED|ERROR) \S+::|[A-Za-z_.]*(Error|Exception): )")
+_FAILURE = re.compile(r"^(FAIL |(FAILED|ERROR) \S+( - |$)|[A-Za-z_.]*(Error|Exception): )")
 _MAX_FAILURES, _MAX_LEN = 10, 300
 
 

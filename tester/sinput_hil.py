@@ -412,10 +412,12 @@ def driver_checks(dev):
     mapped_optional, click_bad = 0, []
     for press, release, bit in presses:
         cmd(press)
-        # A bit with a known key polls until it lands (and the previous release with it); a late press over one
+        # A bit with an expected key polls until it lands (and the previous release with it); a late press over one
         # 400 ms read failed the whole check (2026-11-09: PRESS 5 -> [] on esp32c3, fine in raw and the cycles).
-        # Optional/unmapped bits must wait out the window to tell "nothing" from "not yet".
-        want = DRIVER_KEY.get(bit)
+        # Optional bits poll for their key too, so a late one isn't misread as unmapped (a silent GAP): only a bit
+        # the driver really doesn't map pays the full 2 s. A bit that must produce nothing (touchpad 2's click)
+        # waits out 400 ms to tell "nothing" from "not yet".
+        want = DRIVER_KEY.get(bit, DRIVER_KEY_OPTIONAL.get(bit))
         click = bool(TOUCHPAD_CLICK_BITS.get(bit) and touch)
         settle(
             pad,

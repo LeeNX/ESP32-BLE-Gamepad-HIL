@@ -35,19 +35,23 @@ What a bump means:
 - **Observer matrix names what failed.** A failed lane's verdict was only a
   count (`FAILED (1 failures of 46)`), and the check that failed was only in
   the lane log inside the `hil-results` artifact. `test-matrix.sh` now echoes
-  the lane's failure lines (`FAIL <check>`, pytest's `FAILED`/`ERROR <id>`, or
-  a crash's final `SomeError: message`, e.g. a pairing that never resolved
-  GATT) under its verdict in the step log, and `matrixsummary.py` adds a
-  **Failures** section to the job summary.
+  the lane's failure lines (`FAIL <check>`, pytest's `FAILED`/`ERROR <id>`
+  including collection errors, or a crash's final `SomeError: message`, e.g. a
+  pairing that never resolved GATT) under its verdict in the step log, and
+  `matrixsummary.py` adds a **Failures** section to the job summary. Lane logs
+  are grepped with `-a`, so observer console noise (a NUL byte) can't make
+  grep treat one as binary and print nothing.
 
 ### Fixed
 
 - **`sinput_hil.py` driver button check flake.** Each press was read once after
   a fixed 400 ms, so one late press failed the whole 30-button check
   (`bit 10 (PRESS 5)->[]` on esp32c3, while the raw-report and reload-cycle
-  checks in the same lane passed). Bits with a known key now poll until it
-  lands (up to 2 s), like the axis/IMU checks since 0.4.1; optional and
-  unmapped bits still wait out the 400 ms window.
+  checks in the same lane passed). Bits with an expected key -- the optional
+  paddle/power/misc ones included, so a late one isn't recorded as an
+  unmapped GAP -- now poll until it lands (up to 2 s), like the axis/IMU
+  checks since 0.4.1; only touchpad 2's click, which must produce nothing,
+  still waits out the 400 ms window.
 - **`bp32_hil.py` observer command lost on the console.** `led 4` got no
   `HIL ok` within 3 s and the gamepad never saw it (still on LED 3), while
   every other command in the run went through: the observer's BTstack UART

@@ -213,9 +213,9 @@ for obs in "${ROTATIONS[@]}"; do
       IFS=: read -r name board rc <<<"$lane"
       log="$OUT/$tag-$name-$board.log"
       verdict=$([[ $rc == 0 ]] && echo PASS || echo FAIL)
-      result=$(grep -E "^(PASSED|FAILED)|passed|failed" "$log" | tail -1)
-      gaps=$(grep -c "^GAP " "$log")
-      vers=$(grep -m1 "^VERSIONS " "$log" | cut -d' ' -f2-)
+      result=$(grep -aE "^(PASSED|FAILED)|passed|failed" "$log" | tail -1)
+      gaps=$(grep -ac "^GAP " "$log")
+      vers=$(grep -am1 "^VERSIONS " "$log" | cut -d' ' -f2-)
       line="$verdict observer=$obs profile=$p lane=$name gamepad=$board rc=$rc gaps=$gaps  $result${vers:+  [$vers]}"
       echo "$line" | tee -a "$VERDICTS"
       summary+=("$line")
@@ -223,11 +223,12 @@ for obs in "${ROTATIONS[@]}"; do
         fail=1
         # Name what failed here, not just the count: the lane log is only in the hil-results artifact. Same
         # pattern as host/hil/matrixsummary.py -- the HIL scripts' "FAIL <check>", pytest -ra's "FAILED/ERROR id",
-        # and a crash's final "SomeError: message" (a lane that dies pairing has no FAIL line at all).
+        # and a crash's final "SomeError: message" (a lane that dies pairing has no FAIL line at all). -a on every
+        # grep of a lane log: observer console noise (a NUL) makes grep call it binary and print no lines.
         while IFS= read -r why; do
           echo "    $why"
           summary+=("    $why")
-        done < <(grep -E '^(FAIL |(FAILED|ERROR) [^ ]+::|[A-Za-z_.]*(Error|Exception): )' "$log" | cut -c1-300 | head -10)
+        done < <(grep -aE '^(FAIL |(FAILED|ERROR) [^ ]+( - |$)|[A-Za-z_.]*(Error|Exception): )' "$log" | cut -c1-300 | head -10)
       fi
     done
     # The two gamepad boards may have bonded with BlueZ; drop that before the next profile's descriptor.
