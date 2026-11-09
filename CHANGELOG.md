@@ -55,6 +55,14 @@ What a bump means:
   once when the observer doesn't ack it, and print what the observer said
   instead. The observer reader keeps every line, not only `HIL ...` ones, so a
   garbled line shows up in that note.
+- **`flash.py --wipe-settings` skipped the wipe on an unchanged board.** When
+  the bundle was already on the chip, `flash.py` returned before the erase, so
+  `test-matrix.sh`'s "wipe each board's settings on its first flash of the run"
+  silently kept the bonds of whatever ran before. A rig run of the sinput
+  matrix right after CI's (boards still on sinput) failed 3 of 4 BlueZ lanes
+  while pairing, every one a gamepad that kept its NVS. The wipe now happens
+  either way; with the app already there only the bundle's images inside the
+  settings region (otadata, the observer's blank NVS) are rewritten.
 
 ## [0.4.1] — 2026-11-02
 
