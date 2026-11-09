@@ -94,7 +94,8 @@ flash() {  # <board> <bundle>
   local out rc fam method wipe=()
   fam=$([[ $2 == *-bp32obs-* ]] && echo observer || echo runner)
   [[ ${FAMILY[$1]:-} != "$fam" ]] && wipe=(--wipe-settings)
-  out=$("$PY" tester/flash.py "$2" --port "$(flash_port "$1")" --console-port "$(port "$1")" "${wipe[@]}" 2>&1)
+  out=$(HIL_FLASH_LOG="$OUT/flash-log.jsonl" \
+    "$PY" tester/flash.py "$2" --port "$(flash_port "$1")" --console-port "$(port "$1")" "${wipe[@]}" 2>&1)
   rc=$?
   grep '^flash:' <<<"$out" | tail -1
   if ((rc != 0)); then
@@ -153,6 +154,7 @@ unbond() {
 
 OUT=results/matrix
 mkdir -p "$OUT"
+rm -f "$OUT/flash-log.jsonl"  # this run's flashes only (host/hil/matrixsummary.py totals them)
 VERDICTS=results/matrix-verdicts.md
 echo "## matrix $(date -u +%FT%TZ) rotations=${ROTATIONS[*]} profiles=${PROFILES[*]} lanes=$LANES" >> "$VERDICTS"
 fail=0

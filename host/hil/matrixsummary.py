@@ -12,6 +12,11 @@ import pathlib
 import re
 import sys
 
+try:
+    from hil.summarize import flash_totals
+except ImportError:  # run as a script (hil.yml: python3 host/hil/matrixsummary.py results/)
+    from summarize import flash_totals
+
 _VERDICT = re.compile(
     r"^(?P<verdict>PASS|FAIL) observer=(?P<obs>\S+) profile=(?P<profile>\S+) lane=(?P<lane>\S+) "
     r"gamepad=(?P<pad>\S+) rc=\S+ gaps=(?P<gaps>\d+)(?: slots=(?P<slots>\S+))?\s*(?P<rest>.*)$"
@@ -113,6 +118,10 @@ def render(results_dir):
             "",
         ]
     out += [f"> ⚠️ {a}" for a in aborts] + ([""] if aborts else [])
+    # the suite summary's flash line, over the matrix's own flash log
+
+    totals = flash_totals([results / "matrix" / "x"])
+    out += [totals, ""] if totals else []
 
     if why:
         out += ["### Failures", ""]
