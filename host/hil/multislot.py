@@ -347,6 +347,20 @@ def save_state(port, slots):
 
 
 def pick_victim(state, nslots, keep=()):
-    """Slot to overwrite: one the state knows nothing about first, else the least recently used; never one in keep."""
+    """Slot to overwrite, never one in keep: a second copy of an image another slot also holds first (the copy used
+    least recently goes), then a slot the record knows nothing about (empty, or garbage from another layout), then the
+    least recently used. Rig, 2026-11-09: without the duplicate rule a board holding the observer twice evicted the
+    profile the run needed next, and wrote it back a minute later."""
     cands = [i for i in range(nslots) if i not in keep] or list(range(nslots))
-    return min(cands, key=lambda i: (i in state, state.get(i, {}).get("used", 0), i))
+
+    def used(i):
+        return state.get(i, {}).get("used", 0)
+
+    def dup(i):
+        sha = state.get(i, {}).get("sha256")
+        return bool(sha) and any(
+            j != i and state.get(j, {}).get("sha256") == sha and (used(j), j) > (used(i), i)
+            for j in state
+        )
+
+    return min(cands, key=lambda i: (not dup(i), i in state, used(i), i))

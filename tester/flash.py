@@ -268,9 +268,6 @@ def multislot(args, manifest, base, rec):
 
     def done(slot, action, method, nbytes, wipe):
         now = time.time()
-        for k, v in list(state.items()):
-            if v.get("sha256") == want and k != slot:
-                del state[k]  # the same image can only be in one slot as far as eviction goes
         state[slot] = {
             "sha256": want,
             "label": label,
@@ -307,7 +304,15 @@ def multislot(args, manifest, base, rec):
                     if not v:
                         state.pop(k, None)
                     elif state.get(k, {}).get("sha256") != v["sha256"]:
-                        state[k] = {"sha256": v["sha256"], "label": "?", "used": 0}
+                        # Learned from the chip, not put there by us: label it from another slot with that image.
+                        twin = next(
+                            (s for s in state.values() if s.get("sha256") == v["sha256"]), {}
+                        )
+                        state[k] = {
+                            "sha256": v["sha256"],
+                            "label": twin.get("label", "?"),
+                            "used": 0,
+                        }
                 hits = [k for k, v in known["slots"].items() if v and v["sha256"] == want]
                 if hits:
                     slot = known.get("running") if known.get("running") in hits else hits[0]
