@@ -62,10 +62,9 @@ What a bump means:
 - **`flash.py --wipe-settings` skipped the wipe on an unchanged board.** When
   the bundle was already on the chip, `flash.py` returned before the erase, so
   `test-matrix.sh`'s "wipe each board's settings on its first flash of the run"
-  silently kept the bonds of whatever ran before. A rig run of the sinput
-  matrix right after CI's (boards still on sinput) failed 3 of 4 BlueZ lanes
-  while pairing, every one a gamepad that kept its NVS. The wipe now happens
-  either way; with the app already there only the bundle's images inside the
+  silently kept the bonds of whatever ran before (found while chasing BlueZ
+  pairing failures that turned out to be a degraded rig -- a reboot fixed
+  those). The wipe now happens either way; with the app already there only the bundle's images inside the
   settings region (otadata, the observer's blank NVS) are rewritten. The
   erased region now ends at the bundle's app when that comes first: the
   runner's app starts at 0x10000, inside the fixed 0x9000+0x9000, so every
