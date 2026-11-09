@@ -44,6 +44,13 @@ What a bump means:
 
 ### Fixed
 
+- **CI only forwarded `HIL_LED_PIN_ESP32DEV`.** `hil.yml`'s build step mapped
+  that one repo Variable/Secret, so `HIL_LED_PIN_ESP32C3` never reached
+  `builder/build.sh`: the LED compiled out and `test_diagnostics` skipped with
+  "HIL_LED_PIN not wired/configured for this board". The step now forwards
+  `HIL_LED_PIN_<BOARD>` and `HIL_CONN_LED_PIN_<BOARD>` for every board in
+  `hil_config.toml` (esp32dev, esp32dev2, esp32c3, esp32s3), so wiring an LED
+  later only needs the Variable. Unset ones are no-ops.
 - **`sinput_hil.py` driver button check flake.** Each press was read once after
   a fixed 400 ms, so one late press failed the whole 30-button check
   (`bit 10 (PRESS 5)->[]` on esp32c3, while the raw-report and reload-cycle

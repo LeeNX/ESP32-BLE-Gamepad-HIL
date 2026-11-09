@@ -156,10 +156,18 @@ jobs:
       - name: Build firmware bundles
         env:
           # Status LED GPIOs (docs/rig-hardware.md) -- repo Variables or
-          # Secrets, either works (`||` skips an unset/empty one). Add one
-          # line per board/LED as they get wired; unset -> that LED compiles
-          # out only when the env var and board config are both unset.
+          # Secrets, either works (`||` skips an unset/empty one). Every
+          # [board.*] in hil_config.toml is listed, so wiring an LED only needs
+          # the Variable; add a board here when you add it there. Unset/empty ->
+          # build.sh falls back to board config, else that LED compiles out.
           HIL_LED_PIN_ESP32DEV: ${{ vars.HIL_LED_PIN_ESP32DEV || secrets.HIL_LED_PIN_ESP32DEV || '' }}
+          HIL_LED_PIN_ESP32DEV2: ${{ vars.HIL_LED_PIN_ESP32DEV2 || secrets.HIL_LED_PIN_ESP32DEV2 || '' }}
+          HIL_LED_PIN_ESP32C3: ${{ vars.HIL_LED_PIN_ESP32C3 || secrets.HIL_LED_PIN_ESP32C3 || '' }}
+          HIL_LED_PIN_ESP32S3: ${{ vars.HIL_LED_PIN_ESP32S3 || secrets.HIL_LED_PIN_ESP32S3 || '' }}
+          HIL_CONN_LED_PIN_ESP32DEV: ${{ vars.HIL_CONN_LED_PIN_ESP32DEV || secrets.HIL_CONN_LED_PIN_ESP32DEV || '' }}
+          HIL_CONN_LED_PIN_ESP32DEV2: ${{ vars.HIL_CONN_LED_PIN_ESP32DEV2 || secrets.HIL_CONN_LED_PIN_ESP32DEV2 || '' }}
+          HIL_CONN_LED_PIN_ESP32C3: ${{ vars.HIL_CONN_LED_PIN_ESP32C3 || secrets.HIL_CONN_LED_PIN_ESP32C3 || '' }}
+          HIL_CONN_LED_PIN_ESP32S3: ${{ vars.HIL_CONN_LED_PIN_ESP32S3 || secrets.HIL_CONN_LED_PIN_ESP32S3 || '' }}
         run: |
           cat > hil_config.local.toml <<EOF
           [rig]
