@@ -88,7 +88,11 @@ flash_elapsed=0
 if [[ $FLASH == 1 ]]; then
   say "flash (esptool)"
   flash_start=$(date +%s)
-  "$VENV/bin/python" tester/flash.py "$BUNDLE" --port "$FLASH_PORT"
+  # --console-port: a multi-slot board whose slots already hold this app switches over the console -- no esptool.
+  # HIL_FLASH_RECORD: what flash.py did (slot, action, bytes written), for the run summary (hil.summarize).
+  # HIL_FLASH_LOG: every flash of the run appended (a retry's too), for the summary's totals.
+  HIL_FLASH_RECORD="results/flash-${BOARD}-${PROFILE}.json" HIL_FLASH_LOG="${HIL_FLASH_LOG:-results/flash-log.jsonl}" \
+    "$VENV/bin/python" tester/flash.py "$BUNDLE" --port "$FLASH_PORT" --console-port "$PORT"
   flash_elapsed=$(( $(date +%s) - flash_start ))
 fi
 # Overwritten every attempt -- test-all.sh's retry_run reads these right after

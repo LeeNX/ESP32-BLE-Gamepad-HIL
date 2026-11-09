@@ -86,6 +86,18 @@ LIB_SHA_SHORT=$(git -C "$LIB_DIR" rev-parse --short=8 HEAD 2>/dev/null || echo u
 LIB_SHA_SHORT=${LIB_SHA_SHORT:0:8}
 export PLATFORMIO_BUILD_FLAGS="${PLATFORMIO_BUILD_FLAGS:-} -DHIL_LIB_SHA='\"${LIB_SHA_SHORT}\"'"
 
+# Reproducible images: GCC takes __DATE__ / __TIME__ (hil_runner's ID? "built=") from SOURCE_DATE_EPOCH, so the
+# same library + firmware source builds byte-identical -- and tester/flash.py finds it already in a multi-slot
+# board's slots (a re-run, a rig change that doesn't touch firmware/) instead of writing it again. The newer of the
+# library HEAD and the last firmware/ commit here; an explicit $SOURCE_DATE_EPOCH wins.
+if [[ -z "${SOURCE_DATE_EPOCH:-}" ]]; then
+  lib_t=$(git -C "$LIB_DIR" log -1 --format=%ct 2>/dev/null || echo 0)
+  fw_t=$(git log -1 --format=%ct -- firmware/src firmware/include firmware/platformio.ini 2>/dev/null || echo 0)
+  SOURCE_DATE_EPOCH=$(( lib_t > fw_t ? lib_t : fw_t ))
+fi
+export SOURCE_DATE_EPOCH
+echo "== SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH ($(date -u -r "$SOURCE_DATE_EPOCH" +%FT%TZ 2>/dev/null || date -u -d "@$SOURCE_DATE_EPOCH" +%FT%TZ))"
+
 # Status LED GPIOs, per board (docs/rig-hardware.md, hil_config.toml
 # [board.*].led_pin/.conn_led_pin comments, README "Rig hardware TODO"):
 # $HIL_LED_PIN_<BOARD> / $HIL_CONN_LED_PIN_<BOARD> (uppercased, e.g.

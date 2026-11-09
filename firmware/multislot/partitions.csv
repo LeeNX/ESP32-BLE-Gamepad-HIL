@@ -1,12 +1,15 @@
-# Multi-slot layout (PoC, docs/multislot-ota.md): three OTA app slots on a 4 MB flash, shared by hil_runner and the
-# Bluepad32 observer, so a board changes profile or role with an OTA reboot (BOOT <n>) instead of a reflash.
+# Multi-slot layout (docs/multislot-ota.md): four OTA app slots on a 4 MB flash, shared by hil_runner and the
+# Bluepad32 observer, so a board keeps a run's profiles and the observer side by side and changes profile or role
+# with an OTA reboot instead of a reflash (tester/flash.py treats the slots as a cache).
 # No factory app: with a blank otadata the bootloader starts ota_0. nvs/otadata/phy_init sit where the observer's
-# layout has them, so tester/flash.py's settings region (0x9000+0x9000) still covers them.
+# layout has them, so tester/flash.py's legacy settings region (0x9000+0x9000) still covers them.
+# 960 KB a slot: today's images are 0.57-0.73 MB (the esp32 observer the largest, ~74%).
 # Name,   Type, SubType,  Offset,   Size
 nvs,      data, nvs,      0x9000,   0x6000
 otadata,  data, ota,      0xf000,   0x2000
 phy_init, data, phy,      0x11000,  0x1000
-ota_0,    app,  ota_0,    0x20000,  0x140000
-ota_1,    app,  ota_1,    0x160000, 0x140000
-ota_2,    app,  ota_2,    0x2a0000, 0x140000
+ota_0,    app,  ota_0,    0x20000,  0xf0000
+ota_1,    app,  ota_1,    0x110000, 0xf0000
+ota_2,    app,  ota_2,    0x200000, 0xf0000
+ota_3,    app,  ota_3,    0x2f0000, 0xf0000
 coredump, data, coredump, 0x3f0000, 0x10000

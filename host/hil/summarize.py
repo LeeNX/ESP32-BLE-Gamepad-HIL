@@ -28,6 +28,11 @@ failed attempt is overwritten by the eventual pass, not merged into the junit.
 accumulated across every attempt this run) if one exists, else it just equals
 test time.
 
+The "flash" column is what tester/flash.py did for that bundle's last flash -- which multi-slot OTA slot it runs from
+and how it got there (switch / reboot over the console, write, convert; or a legacy write) -- read from a sidecar
+`flash-<board>-<profile>.json` (tester/test.sh's HIL_FLASH_RECORD); a line under the table totals every flash of the
+run from `flash-log.jsonl` (HIL_FLASH_LOG, retries included) and the bytes they wrote.
+
 Pass --run-seconds <n> (tester/test-all.sh does, from its own start-of-batch
 timer) to also print a footer comparing that wall-clock total against the sum
 of every bundle's wall time -- a sanity check, not an identity: --by-board
@@ -37,6 +42,7 @@ batch's own wall clock there.
 Exit status is 1 if any test failed, else 0.
 """
 
+import json
 import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict
@@ -118,6 +124,58 @@ def _retries(path, board, profile):
         return 0
 
 
+def _flash(path, board, profile):
+    """tester/flash.py's record of this bundle's (last) flash -- flash-<board>-<profile>.json -- or None."""
+    try:
+        return json.loads((Path(path).parent / f"flash-{board}-{profile}.json").read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def _flash_cell(rec):
+    """`slot 2 · switch` / `slot 1 · write 617 KB` / `written 640 KB` (legacy) / "–" (no record)."""
+    if not rec:
+        return "–"
+    action = rec.get("action", "?")
+    n = rec.get("bytes_written") or 0
+    size = f" {_size(n)}" if action in ("write", "convert", "written", "wiped") and n else ""
+    slot = rec.get("slot")
+    where = f"slot {slot} · " if slot is not None else ""
+    via = " (console)" if rec.get("method") == "console" else ""
+    return f"{where}{action}{size}{via}"
+
+
+def _size(n):
+    return f"{n / 1e6:.1f} MB" if n >= 1e6 else f"{n / 1e3:.0f} KB"
+
+
+def flash_totals(paths):
+    """One line over every flash of the run (results/flash-log.jsonl next to the junit files), or ""."""
+    dirs = {Path(p).parent for p in paths}
+    recs = []
+    for d in dirs:
+        try:
+            recs += [
+                json.loads(ln)
+                for ln in (d / "flash-log.jsonl").read_text().splitlines()
+                if ln.strip()
+            ]
+        except (OSError, ValueError):
+            continue
+    if not recs:
+        return ""
+    by = defaultdict(int)
+    for r in recs:
+        by[r.get("action", "?")] += 1
+    written = sum(r.get("bytes_written") or 0 for r in recs)
+    console = sum(1 for r in recs if r.get("method") == "console")
+    parts = [f"{v} {k}" for k, v in sorted(by.items())]
+    return (
+        f"**Flash:** {len(recs)} flashes — {', '.join(parts)}; {console} over the console (no esptool); "
+        f"{_size(written)} written in all."
+    )
+
+
 def _overhead(path, board, profile):
     sidecar = Path(path).parent / f"overhead-{board}-{profile}.txt"
     try:
@@ -144,8 +202,10 @@ def collect(paths):
                 "time": 0.0,
                 "retries": 0,
                 "overhead": 0.0,
+                "flash": None,
             },
         )
+        b["flash"] = _flash(p, board, profile)
         b["retries"] = _retries(p, board, profile)
         b["overhead"] = _overhead(p, board, profile)
         try:
@@ -169,7 +229,7 @@ def collect(paths):
     return bundles, areas, failures, gap_skips
 
 
-def render(bundles, areas, failures, gap_skips, run_seconds=None):
+def render(bundles, areas, failures, gap_skips, run_seconds=None, flash_line=""):
     tot = {k: sum(b[k] for b in bundles.values()) for k in ("pass", "fail", "skip", "xfail")}
     head = f"{tot['pass']} passed · {tot['fail']} failed · {tot['skip']} skipped"
     if tot["xfail"]:
@@ -178,8 +238,8 @@ def render(bundles, areas, failures, gap_skips, run_seconds=None):
     out = [f"## HIL — {n} bundle{'' if n == 1 else 's'} · {head}", ""]
 
     out += [
-        "| board / profile | pass | fail | skip | xfail | retries | test time | wall time |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|",
+        "| board / profile | pass | fail | skip | xfail | retries | flash | test time | wall time |",
+        "|---|---:|---:|---:|---:|---:|---|---:|---:|",
     ]
     wall_total = 0.0
     for (board, profile), b in sorted(bundles.items()):
@@ -189,9 +249,11 @@ def render(bundles, areas, failures, gap_skips, run_seconds=None):
         wall_total += wall
         out.append(
             f"| {mark}{board} / {profile} | {b['pass']} | {b['fail']} | {b['skip']} | "
-            f"{b['xfail']} | {retries} | {_dur(b['time'])} | {_dur(wall)} |"
+            f"{b['xfail']} | {retries} | {_flash_cell(b['flash'])} | {_dur(b['time'])} | {_dur(wall)} |"
         )
     out.append("")
+    if flash_line:
+        out += [flash_line, ""]
 
     by_board = defaultdict(lambda: {"n": 0, "time": 0.0, "wall": 0.0})
     for (board, _profile), b in bundles.items():
@@ -279,7 +341,9 @@ def main(argv):
         return 2
 
     bundles, areas, failures, gap_skips = collect(paths)
-    report = render(bundles, areas, failures, gap_skips, run_seconds=run_seconds)
+    report = render(
+        bundles, areas, failures, gap_skips, run_seconds=run_seconds, flash_line=flash_totals(paths)
+    )
     sys.stdout.write(report)
     if out_file:
         Path(out_file).write_text(report)

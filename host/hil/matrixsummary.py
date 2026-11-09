@@ -14,7 +14,7 @@ import sys
 
 _VERDICT = re.compile(
     r"^(?P<verdict>PASS|FAIL) observer=(?P<obs>\S+) profile=(?P<profile>\S+) lane=(?P<lane>\S+) "
-    r"gamepad=(?P<pad>\S+) rc=\S+ gaps=(?P<gaps>\d+)\s*(?P<rest>.*)$"
+    r"gamepad=(?P<pad>\S+) rc=\S+ gaps=(?P<gaps>\d+)(?: slots=(?P<slots>\S+))?\s*(?P<rest>.*)$"
 )
 
 # The HIL scripts' (sinput_hil.py, bp32_hil.py) "FAIL <check>: detail", pytest -ra's "FAILED/ERROR <id> - msg"
@@ -59,6 +59,19 @@ def failures(log):
     )
 
 
+def _slots(tok):
+    """`pad:1:switch,obs:3:reboot` (tester/test-matrix.sh) -> `pad 1 (switch) · obs 3 (reboot)`; "" for older runs."""
+    out = []
+    for part in (tok or "").split(","):
+        who, _, rest = part.partition(":")
+        slot, _, action = rest.partition(":")
+        if who:
+            out.append(
+                f"{who} {slot} ({action})" if slot not in ("", "-") else f"{who} – ({action})"
+            )
+    return " · ".join(out)
+
+
 def render(results_dir):
     """(markdown, exit code)."""
     results = pathlib.Path(results_dir)
@@ -86,15 +99,16 @@ def render(results_dir):
             detail = re.sub(r"^== \[[\d:]+\] \w+\s+\S+\s+", "", detail)
             detail = re.sub(r"\s*(=+\s*)?\(\d+s,.*\)$", "", detail).replace("|", "\\|").strip()
             rows.append(
-                f"| {icon} | {m['obs']} | {m['profile']} | {m['lane']} | {m['pad']} | {m['gaps']} | {detail} |"
+                f"| {icon} | {m['obs']} | {m['profile']} | {m['lane']} | {m['pad']} | {m['gaps']} "
+                f"| {_slots(m['slots'])} | {detail} |"
             )
         elif ln.startswith(("ABORT", "SKIP")):
             aborts.append(ln)
             failed |= ln.startswith("ABORT")
     if rows:
         out += [
-            "| | Observer | Profile | Lane | Gamepad | GAPs | Result |",
-            "|---|---|---|---|---|---|---|",
+            "| | Observer | Profile | Lane | Gamepad | GAPs | Slot | Result |",
+            "|---|---|---|---|---|---|---|---|",
             *rows,
             "",
         ]
