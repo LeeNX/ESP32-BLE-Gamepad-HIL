@@ -117,6 +117,39 @@ plain boot, no pending-verify.
 - **Wear.** A console switch erases one 4 KB otadata sector (the two alternate); an esptool switch writes both
   (8 KB); `WIPE` adds the 24 KB NVS. A legacy flash wrote 0.6–0.7 MB per app, every time the app changed.
 
+## Validation (2026-11-09, rig rp3b-ble-hil, bundles built on a Mac)
+
+Bundles built on a Mac exactly as CI does (`build.sh` esp32dev/esp32c3/esp32s3 × minimal maxfeat sinput, LED pins as
+CI's, `build-observers.sh`), run from a worktree of this branch: `test-all.sh --by-board` + the **full** observer
+matrix (`test-matrix.sh --lanes parallel`: 3 rotations × minimal maxfeat sinput, 18 lanes), three times — cold
+(boards on the legacy layout), warm (same bundles again), and legacy (`HIL_MULTISLOT=0`) as the A/B.
+
+| | r1 multi-slot, cold | r2 multi-slot, warm | r3 legacy (A/B) |
+|---|---|---|---|
+| suite (`--by-board`) | 6/6 bundles pass | 6/6 | 6/6 |
+| matrix lanes | 17/18 (bp32_hil torn-line crash, fixed) | 15/16, then the USB guard aborted rotation 3 (see below) | 16/18 (two lane flakes) |
+| flashes (suite + matrix) | 27: 3 convert, 9 write, 15 console | **31, all over the console** | 33: 26 written, 7 verify-skip/wipe |
+| esptool sessions | 12 flashes | **0** | 33 flashes (a write is verify + write) |
+| bytes written | 7.9 MB (each image once per board) | **0** | 17.2 MB |
+| time in flash.py | 483 s | 178 s | 786 s |
+| per-bundle flash overhead (suite) | 31–34 s write, ~5 s console | 3–9 s | 14–48 s |
+| matrix wall time | 18 min (full) | – (aborted) | 24 min (full) |
+
+- A console switch costs 4.5–6 s (dominated by waiting for the restarted firmware to answer `SLOTS?`; the esp32
+  observer's Bluetooth init is the long pole); an esptool write 26–34 s; a legacy write of the same app 26–30 s.
+- With the cache warm, every flash of a full run was a console switch: nothing written, no esptool session.
+- **USB warnings:** not reduced measurably. r2 (no esptool at all) logged 16 `dwc_otg` warnings in ~23 min, r3
+  (33 esptool flashes) 27 in ~34 min — the same rate. The bursts line up with board *resets* — `bp32_hil.py`
+  resetting the observer at each lane, the C3's native USB re-enumerating on every chip reset — which both modes
+  do. r2's abort was one 12-warning burst at a lane start hitting the matrix guard's threshold (12), not flashing.
+- The cell that failed in r1 and r2 (observer esp32c3 / sinput / Bluepad32 lane, gamepad esp32dev) passed 4/4 when
+  rerun on its own (one cold conversion + three console reboots), and in r3. Both failures were harness gaps the
+  faster switches exposed or happened to hit, fixed in `bp32_hil.py`: a state line torn by the observer reset
+  crashed the reader thread (now skipped), and a lost `SPECIAL RELEASE` left a button held (commands are now resent
+  once when no reply comes, as `SerialDev` does).
+- Suite `test time` (pairing inside pytest) varied 5 s–3 min per bundle in every round, both modes; six samples
+  per round don't separate that from BLE pairing variance.
+
 ## PoC results (2026-11-09, the first 3 × 1.25 MB layout, composed bundles + `slot.py`)
 
 ### esp32dev2 — ESP32-D0WD-V3 rev 3.1, CP2102, 4 MB

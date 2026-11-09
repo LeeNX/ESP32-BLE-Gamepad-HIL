@@ -69,13 +69,18 @@ pad = serial.Serial(args.gamepad_port, 115200, timeout=0.2)
 
 
 def cmd(c, timeout=2.0):
-    pad.reset_input_buffer()
-    pad.write((c + "\n").encode())
-    end = time.monotonic() + timeout
-    while time.monotonic() < end:
-        line = pad.readline().decode(errors="replace").strip()
-        if line and not line.startswith(("[", "HIL hil_runner ready")):
-            return line
+    """One command to the gamepad; its reply line, or None. Resent once when no reply comes: the rig's USB-UART
+    bridges now and then drop a line (SerialDev retries once for the same reason), and a lost SPECIAL RELEASE left
+    "start" held through the next checks (2026-11-09, sinput: select/back -> misc=6, home -> misc=5). Every command
+    sent here sets state (press/release/axis/hat/reset) or reads it, so a second copy changes nothing."""
+    for _ in range(2):
+        pad.reset_input_buffer()
+        pad.write((c + "\n").encode())
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            line = pad.readline().decode(errors="replace").strip()
+            if line and not line.startswith(("[", "HIL hil_runner ready")):
+                return line
     return None
 
 

@@ -41,6 +41,13 @@ What a bump means:
 - `tester/slot.py` (list / verify / boot a board's slots over its console) and `builder/make_multislot.py` (compose
   a bundle with apps in fixed slots, with image, size and table checks).
 
+### Fixed
+
+- `tester/bp32_hil.py`: a console line torn by the observer's reset (`dpad=0x0ESP-ROM…`) no longer kills the reader
+  thread (and with it every later check of the lane); a gamepad command with no reply is resent once, so a line
+  dropped by a USB-UART bridge can't leave a button held.
+- `tester/test.sh` exports `HIL_FLASH_LOG`, so conftest.py's own flash of the bundle is in the run's flash totals.
+
 ### Changed
 
 - `--wipe-settings` on a multi-slot board erases only the nvs partition (bonds), keeping the slot selection.
