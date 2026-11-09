@@ -18,6 +18,8 @@ What a bump means:
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-11-09
+
 ### Added
 
 - **Rig health in the job summary.** `hil.yml` samples the tester host under the
@@ -821,7 +823,8 @@ descriptor + latency suite, and the Tailscale-based CI. Plus:
   `HIL_RIG_ENABLED=true` is set — so a fork with no tester wired gets a clean
   skipped run, not a failure on the missing Tailscale secret.
 
-[Unreleased]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.5.0
 [0.4.1]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.4.1
 [0.4.0]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.4.0
 [0.3.1]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.3.1
