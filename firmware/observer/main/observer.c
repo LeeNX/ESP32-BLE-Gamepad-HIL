@@ -19,6 +19,9 @@
 //   rumble <weak> <strong> <ms>   dual rumble, magnitudes 0..255, for ms milliseconds (0 = stop)
 //   features?           print the device's feature response
 //   allow <addr>|any    only pair with this Bluetooth address (any = clear the filter)
+//   SLOTS?              OTA app slots: HIL slots running=<n> boot=<n> count=<n> <i>=<sha256>/<state>/<proj>/<ver>
+//   BOOT <n> [WIPE]     boot OTA slot n next (WIPE: erase NVS too), reply HIL ok boot <n>, restart
+//                       (multi-slot PoC, docs/multislot-ota.md; same commands as hil_runner)
 //
 // Pairing filter: with an allowed address set, only that device is accepted. Otherwise devices whose name starts
 // with "HILpad" (the rig's gamepads), or that advertise no name at all (which a rig gamepad can do before its scan
@@ -38,10 +41,15 @@
 #include <uni.h>
 
 #include <esp_app_desc.h>
+#include <esp_ota_ops.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #include "sdkconfig.h"
 
 #include "parser/uni_hid_parser_sinput.h"
+
+#include "hil_slots.h"
 
 #ifndef HIL_ALLOW_ADDR
 #define HIL_ALLOW_ADDR ""
@@ -103,6 +111,8 @@ static void print_help(void) {
         "HIL help   rgb <r> <g> <b>             RGB LED",
         "HIL help   rumble <weak> <strong> <ms> dual rumble, 0..255 each, ms 0 = stop",
         "HIL help   allow <addr>|any            only pair with this Bluetooth address",
+        "HIL help   SLOTS?                      OTA app slots: running, next boot, each slot's image sha256",
+        "HIL help   BOOT <n> [WIPE]             boot OTA slot n next (WIPE: erase NVS too), then restart",
     };
     for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); i++)
         printf("%s\n", lines[i]);
@@ -110,10 +120,28 @@ static void print_help(void) {
 
 static void handle_command(char* line) {
     unsigned a, b, c;
-    char addr[32];
+    char addr[32], extra[8];
+    static char slots[512];
+    int n;
 
     if (strcmp(line, "help") == 0 || strcmp(line, "?") == 0) {
         print_help();
+    } else if (strcmp(line, "SLOTS?") == 0) {
+        hil_slots_describe(slots, sizeof(slots));
+        printf("HIL slots %s\n", slots);
+    } else if ((n = sscanf(line, "BOOT %u %7s", &a, extra)) >= 1) {
+        if (n == 2 && strcmp(extra, "WIPE") != 0) {
+            printf("HIL err args\n");
+            return;
+        }
+        const char* err = hil_slots_set_boot((int)a, n == 2);
+        if (err) {
+            printf("HIL err %s\n", err);
+            return;
+        }
+        printf("HIL ok boot %u%s\n", a, n == 2 ? " wipe" : "");
+        vTaskDelay(pdMS_TO_TICKS(20));
+        hil_slots_restart();
     } else if (strcmp(line, "version?") == 0) {
         printf("HIL version %s\n", esp_app_get_description()->version);
     } else if (strcmp(line, "features?") == 0) {
@@ -175,6 +203,10 @@ static void hil_on_init_complete(void) {
     uni_bt_start_scanning_and_autoconnect_unsafe();
     uni_bt_allow_incoming_connections(true);
     btstack_stdin_setup(hil_stdin);
+    // Booted into this slot by BOOT <n> (state pending-verify with the bootloader's rollback on): Bluetooth came up,
+    // so keep it. Otherwise the bootloader would return to the previous slot on the next reset. A no-op when the
+    // image isn't pending (factory app, flashed slot).
+    esp_ota_mark_app_valid_cancel_rollback();
     printf("HIL init-complete\n");
 }
 

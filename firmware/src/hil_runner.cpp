@@ -23,6 +23,7 @@
 #include <NimBLEDevice.h>
 #include <soc/soc_caps.h>
 #include "hil_profile.h"
+#include "hil_slots.h"
 
 // HIL_DEVICE_NAME (hil_profile.h): "HILpad <board>" for CI/release, "HILdev
 // <board>" for the `local` profile, or a -D override. Keep it <= 18 chars --
@@ -252,6 +253,33 @@ static void handle(const String &cmd)
         // This board's own BLE address, so an observer that filters by address (Bluepad32's
         // `allow <addr>`) can be pointed at whichever board plays the gamepad in a rotation.
         Serial.printf("ADDR %s\n", NimBLEDevice::getAddress().toString().c_str());
+        return;
+    }
+
+    if (c == "SLOTS?")
+    {
+        // OTA app slots (multi-slot layout, docs/multislot-ota.md): which one runs, which boots next, and each
+        // slot's image digest, so the host can check them against the multislot bundle's manifest.
+        static char buf[512];
+        hil_slots_describe(buf, sizeof(buf));
+        Serial.printf("SLOTS %s\n", buf);
+        return;
+    }
+
+    if (c == "BOOT")
+    {
+        // BOOT <n> [WIPE]: boot OTA slot n next (WIPE: erase NVS -- bonds -- too), reply OK, restart.
+        if (n < 2 || n > 3 || (n > 2 && t[2] != "WIPE") || t[1].length() != 1 || !isDigit(t[1][0]))
+        {
+            reply("ERR args");
+            return;
+        }
+        const char *err = hil_slots_set_boot(t[1].toInt(), n > 2);
+        if (err) { Serial.printf("ERR %s\n", err); return; }
+        reply("OK");
+        Serial.flush();
+        delay(20);
+        hil_slots_restart();
         return;
     }
 

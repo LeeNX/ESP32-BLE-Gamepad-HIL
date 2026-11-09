@@ -44,7 +44,8 @@ CONFIG_BTSTACK_AUDIO=n
 
 #
 # Partitions: the layout of the v0.3.0 observer bundles (factory app at 0x20000), kept so their offsets don't move.
-# The OTA slots and rollback are unused here.
+# Its OTA slots are unused. Rollback stays on: a multi-slot bundle (docs/multislot-ota.md, firmware/multislot/) puts
+# this app in an OTA slot, and observer.c marks itself valid once Bluetooth is up after a BOOT <n> switch.
 #
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 CONFIG_PARTITION_TABLE_CUSTOM=y

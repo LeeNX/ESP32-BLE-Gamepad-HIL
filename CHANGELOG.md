@@ -18,6 +18,18 @@ What a bump means:
 
 ## [Unreleased]
 
+### Added
+
+- **Multi-slot OTA bundles (proof of concept, `docs/multislot-ota.md`).** One flash holds up to three apps (DUT
+  profiles and/or the Bluepad32 observer) in OTA slots behind a shared bootloader and partition table
+  (`firmware/multislot/partitions.csv`); a board changes profile or role with an OTA reboot instead of a reflash.
+  `builder/make_multislot.py` composes the bundle from ordinary ones, checking chip, image integrity (XOR checksum,
+  appended SHA-256, exact length) and slot fit first; `tester/slot.py` lists, verifies (each slot's on-chip image
+  digest vs the manifest) and switches slots. New serial commands on both firmwares: `SLOTS?` and
+  `BOOT <n> [WIPE]` (hil_runner replies `SLOTS …` / `OK`, the observer `HIL slots …` / `HIL ok boot <n>`). The
+  observer now marks its image valid once Bluetooth is up, so the bootloader's rollback keeps a switched-to slot.
+  Not used by CI or the release yet.
+
 ## [0.5.0] — 2026-11-09
 
 ### Added

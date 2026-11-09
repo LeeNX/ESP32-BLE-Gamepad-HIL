@@ -394,6 +394,8 @@ banner and any debug lines are skipped by the host.
 | `ID?` | `ID hil_runner profile=… board=… built=…` |
 | `NAME?` | `NAME <advertised BLE name>` — `getDeviceName()`; `HILpad <board>`, or `HILdev <board>` / a `-D HIL_DEVICE_NAME` override for the `local` profile |
 | `ADDR?` | `ADDR <aa:bb:cc:dd:ee:ff>` — this board's own BLE address (`NimBLEDevice::getAddress()`), e.g. to point a Bluepad32 observer's `allow <addr>` at it |
+| `SLOTS?` | `SLOTS running=<n> boot=<n> count=<n> <i>=<sha256>/<state>/<project>/<version> …` (or `<i>=empty`) — the OTA app slots; only meaningful on a board flashed with a multi-slot bundle (`docs/multislot-ota.md`). `running=-1` means a factory app (the observer's single-app layout) |
+| `BOOT <n> [WIPE]` | `OK`, then the board restarts into OTA slot `<n>` (`WIPE`: NVS — bonds — erased first); `ERR no_such_slot` / `slot_empty` / `image_invalid` / `args`. PoC, `docs/multislot-ota.md` |
 | `CONFIG?` | `CONFIG buttons=… hats=… axes=… special=… axesMin=… axesMax=… vid=… pid=… ver=… reportId=… feat=… out=… profile=… libsha=…` — `libsha` is the ESP32-BLE-Gamepad commit this build embeds (`-D HIL_LIB_SHA`, set by `builder/build.sh`; `"unknown"` for a from-source dev build). `conftest.py`'s `dut` fixture checks it against the flashed bundle's `manifest.json` `lib_sha` to catch a stale/wrong flash — same board/profile/layout can still be the wrong build |
 | `DIS?` | `DIS model=… serial=… fw=… hw=… sw=… mfr=…` — the DIS strings the firmware configured |
 | `PNP?` | `PNP vidsrc=1 vid=… pid=… ver=…` |

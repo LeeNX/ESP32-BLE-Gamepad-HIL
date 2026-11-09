@@ -1,6 +1,6 @@
 idf_component_register(SRCS "main.c" "observer.c"
-                    INCLUDE_DIRS "."
-                    REQUIRES "bluepad32" "btstack")
+                    INCLUDE_DIRS "." "../../include"
+                    REQUIRES "bluepad32" "btstack" "app_update" "esp_partition")
 
 # HIL_ALLOW_ADDR=AA:BB:CC:DD:EE:FF bakes in a pairing filter (see observer.c); `allow <addr>` sets it at runtime.
 if(DEFINED ENV{HIL_ALLOW_ADDR})
