@@ -160,6 +160,12 @@ matrix (`test-matrix.sh --lanes parallel`: 3 rotations × minimal maxfeat sinput
   a duplicate is now evicted first.
 - **Final** (6759c25, the duplicate rule): suite 6/6 (one "GATT services never resolved" pairing retry, the known
   BlueZ flake) + CI's quick matrix 2/2 — all 17 flashes over the console, 0 B written, no esptool session.
+- **PR #73 review fixes** (2026-11-10). r5 (b74b2dd, partition tables moved to `firmware/partitions/`, every
+  `partitions.bin` byte-identical): suite 6/6, full matrix 18/18. r6 (7323256, verify-before-wipe + observer `BOOT`
+  parsing): suite 6/6, full matrix 18/18, 16 of the matrix's 21 flashes over the console. Before r6, a `BOOT` check
+  on the esp32dev runner and the C3 observer: 8 malformed `BOOT` lines rejected without a restart; a slot with 4 KB
+  overwritten mid-image listed `empty` by `SLOTS?` and answered `BOOT <it> WIPE` with `image_invalid`, NVS
+  byte-identical and the boot slot unchanged. r6 then refilled those damaged slots first.
 - Suite `test time` (pairing inside pytest) varied 5 s–3 min per bundle in every round, both modes; six samples
   per round don't separate that from BLE pairing variance.
 
