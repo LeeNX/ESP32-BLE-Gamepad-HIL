@@ -59,8 +59,9 @@ What a bump means:
 - All partition tables live in `firmware/partitions/` (README there says who uses which): the multi-slot table, the
   observer's, and hil_runner's — Arduino-ESP32's `default.csv` / `default_8MB.csv` (S3), now pinned copies instead
   of an implicit core default. Every table is byte-identical to before.
-- **hil_runner's PlatformIO platform is pinned** to the observer's pioarduino commit (`d41d838`, Arduino-ESP32
-  3.3.12 / ESP-IDF 5.5.5). It was an unpinned `espressif32`, and CI's `~/.platformio` cache (keyed on
+- **hil_runner's PlatformIO platform is pinned** to the pioarduino release `55.03.312-1` (by commit, `2959e98`;
+  Arduino-ESP32 3.3.12 / ESP-IDF 5.5.5 — the release's own 3.3.12 core + libs tarballs, where a develop commit such
+  as the observer's `d41d838` fetches arduino-esp32 `master.zip`). It was an unpinned `espressif32`, and CI's `~/.platformio` cache (keyed on
   `firmware/platformio.ini`) had kept **Arduino-ESP32 2.0.17 / ESP-IDF 4.4.7** since 2026-10-05, so CI runs and the
   0.5.0 bundles were 2.0.17 builds while local builds were 3.x. CI and releases now build hil_runner on the 3.3.12
   core — expect bench timings to move. The pin also fixes the image size: a fresh unpinned install got the official
