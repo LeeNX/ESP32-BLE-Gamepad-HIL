@@ -112,7 +112,10 @@ static const char *hil_slots_set_boot(int idx, bool wipe)
     if (!p) return "no_such_slot";
     esp_app_desc_t d;
     if (esp_ota_get_partition_description(p, &d) != ESP_OK) return "slot_empty";
-    // Wipe first: a failed erase then leaves the boot slot as it was, so any error means "not switched".
+    // Verify the whole image first (esp_partition_get_sha256 runs the same esp_image_verify as
+    // esp_ota_set_boot_partition), then wipe, then switch: any error leaves both the bonds and the boot slot alone.
+    uint8_t sha[32];
+    if (esp_partition_get_sha256(p, sha) != ESP_OK) return "image_invalid";
     if (wipe)
     {
         const esp_partition_t *nvs =

@@ -122,17 +122,19 @@ static void handle_command(char* line) {
     unsigned a, b, c;
     char addr[32], extra[8];
     static char slots[512];
-    int n;
+    int n, end1 = 0, end2 = 0;
 
     if (strcmp(line, "help") == 0 || strcmp(line, "?") == 0) {
         print_help();
     } else if (strcmp(line, "SLOTS?") == 0) {
         hil_slots_describe(slots, sizeof(slots));
         printf("HIL slots %s\n", slots);
-    } else if ((n = sscanf(line, "BOOT %u %7s", &a, extra)) >= 1) {
-        // Same rules as hil_runner: a single digit, optionally WIPE (sscanf's %u would take "-1" or "12").
-        bool digit = line[5] >= '0' && line[5] <= '9' && (line[6] == '\0' || line[6] == ' ');
-        if (!digit || (n == 2 && strcmp(extra, "WIPE") != 0)) {
+    } else if (strncmp(line, "BOOT", 4) == 0 && (line[4] == ' ' || line[4] == '\0')) {
+        // Same rules as hil_runner: a single digit, optionally WIPE, nothing after (sscanf's %u would take "-1" or
+        // "12", and ignores trailing words).
+        n = sscanf(line, "BOOT %u%n %7s%n", &a, &end1, extra, &end2);
+        bool digit = n >= 1 && line[5] >= '0' && line[5] <= '9' && (line[6] == '\0' || line[6] == ' ');
+        if (!digit || line[n == 2 ? end2 : end1] != '\0' || (n == 2 && strcmp(extra, "WIPE") != 0)) {
             printf("HIL err args\n");
             return;
         }

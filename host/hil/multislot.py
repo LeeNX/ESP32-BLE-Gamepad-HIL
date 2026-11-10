@@ -145,6 +145,10 @@ def table_bin(parts):
             p["flags"],
         )
     out += b"\xeb\xeb" + b"\xff" * 14 + hashlib.md5(out).digest()
+    if len(out) > TABLE_SIZE:
+        raise SystemExit(
+            f"partition table: {len(parts)} entries don't fit in {TABLE_SIZE:#x} bytes"
+        )
     return out + b"\xff" * (TABLE_SIZE - len(out))
 
 
