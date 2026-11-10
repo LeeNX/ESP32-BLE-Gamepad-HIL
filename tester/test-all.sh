@@ -480,7 +480,8 @@ run_lane() {  # <board> <pytest-args...> ; loop its bundles. rc 1 on any failure
 # would make this run's report claim a retry that actually happened last time.
 mkdir -p results
 rm -f results/junit-*.phase1.xml results/retries-*.txt \
-      results/flash-seconds-*.txt results/pytest-seconds-*.txt results/overhead-*.txt
+      results/flash-seconds-*.txt results/pytest-seconds-*.txt results/overhead-*.txt \
+      results/flash-*.json results/flash-log.jsonl
 
 if [ "$BY_BOARD" = 1 ]; then
   for a in "$@"; do

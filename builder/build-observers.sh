@@ -48,13 +48,24 @@ board_env() { case "$1" in
 board_chip() { case "$1" in
   esp32dev|esp32dev2) echo esp32 ;; esp32c3) echo esp32c3 ;; esp32s3) echo esp32s3 ;;
   *) echo "unknown board: $1" >&2; exit 2 ;; esac; }
-# partitions.csv field (offset or size) of a partition, by name.
-part() { awk -F, -v n="$1" -v f="$2" '$1 ~ "^"n"[ \t]*$" {gsub(/[ \t]/, "", $f); print $f}' "$HOST_DIR/partitions.csv"; }
+# firmware/partitions/observer-factory-ota.csv field (offset or size) of a partition, by name.
+part() { awk -F, -v n="$1" -v f="$2" '$1 ~ "^"n"[ \t]*$" {gsub(/[ \t]/, "", $f); print $f}' "$HOST_DIR/../partitions/observer-factory-ota.csv"; }
 
 BP32_SHA=$(git -C "$BP32_DIR" rev-parse --short=8 HEAD)
-RIG_SHA=$(git rev-parse --short=8 HEAD)
+# The observer's own source commit, not the rig HEAD: a rig commit that doesn't touch the observer then builds the
+# same image (version string included), which a multi-slot board already holds -- no write (tester/flash.py).
+OBS_PATHS=(firmware/observer firmware/include builder/build-observers.sh)
+RIG_SHA=$(git log -1 --format=%h --abbrev=8 -- "${OBS_PATHS[@]}")
+RIG_SHA=${RIG_SHA:0:8}
+[[ -z $(git status --porcelain -- "${OBS_PATHS[@]}") ]] || RIG_SHA="$RIG_SHA-dirty"
+# Reproducible: __DATE__/__TIME__ (the app descriptor's build time) from the newer of the two source commits.
+if [[ -z "${SOURCE_DATE_EPOCH:-}" ]]; then
+  bp_t=$(git -C "$BP32_DIR" log -1 --format=%ct); obs_t=$(git log -1 --format=%ct -- "${OBS_PATHS[@]}")
+  SOURCE_DATE_EPOCH=$(( bp_t > obs_t ? bp_t : obs_t ))
+fi
+export SOURCE_DATE_EPOCH
 NVS_OFF=$(part nvs 4); NVS_SIZE=$(part nvs 5); APP_OFF=$(part factory 4)
-[[ -n "$NVS_OFF" && -n "$NVS_SIZE" && -n "$APP_OFF" ]] || { echo "can't read nvs/factory from partitions.csv" >&2; exit 2; }
+[[ -n "$NVS_OFF" && -n "$NVS_SIZE" && -n "$APP_OFF" ]] || { echo "can't read nvs/factory from firmware/partitions/observer-factory-ota.csv" >&2; exit 2; }
 echo "== bluepad32 $(git -C "$BP32_DIR" describe --tags --always --dirty) ($(git -C "$BP32_DIR" rev-parse --abbrev-ref HEAD))"
 echo "== observer firmware/observer @ $(git rev-parse --short HEAD); nvs $NVS_OFF+$NVS_SIZE, factory app $APP_OFF"
 

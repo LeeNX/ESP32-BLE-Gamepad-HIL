@@ -26,6 +26,7 @@ REPLY_PREFIXES = (
     "FEATURE",
     "OUTPUT",
     "TEMP",
+    "SLOTS",
 )
 
 

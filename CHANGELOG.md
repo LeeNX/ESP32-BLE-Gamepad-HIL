@@ -18,6 +18,48 @@ What a bump means:
 
 ## [Unreleased]
 
+### Added
+
+- **Multi-slot flashing: fewer writes, less wear, fewer esptool sessions** (`docs/multislot-ota.md`). Every board's
+  flash now holds four apps — the run's hil_runner profiles and the Bluepad32 observer — in OTA slots behind a shared
+  table (`firmware/partitions/multislot.csv`, 4 × 960 KB), and `tester/flash.py` treats them as a cache: an app
+  already in a slot is booted — over the firmware console (`BOOT <n>`, no esptool, no native-USB reset) when
+  `--console-port` is given, else with an 8 KB otadata write — and a new one is written into the least recently
+  used slot, just the app. A board on another layout is converted on first contact; `HIL_MULTISLOT=0` /
+  `--no-multislot` keeps the legacy whole-bundle flash. Slots are trusted only after an on-chip digest.
+- **New serial commands, both firmwares:** `SLOTS?` (running / next-boot slot, each slot's image SHA-256 and OTA
+  state) and `BOOT <n> [WIPE]`. hil_runner replies `SLOTS …` / `OK`, the observer `HIL slots …` /
+  `HIL ok boot <n>`. The observer now marks its image valid once Bluetooth is up, so the bootloader's rollback
+  keeps a slot switched to.
+- **Slot reporting.** The run summary has a *flash* column (slot + action, e.g. `slot 2 · switch (console)`) and a
+  flash totals line; the matrix summary a *Slot* column per lane (from a new `slots=` field on the verdict lines)
+  and its own totals. `flash.py` writes `$HIL_FLASH_RECORD` / appends `$HIL_FLASH_LOG` (JSON) and prints a
+  `flash-slot:` line.
+- **Reproducible images.** `builder/build.sh` sets `SOURCE_DATE_EPOCH` from the library / firmware commits, and the
+  observer's version and bundle name follow its own source commit rather than the rig HEAD, so unchanged source
+  builds a byte-identical image a slot already holds.
+- `tester/slot.py` (list / verify / boot a board's slots over its console) and `builder/make_multislot.py` (compose
+  a bundle with apps in fixed slots, with image, size and table checks).
+
+### Fixed
+
+- `tester/bp32_hil.py`: a console line torn by the observer's reset (`dpad=0x0ESP-ROM…`) no longer kills the reader
+  thread (and with it every later check of the lane); a gamepad command with no reply is resent once, so a line
+  dropped by a USB-UART bridge can't leave a button held.
+- `tester/test.sh` exports `HIL_FLASH_LOG`, so conftest.py's own flash of the bundle is in the run's flash totals.
+
+### Changed
+
+- A multi-slot board always gets hil_runner's (Arduino-ESP32's) bootloader, also when an observer bundle converts
+  it — under the observer build's, hil_runner's `SLOTS?` sees no slots — and `flash.py` rewrites a different one.
+- `--wipe-settings` on a multi-slot board erases only the nvs partition (bonds), keeping the slot selection.
+- `hil_runner`'s `ID?` `built=` is now the source commit time (reproducible), not the wall clock of the build.
+- Observer bundle names end in the observer's source commit (`…-bp32obs-<bluepad32>-<observer src>`), not the rig
+  HEAD.
+- All partition tables live in `firmware/partitions/` (README there says who uses which): the multi-slot table, the
+  observer's, and hil_runner's — Arduino-ESP32's `default.csv` / `default_8MB.csv` (S3), now pinned copies instead
+  of an implicit core default. Every table is byte-identical to before.
+
 ## [0.5.0] — 2026-11-09
 
 ### Added

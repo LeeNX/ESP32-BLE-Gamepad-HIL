@@ -127,11 +127,14 @@ PROFILE_ENV_SUFFIX = {
 }
 
 
-def _flash_bundle(bundle_dir, port):
-    """TESTER path: flash a prebuilt bundle with esptool (no PlatformIO)."""
+def _flash_bundle(bundle_dir, port, console_port=""):
+    """TESTER path: flash a prebuilt bundle with esptool (no PlatformIO) -- or, on a multi-slot board already
+    holding its app, switch to it over the console (tester/flash.py)."""
     bundle = pathlib.Path(bundle_dir)
     manifest = json.loads((bundle / "manifest.json").read_text())
     cmd = [sys.executable, str(REPO / "tester" / "flash.py"), str(bundle), "--port", port]
+    if console_port:
+        cmd += ["--console-port", console_port]
     print(
         f"\n[firmware] bundle {bundle.name}  ({manifest['lib_describe']}, "
         f"profile={manifest['profile']})"
@@ -151,7 +154,7 @@ def firmware(rigcfg, pytestconfig):
         return env_name  # --no-flash wins over everything
 
     if bundle:
-        manifest = _flash_bundle(bundle, rigcfg["flash_port"])
+        manifest = _flash_bundle(bundle, rigcfg["flash_port"], rigcfg["port"])
         if manifest["board"] != rigcfg["name"] or manifest["profile"] != rigcfg["profile"]:
             pytest.exit(
                 f"bundle is {manifest['board']}/{manifest['profile']}, "

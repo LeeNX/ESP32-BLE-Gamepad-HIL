@@ -87,12 +87,15 @@ bundle() {  # <board> <profile>
 # the run (state unknown) -- not between hil_runner profiles: wiping a gamepad's bond while the observer keeps its
 # copy leaves the observer reconnecting with a stale key, and the gamepad never comes up.
 # A failed flash stops the run: the next cell would test the old firmware.
-declare -A FAMILY=()
+# Multi-slot boards (tester/flash.py's default): an app already in a slot is switched to over the console (--console-port)
+# -- no esptool, no native-USB reset; SLOT[<board>] keeps "<slot>:<action>" of its last flash for the verdict lines.
+declare -A FAMILY=() SLOT=()
 flash() {  # <board> <bundle>
   local out rc fam wipe=()
   fam=$([[ $2 == *-bp32obs-* ]] && echo observer || echo runner)
   [[ ${FAMILY[$1]:-} != "$fam" ]] && wipe=(--wipe-settings)
-  out=$("$PY" tester/flash.py "$2" --port "$(flash_port "$1")" "${wipe[@]}" 2>&1)
+  out=$(HIL_FLASH_LOG="$OUT/flash-log.jsonl" \
+    "$PY" tester/flash.py "$2" --port "$(flash_port "$1")" --console-port "$(port "$1")" "${wipe[@]}" 2>&1)
   rc=$?
   grep '^flash:' <<<"$out" | tail -1
   if ((rc != 0)); then
@@ -102,7 +105,10 @@ flash() {  # <board> <bundle>
     exit 3
   fi
   FAMILY[$1]=$fam
-  # Even an unchanged bundle resets the chip (verify_flash's hard reset), so a native-USB port re-enumerates.
+  read -r _ slot action _ < <(grep '^flash-slot:' <<<"$out" | tail -1)
+  SLOT[$1]="${slot:--}:${action:-?}"
+  # Every path resets the chip (esptool, or BOOT's restart after a console switch), so a native-USB port
+  # re-enumerates: settle before the next health check.
   [[ -n $(cfg "board.$1.flash_port") ]] && sleep 5
   return 0
 }
@@ -148,6 +154,7 @@ unbond() {
 
 OUT=results/matrix
 mkdir -p "$OUT"
+rm -f "$OUT/flash-log.jsonl"  # this run's flashes only (host/hil/matrixsummary.py totals them)
 VERDICTS=results/matrix-verdicts.md
 echo "## matrix $(date -u +%FT%TZ) rotations=${ROTATIONS[*]} profiles=${PROFILES[*]} lanes=$LANES" >> "$VERDICTS"
 fail=0
@@ -216,7 +223,9 @@ for obs in "${ROTATIONS[@]}"; do
       result=$(grep -aE "^(PASSED|FAILED)|passed|failed" "$log" | tail -1)
       gaps=$(grep -ac "^GAP " "$log")
       vers=$(grep -am1 "^VERSIONS " "$log" | cut -d' ' -f2-)
-      line="$verdict observer=$obs profile=$p lane=$name gamepad=$board rc=$rc gaps=$gaps  $result${vers:+  [$vers]}"
+      # slots=: which OTA slot each board ran this cell from, and how it got there (switch / reboot / write / convert).
+      slots="pad:${SLOT[$board]:--:?}"; [[ $name == bp32 ]] && slots+=",obs:${SLOT[$obs]:--:?}"
+      line="$verdict observer=$obs profile=$p lane=$name gamepad=$board rc=$rc gaps=$gaps slots=$slots  $result${vers:+  [$vers]}"
       echo "$line" | tee -a "$VERDICTS"
       summary+=("$line")
       if [[ $rc != 0 ]]; then
