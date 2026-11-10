@@ -5,7 +5,7 @@ nothing but esptool. No PlatformIO, no toolchain -- fine on a Raspberry Pi.
     tester/flash.py <bundle_dir> --port /dev/ttyUSB0 [--console-port /dev/ttyUSB1]
 
 Multi-slot (the default, docs/multislot-ota.md): the board's flash holds four apps in OTA slots behind a shared
-partition table (firmware/multislot/partitions.csv), and this treats them as a cache:
+partition table (firmware/partitions/multislot.csv), and this treats them as a cache:
 
   1. the bundle's app already in a slot -> boot it: over the console (`BOOT <n>`, no esptool, no USB bulk transfer,
      no native-USB re-enumeration) when --console-port answers, else an 8 KB otadata write with esptool;

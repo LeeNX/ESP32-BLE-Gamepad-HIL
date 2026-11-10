@@ -2,7 +2,7 @@
 """Compose one multi-slot bundle from up to N ordinary bundles (PoC, docs/multislot-ota.md).
 
 Each source bundle's firmware.bin goes into its own OTA slot of a shared partition table
-(firmware/multislot/partitions.csv), behind one bootloader, so a board switches profile or role with an OTA reboot
+(firmware/partitions/multislot.csv), behind one bootloader, so a board switches profile or role with an OTA reboot
 (`BOOT <n>`, tester/slot.py) instead of a reflash:
 
     builder/make_multislot.py --out-root bundles/multislot \\

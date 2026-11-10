@@ -15,7 +15,7 @@ import struct
 import time
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-DEFAULT_TABLE = REPO / "firmware" / "multislot" / "partitions.csv"
+DEFAULT_TABLE = REPO / "firmware" / "partitions" / "multislot.csv"
 
 # esptool's image chip ids (extended header), by esptool --chip name.
 CHIP_IDS = {

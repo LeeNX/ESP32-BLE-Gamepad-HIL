@@ -22,7 +22,7 @@ What a bump means:
 
 - **Multi-slot flashing: fewer writes, less wear, fewer esptool sessions** (`docs/multislot-ota.md`). Every board's
   flash now holds four apps — the run's hil_runner profiles and the Bluepad32 observer — in OTA slots behind a shared
-  table (`firmware/multislot/partitions.csv`, 4 × 960 KB), and `tester/flash.py` treats them as a cache: an app
+  table (`firmware/partitions/multislot.csv`, 4 × 960 KB), and `tester/flash.py` treats them as a cache: an app
   already in a slot is booted — over the firmware console (`BOOT <n>`, no esptool, no native-USB reset) when
   `--console-port` is given, else with an 8 KB otadata write — and a new one is written into the least recently
   used slot, just the app. A board on another layout is converted on first contact; `HIL_MULTISLOT=0` /
@@ -56,6 +56,9 @@ What a bump means:
 - `hil_runner`'s `ID?` `built=` is now the source commit time (reproducible), not the wall clock of the build.
 - Observer bundle names end in the observer's source commit (`…-bp32obs-<bluepad32>-<observer src>`), not the rig
   HEAD.
+- All partition tables live in `firmware/partitions/` (README there says who uses which): the multi-slot table, the
+  observer's, and hil_runner's — Arduino-ESP32's `default.csv` / `default_8MB.csv` (S3), now pinned copies instead
+  of an implicit core default. Every table is byte-identical to before.
 
 ## [0.5.0] — 2026-11-09
 

@@ -1,0 +1,10 @@
+# hil_runner on 4 MB boards (esp32dev, esp32c3): Arduino-ESP32's default.csv, copied here and pinned in
+# platformio.ini so the layout is visible and a core update can't change it unnoticed. Two 1.25 MB OTA app
+# slots (the runner boots app0), spiffs (unused), coredump. Multi-slot boards don't use this: see multislot.csv.
+# Name,   Type, SubType, Offset,  Size, Flags
+nvs,      data, nvs,     0x9000,  0x5000,
+otadata,  data, ota,     0xe000,  0x2000,
+app0,     app,  ota_0,   0x10000, 0x140000,
+app1,     app,  ota_1,   0x150000,0x140000,
+spiffs,   data, spiffs,  0x290000,0x160000,
+coredump, data, coredump,0x3F0000,0x10000,

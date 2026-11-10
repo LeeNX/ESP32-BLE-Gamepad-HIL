@@ -3,7 +3,8 @@
 # with an OTA reboot instead of a reflash (tester/flash.py treats the slots as a cache).
 # No factory app: with a blank otadata the bootloader starts ota_0. nvs/otadata/phy_init sit where the observer's
 # layout has them, so tester/flash.py's legacy settings region (0x9000+0x9000) still covers them.
-# 960 KB a slot: today's images are 0.57-0.73 MB (the esp32 observer the largest, ~74%).
+# 960 KB a slot: today's images are 0.57-0.73 MB (the esp32 observer the largest, ~74%). On the 8 MB S3 it uses the
+# first 4 MB. Not a build table: tester/flash.py writes it to the board, and either firmware's app runs from any slot.
 # Name,   Type, SubType,  Offset,   Size
 nvs,      data, nvs,      0x9000,   0x6000
 otadata,  data, ota,      0xf000,   0x2000

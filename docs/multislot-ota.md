@@ -1,7 +1,7 @@
 # Multi-slot OTA flashing
 
 Every rig board's flash holds **four apps** — the run's hil_runner profiles and the Bluepad32 observer — each in its
-own OTA slot behind a shared bootloader and partition table (`firmware/multislot/partitions.csv`).
+own OTA slot behind a shared bootloader and partition table (`firmware/partitions/multislot.csv`).
 `tester/flash.py` treats the slots as a cache: an app already in a slot is *booted*, not written again; a new one
 is written into the least recently used slot, ~0.6 MB, never a whole board image. A board changes profile or role
 (gamepad ↔ observer) in ~1.3–8 s, and on the C3/S3 — 115200 baud — without minutes of flashing.
@@ -21,7 +21,7 @@ what OTA is). So an unmodified bundle's `firmware.bin` runs from any slot of a t
 looks for (`nvs`, `coredump`). Bundles keep their own layout; `flash.py` only takes their app (and, converting a
 board, their bootloader).
 
-| | hil_runner bundle | observer bundle | multi-slot (`firmware/multislot/partitions.csv`) |
+| | hil_runner bundle | observer bundle | multi-slot (`firmware/partitions/multislot.csv`) |
 |---|---|---|---|
 | nvs | 0x9000 +0x5000 | 0x9000 +0x6000 | 0x9000 +0x6000 |
 | otadata | 0xe000 | 0xf000 | 0xf000 |

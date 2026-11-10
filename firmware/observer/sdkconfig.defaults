@@ -49,7 +49,7 @@ CONFIG_BTSTACK_AUDIO=n
 #
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../partitions/observer-factory-ota.csv"
 
 # The BTstack loop runs in the "main" task; ESP-IDF 5.5 needs more stack than the default.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

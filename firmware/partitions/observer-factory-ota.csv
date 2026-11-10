@@ -1,6 +1,7 @@
-# Name,   Type, SubType, Offset,   Size
-# factory + two OTA app slots on a 4 MB flash. A first flash needs the chip erased, then bootloader, partition table
+# Bluepad32 observer (firmware/observer, every board): factory + two OTA app slots on a 4 MB flash. A first flash needs the chip erased, then bootloader, partition table
 # and the factory app at 0x20000; OTA updates land in ota_0 / ota_1. Factory reset boots the factory app again.
+# Multi-slot boards don't use this: see multislot.csv.
+# Name,   Type, SubType, Offset,   Size
 nvs,      data, nvs,     0x9000,   0x6000
 otadata,  data, ota,     0xf000,   0x2000
 phy_init, data, phy,     0x11000,  0x1000
