@@ -68,9 +68,10 @@ def main():
     ap.add_argument(
         "--bootloader-from",
         type=int,
-        default=0,
-        help="slot whose source bundle supplies bootloader.bin (default 0); every app in this repo's bundles is "
-        "ESP-IDF 5.x, whose bootloaders all boot each other's apps",
+        default=None,
+        help="slot whose source bundle supplies bootloader.bin (default: the first hil_runner bundle). It must be a "
+        "runner's: under the observer build's bootloader hil_runner's SLOTS? reads every slot empty "
+        "(docs/multislot-ota.md, the bootloader rule)",
     )
     ap.add_argument(
         "--name", default="", help="bundle dir name (default <board>-ms-<profiles>-<sha8>)"
@@ -90,8 +91,21 @@ def main():
             file=sys.stderr,
         )
 
+    if args.bootloader_from is None:
+        args.bootloader_from = next(
+            (i for i, (_, m) in enumerate(srcs) if m["profile"] != "bp32obs"), None
+        )
+        if args.bootloader_from is None:
+            raise SystemExit(
+                "no hil_runner bundle to take the bootloader from: give --bootloader-from"
+            )
     if not 0 <= args.bootloader_from < len(srcs):
         raise SystemExit("--bootloader-from: no such slot")
+    if srcs[args.bootloader_from][1]["profile"] == "bp32obs":
+        print(
+            "warning: bootloader from the observer bundle -- hil_runner's SLOTS? will read every slot empty",
+            file=sys.stderr,
+        )
     bl_dir, bl_m = srcs[args.bootloader_from]
     bl_img = next((i for i in bl_m["images"] if i["file"] == "bootloader.bin"), None)
     if not bl_img:

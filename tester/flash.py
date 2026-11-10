@@ -276,7 +276,10 @@ def multislot(args, manifest, base, rec):
         }
         if action in ("write", "convert"):
             state[slot]["written"] = now
-        ms.save_state(args.port, state)
+        try:
+            ms.save_state(args.port, state)
+        except OSError as e:  # only a hint (labels, LRU): never fails a flash that worked
+            print(f"flash: slot record not saved: {e}", file=sys.stderr)
         rec.update(slot=slot, action=action, method=method, bytes_written=nbytes, wipe=wipe)
         verb = {
             "reboot": "already running, restarted",

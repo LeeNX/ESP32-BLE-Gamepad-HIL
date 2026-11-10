@@ -91,7 +91,7 @@ bundle() {  # <board> <profile>
 # -- no esptool, no native-USB reset; SLOT[<board>] keeps "<slot>:<action>" of its last flash for the verdict lines.
 declare -A FAMILY=() SLOT=()
 flash() {  # <board> <bundle>
-  local out rc fam method wipe=()
+  local out rc fam wipe=()
   fam=$([[ $2 == *-bp32obs-* ]] && echo observer || echo runner)
   [[ ${FAMILY[$1]:-} != "$fam" ]] && wipe=(--wipe-settings)
   out=$(HIL_FLASH_LOG="$OUT/flash-log.jsonl" \
@@ -105,11 +105,11 @@ flash() {  # <board> <bundle>
     exit 3
   fi
   FAMILY[$1]=$fam
-  read -r _ slot action method _ < <(grep '^flash-slot:' <<<"$out" | tail -1)
+  read -r _ slot action _ < <(grep '^flash-slot:' <<<"$out" | tail -1)
   SLOT[$1]="${slot:--}:${action:-?}"
-  # An esptool session resets the chip even for an unchanged bundle, so a native-USB port re-enumerates; a console
-  # switch never touches that port.
-  [[ -n $(cfg "board.$1.flash_port") && ${method:-esptool} != console ]] && sleep 5
+  # Every path resets the chip (esptool, or BOOT's restart after a console switch), so a native-USB port
+  # re-enumerates: settle before the next health check.
+  [[ -n $(cfg "board.$1.flash_port") ]] && sleep 5
   return 0
 }
 health() { PYTHONPATH=host python3 -m hil.usbhealth "${@:-check}"; }

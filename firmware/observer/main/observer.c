@@ -130,7 +130,9 @@ static void handle_command(char* line) {
         hil_slots_describe(slots, sizeof(slots));
         printf("HIL slots %s\n", slots);
     } else if ((n = sscanf(line, "BOOT %u %7s", &a, extra)) >= 1) {
-        if (n == 2 && strcmp(extra, "WIPE") != 0) {
+        // Same rules as hil_runner: a single digit, optionally WIPE (sscanf's %u would take "-1" or "12").
+        bool digit = line[5] >= '0' && line[5] <= '9' && (line[6] == '\0' || line[6] == ' ');
+        if (!digit || (n == 2 && strcmp(extra, "WIPE") != 0)) {
             printf("HIL err args\n");
             return;
         }

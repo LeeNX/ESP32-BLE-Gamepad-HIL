@@ -112,13 +112,14 @@ static const char *hil_slots_set_boot(int idx, bool wipe)
     if (!p) return "no_such_slot";
     esp_app_desc_t d;
     if (esp_ota_get_partition_description(p, &d) != ESP_OK) return "slot_empty";
-    if (esp_ota_set_boot_partition(p) != ESP_OK) return "image_invalid";
+    // Wipe first: a failed erase then leaves the boot slot as it was, so any error means "not switched".
     if (wipe)
     {
         const esp_partition_t *nvs =
             esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS, "nvs");
         if (!nvs || esp_partition_erase_range(nvs, 0, nvs->size) != ESP_OK) return "nvs_erase_failed";
     }
+    if (esp_ota_set_boot_partition(p) != ESP_OK) return "image_invalid";
     return NULL;
 }
 
