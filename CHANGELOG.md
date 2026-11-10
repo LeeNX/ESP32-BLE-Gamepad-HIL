@@ -18,6 +18,8 @@ What a bump means:
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-11-10
+
 ### Added
 
 - **Multi-slot flashing: fewer writes, less wear, fewer esptool sessions** (`docs/multislot-ota.md`). Every board's
@@ -872,7 +874,8 @@ descriptor + latency suite, and the Tailscale-based CI. Plus:
   `HIL_RIG_ENABLED=true` is set — so a fork with no tester wired gets a clean
   skipped run, not a failure on the missing Tailscale secret.
 
-[Unreleased]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.6.0
 [0.5.0]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.5.0
 [0.4.1]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.4.1
 [0.4.0]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.4.0
