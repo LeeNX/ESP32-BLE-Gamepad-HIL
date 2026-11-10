@@ -494,6 +494,8 @@ def main():
     )
     ap.add_argument("--record", default=os.environ.get("HIL_FLASH_RECORD", ""))
     args = ap.parse_args()
+    if args.retries < 1:
+        ap.error("--retries must be at least 1")
 
     manifest = json.loads((args.bundle / "manifest.json").read_text())
     chip = manifest["chip"]

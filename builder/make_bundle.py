@@ -17,6 +17,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import os
 import pathlib
 import shutil
 import socket
@@ -153,7 +154,8 @@ def main():
     if args.device_name:
         manifest["device_name"] = args.device_name
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    out.touch()  # rewriting existing files leaves the dir mtime alone; test-matrix.sh picks the newest dir
+    # Rewriting existing files leaves the dir mtime alone; test-matrix.sh picks the newest dir.
+    os.utime(out)
     print(out)
 
 
