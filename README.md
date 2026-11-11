@@ -349,18 +349,19 @@ was carrying during that sweep (normally `1`); `bench.py` records it as
 `adapter_links` so a number taken while another bond lingered isn't mistaken
 for a clean solo measurement.
 
-### Findings (3 boards × 5 suite profiles, Raspberry Pi 3B+, kernel 6.18, BlueZ 5.82)
+### Findings (3 boards × 5 suite profiles, x86_64 mimir-u26, kernel 7.0, BlueZ 5.85)
 
-From the v0.4.0 snapshot in [`docs/bench/`](docs/bench/README.md) (library
-0.8.0), the first timed from the serial write; its README has the full table
-and the caveats.
+From the 2026-11-11 snapshot in [`docs/bench/`](docs/bench/README.md) (the
+v0.6.0 bundles), the first on mimir-u26, which replaced the Raspberry Pi 3B+
+as the reference rig; its README has the full table, the caveats and the Pi
+comparison.
 
-- **Connection interval 8.75 ms on the esp32c3/esp32s3, 48.75 ms on the
-  esp32dev this run, MTU 255.** BlueZ settles the interval per connection, so
-  it moves between runs (43.75 ms on the esp32dev in the v0.3.0 snapshot).
-- Single button press → host: **~4.2–4.5 ms** median on the esp32s3, **~8.0–8.5
-  ms** on the esp32c3 and **~17.7 ms** on the esp32dev, all solo. **0 dropped**
-  across 200 paced presses per profile. The v0.3.0 snapshot's ~17.8 ms for the
+- **Connection interval 8.75 ms on all three boards, MTU 255–256.** On the Pi
+  the esp32dev negotiated 48.75 ms (43.75 ms in v0.3.0) with the same firmware.
+  That was the host/adapter with a classic ESP32, not the library.
+- Single button press → host: **~4.6–4.7 ms** median on the esp32s3, **~8.9–10.4
+  ms** on the esp32c3 and **~13.5 ms** on the esp32dev (~17.7 ms on the Pi), all
+  solo. **0 dropped** across 200 paced presses per profile. The v0.3.0 snapshot's ~17.8 ms for the
   esp32c3 was a measurement artifact (the bench timed from the serial reply,
   which its FTDI bridge holds up to 16 ms); figures from before rig 0.4.0 aren't
   comparable.
@@ -371,7 +372,7 @@ and the caveats.
 - **Latency is flat vs HID report size** (5–28 B) within a board. p99 is
   connection-interval jitter and swings run to run; p50 is the signal. The
   interval bounds *latency*, not paced *rate*: NimBLE sends several packets per
-  connection event, and the esp32s3 paces **~258–267 Hz** clean. The esp32c3's
+  connection event, and the esp32s3 paces **~389–398 Hz** clean. The esp32c3's
   ~63 Hz is its serial bridge, not BLE.
 - **Unpaced `sendReport()` bursts overflow and drop silently** — at gap=0 only
   ~2% of a 500-report burst survives. Don't call `sendReport()` faster than you

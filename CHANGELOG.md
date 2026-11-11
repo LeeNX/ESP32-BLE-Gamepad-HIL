@@ -18,6 +18,15 @@ What a bump means:
 
 ## [Unreleased]
 
+### Changed
+
+- **Reference rig moved to mimir-u26 (x86_64 Ubuntu, kernel 7.0, BlueZ 5.85).** The Raspberry Pi 3B+ is retired:
+  its shared dwc_otg USB/Ethernet controller kept wedging. mimir took over all four boards and their adapters
+  unchanged. The `docs/bench/` snapshot is re-taken on it (v0.6.0 bundles, run 42984123196). Every board now connects
+  at 8.75 ms, the classic esp32dev included (48.75 ms on the Pi), so its button p50 drops ~17.7 → ~13.5 ms and its
+  clean rate roughly doubles. The README's bench findings and the `test_conn_interval_recorded` comment follow; no
+  gate changed.
+
 ## [0.6.0] — 2026-11-10
 
 ### Added
