@@ -315,6 +315,51 @@ def _merge_state(name, entry):
         STATE.write_text(json.dumps(s, indent=2))
 
 
+def _reconnect_bond(name, mac, connected_dut, timeout=90):
+    """--no-pair (phase 2 of a --by-board run) trusts the link phase 1 left
+    up. If it dropped in between -- seen on mimir-u26: the Intel controller
+    wedging during another lane's pairing ("hci0: Controller not accepting
+    commands anymore" -> injected hardware error -> every LE link reset),
+    after which BlueZ's trusted-bond auto-reconnect brought some boards back
+    but not all -- nothing in phase 2 would ever reconnect it, so every
+    retry of the bundle failed identically at the evdev wait. Reconnect the
+    existing bond instead (never re-pair: --no-pair lanes run in parallel,
+    and a fresh pair is phase 1's job). A no-op when the link is up."""
+    if bluetooth.is_connected(mac):
+        return
+    if not bluetooth.is_bonded(mac):
+        raise RuntimeError(
+            f"--no-pair: {name} ({mac}) has no bond any more -- nothing to reconnect; "
+            "re-run without --no-pair to pair it fresh"
+        )
+    print(f"\n[bt] {name} ({mac}) not connected -- reconnecting the existing bond")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        # short-lived BtCtl under the lock -- one agent at a time (see bt_mac)
+        with _flock("pair.lock"), bluetooth.BtCtl() as btctl:
+            if not bluetooth.is_connected(mac):
+                btctl.connect(mac)
+            if bluetooth.is_connected(mac):
+                # re-trust so _recover_link's mid-run auto-reconnect works too
+                btctl.send(f"trust {mac}")
+        if bluetooth.is_connected(mac) and bluetooth.wait_services_resolved(mac):
+            try:
+                connected_dut.wait_connected(timeout=5)
+            except Exception:  # noqa: BLE001 -- the evdev wait below is the real check
+                pass
+            try:
+                find_gamepad(name, timeout=15).close()
+            except TimeoutError:
+                continue
+            print(f"[bt] {name} reconnected")
+            return
+        time.sleep(2)
+    raise RuntimeError(
+        f"--no-pair: {name} ({mac}) dropped its link and did not reconnect within {timeout}s "
+        f"(DUT reports {'connected' if connected_dut.connected() else 'not connected'})"
+    )
+
+
 @pytest.fixture(scope="session")
 def bt_mac(rigcfg, connected_dut, pytestconfig):
     name = rigcfg["device_name"]
@@ -329,8 +374,12 @@ def bt_mac(rigcfg, connected_dut, pytestconfig):
     )
 
     if pytestconfig.getoption("no_pair") and prev.get("mac") and not want_fresh:
-        yield prev["mac"]  # no BtCtl at all -- lets --by-board lanes stay independent
-        return  # didn't touch the link this session -- not ours to disconnect
+        # Normally no BtCtl at all -- lets --by-board lanes stay independent.
+        # Only if the link phase 1 left up has since dropped does this touch
+        # the adapter (see _reconnect_bond).
+        _reconnect_bond(name, prev["mac"], connected_dut)
+        yield prev["mac"]
+        return  # phase 1 owns this link's teardown -- not ours to disconnect
 
     # One board pairs at a time: `remove`/`pair` and BlueZ discovery are
     # adapter-global, and a second bluetoothctl agent confuses bluetoothd

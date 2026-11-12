@@ -428,7 +428,9 @@ phase1_turn() {
     # --by-board header comment) and starts the moment this session ends, so
     # conftest.py's bt_mac must leave the link connected+trusted instead of
     # its normal end-of-session disconnect+untrust -- otherwise phase 2
-    # inherits a dead link with nothing left to reconnect it.
+    # inherits a dead link. (If the link drops anyway -- e.g. the adapter
+    # resetting during another lane's pairing -- bt_mac's --no-pair path
+    # reconnects the existing bond under pair.lock; it never re-pairs.)
     retry_run "$bundle" --recover env HIL_TEST_PATH="$CONN_TEST" HIL_JUNIT_TAG=phase1 \
       HIL_KEEP_LINK=1 ./tester/test.sh "$bundle"
   ) 210>"$PHASE1_LOCK" || rc=$?
