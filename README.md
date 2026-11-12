@@ -8,11 +8,12 @@ axes / hats / special buttons map correctly, does the Device Information / PnP /
 battery data reach a GATT client, does the generated HID report descriptor
 arrive intact, and how fast do reports get through the air.
 
-The rig is split into two roles so the BLE host can be a small board (a
-Raspberry Pi) that can't build firmware in reasonable time:
+The rig is split into two roles so the BLE host can be a small, cheap Linux
+box (an up-cycled 1-litre PC, or a Raspberry Pi for one or two boards) that
+doesn't need to build firmware:
 
 ```text
- BUILDER (CI runner / dev machine)          TESTER (Raspberry Pi + ESP32 + BLE)
+ BUILDER (CI runner / dev machine)          TESTER (Linux box + ESP32 + BLE)
  ┌────────────────────────────┐   bundle   ┌──────────────────────────────────┐
  │ builder/build.sh:          │  (rsync/   │ tester/test.sh:                  │
  │  pio run  (lib under test) │   CI       │  tester/flash.py  (esptool only) │
@@ -27,7 +28,7 @@ Raspberry Pi) that can't build firmware in reasonable time:
   against the library under test and writes a **bundle**: the flashable `.bin`
   parts + `manifest.json` (chip, flash offsets, sha256s, lib git sha).
 - **tester** needs only `esptool` + the pytest deps (all pure-Python /
-  lightweight — fine on a Pi). `tester/test.sh` flashes a bundle and runs the
+  lightweight — fine on a Pi or a small PC). `tester/test.sh` flashes a bundle and runs the
   suite.
 - Command injection is over USB serial, **not** BLE — an independent channel,
   so the harness never depends on the thing under test being up.
@@ -132,10 +133,15 @@ tester/bootstrap.sh
 
 Still manual:
 
+- **Host choice**: a Raspberry Pi 3B+ handles one ESP32, maybe two. Its USB,
+  Ethernet and any USB storage share one controller, which wedged with three
+  boards. The reference rig is now an up-cycled 1-litre PC with USB on its own
+  bus. See [`docs/rig-build.md`](docs/rig-build.md) "Choosing a tester host".
 - **Power**: a Pi 3B+ can't reliably power an ESP32 doing BLE off its own USB —
   brownouts show up as a reset loop that never advertises. Use a **powered USB
-  hub** for the ESP32.
-- BLE: a built-in Pi adapter works; a USB BT dongle is steadier for a rig.
+  hub** for the ESP32s on any host.
+- BLE: a built-in adapter works (the Pi's, or the PC's onboard Intel one on
+  the reference rig); a USB BT dongle is steadier on a Pi.
 - `hil_config.local.toml` sets the real `[board.<b>].port`
   (`ls -l /dev/serial/by-id/`).
 
@@ -638,7 +644,7 @@ red test. Locally the same:
 
 `tester/test-all.sh --by-board` runs one **lane per board** concurrently — each
 lane flashes + tests its own profiles sequentially, but the boards overlap. On
-the 3-board reference rig the old 18-bundle functional matrix ran in **~12 min**
+the 3-board Raspberry Pi rig the old 18-bundle functional matrix ran in **~12 min**
 (measured, `-k "buttons or descriptor"`) versus ~35 min sequential — about 3x,
 bounded by the slowest board's lane. Every push now runs 2 suite profiles
 (`minimal maxfeat`, 6 bundles), so it's quicker still, plus a quick observer
@@ -715,12 +721,12 @@ above are the software half; these are physical additions:
   `builder/build.sh` (the bundle path CI/the tester use) and `conftest.py`'s
   direct-from-source build.
 - **Ambient box temperature/humidity sensor** (e.g. BME280/SHT31 on I2C to
-  the Pi): cheap, and drops straight into `tester/rig-lock.sh`'s
+  a Pi tester, or a USB one on a PC): cheap, and drops straight into `tester/rig-lock.sh`'s
   `health-timeline-*.csv` sampler as one more column.
-- **Clean power-off button**: `dtoverlay=gpio-shutdown` in the Pi's
+- **Clean power-off button** (Pi tester): `dtoverlay=gpio-shutdown` in the Pi's
   `config.txt` + a momentary switch on GPIO3/GND — no code, built into
   Raspberry Pi OS, does a proper clean shutdown.
-- **Hard reset/power-cycle button**: no native reset line on the Pi, so this
+- **Hard reset/power-cycle button** (Pi tester): no native reset line on the Pi, so this
   means a relay or smart-plug cutting 5V. Pair it with `gpio-shutdown` (press
   = clean shutdown first) rather than a raw kill switch — cutting power to a
   live system is the same risk as the crash that prompted this list.
@@ -737,8 +743,8 @@ not a failure. So `esp32c3` and `esp32s3` ship with their ports still
 see [ESP32-C3 serial bridge](#esp32-c3-serial-bridge) /
 [ESP32-S3 dual-USB-C setup](#esp32-s3-dual-usb-c-setup)), and a newly-wired
 board starts running with no CI change. All three are verified green on the
-reference rig (Raspberry Pi 3B+ — photos and what it takes to run all three
-concurrently: `docs/rig-build.md`).
+reference rig (an up-cycled 1-litre PC since 2026-11-11, a Raspberry Pi 3B+
+before that — photos, specs, and why it moved: `docs/rig-build.md`).
 
 ```bash
 PYTHONPATH=host python3 -m hil.detect            # table of present / absent + why

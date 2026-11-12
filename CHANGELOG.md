@@ -26,6 +26,10 @@ What a bump means:
   at 8.75 ms, the classic esp32dev included (48.75 ms on the Pi), so its button p50 drops ~17.7 → ~13.5 ms and its
   clean rate roughly doubles. The README's bench findings and the `test_conn_interval_recorded` comment follow; no
   gate changed.
+- **`docs/rig-build.md`: "Choosing a tester host".** A Pi 3B+ is good for one ESP32, maybe two. Its shared
+  USB/Ethernet/storage controller is what wedged with three. A Pi 4 is untested, and an up-cycled 1-litre PC with USB on
+  its own bus is the recommendation. Adds mimir's specs and keeps the Pi build notes, BOM and numbers for anyone trying
+  it on a Pi. The README's architecture intro, setup notes and reference-rig mentions follow.
 
 ## [0.6.0] — 2026-11-10
 
