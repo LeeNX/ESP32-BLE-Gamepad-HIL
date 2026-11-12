@@ -33,8 +33,10 @@ problem. **USB is.**
   own xHCI/EHCI controllers, storage on SATA (or NVMe), networking on an
   onboard PCIe NIC. You also get plenty of RAM and x86 cores, often for less
   than a new Pi 4/5 with a PSU, case and SD card. No USB hangs have shown up
-  since the move (early days: 2026-11-11 onwards). It also helped BLE: the classic
-  esp32dev now connects at 8.75 ms instead of the Pi's 48.75 ms
+  since the move (early days: 2026-11-11 onwards). It also changed BLE: with
+  identical v0.6.0 firmware, the classic esp32dev connects at 8.75 ms instead
+  of the Pi's 48.75 ms (button p50 ~13.5 vs ~17.7 ms). The esp32c3/esp32s3
+  were already at 8.75 ms on the Pi and came out slightly slower here
   (`docs/bench/README.md`).
 
 Whatever you pick: keep the ESP32 boards' USB controller free of unrelated

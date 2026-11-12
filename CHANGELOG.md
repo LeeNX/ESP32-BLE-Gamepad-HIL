@@ -22,9 +22,10 @@ What a bump means:
 
 - **Reference rig moved to mimir-u26 (x86_64 Ubuntu, kernel 7.0, BlueZ 5.85).** The Raspberry Pi 3B+ is retired:
   its shared dwc_otg USB/Ethernet controller kept wedging. mimir took over all four boards and their adapters
-  unchanged. The `docs/bench/` snapshot is re-taken on it (v0.6.0 bundles, run 42984123196). Every board now connects
-  at 8.75 ms, the classic esp32dev included (48.75 ms on the Pi), so its button p50 drops ~17.7 → ~13.5 ms and its
-  clean rate roughly doubles. The README's bench findings and the `test_conn_interval_recorded` comment follow; no
+  unchanged. The `docs/bench/` snapshot is re-taken on it (v0.6.0 bundles, run 42984123196). The Pi comparison uses
+  the Pi's bench of the identical bundles (run 42814840087). Every board now connects at 8.75 ms, the classic esp32dev
+  included (48.75 ms on the Pi with the same firmware), so its button p50 drops ~17.7 → ~13.5 ms and its clean rate
+  roughly doubles. The esp32c3/esp32s3 come out ~0.2–1.5 ms slower than on the Pi. The README's bench findings and the `test_conn_interval_recorded` comment follow; no
   gate changed.
 - **`docs/rig-build.md`: "Choosing a tester host".** A Pi 3B+ is good for one ESP32, maybe two. Its shared
   USB/Ethernet/storage controller is what wedged with three. A Pi 4 is untested, and an up-cycled 1-litre PC with USB on
