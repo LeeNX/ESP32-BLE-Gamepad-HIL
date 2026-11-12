@@ -18,6 +18,14 @@ What a bump means:
 
 ## [Unreleased]
 
+### Fixed
+
+- **`--by-board` phase 2 reconnects a dropped link instead of failing the bundle.** Phase 2 (`--no-pair`) trusted the
+  link phase 1 left up and never touched the adapter. A drop in between failed every test, and every retry failed the
+  same way. On mimir the drop comes from the Intel controller wedging during another lane's pairing (`hci0: Controller
+  not accepting commands anymore`, then a reset that drops every LE link). `bt_mac` now reconnects the existing bond
+  under `pair.lock` when it finds it disconnected (it never re-pairs), and does nothing when the link is up.
+
 ### Changed
 
 - **Reference rig moved to mimir-u26 (x86_64 Ubuntu, kernel 7.0, BlueZ 5.85).** The Raspberry Pi 3B+ is retired: its
