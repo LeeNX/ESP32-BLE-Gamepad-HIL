@@ -43,13 +43,15 @@ interval was the Pi's host/adapter with a classic ESP32, not the library or the
 core. Button e2e p50 is **~4.6–4.7 ms** on the esp32s3 (one exception, below),
 **~8.9–10.4 ms** on the esp32c3 and **~13.5 ms** on the esp32dev (Pi, same
 bundles: ~4.3–4.5, ~7.6–8.4 and ~17.7–18.2 ms). The host is **not a uniform
-win**: the esp32dev gains ~4 ms, but the esp32c3 and esp32s3 are ~0.2–1.5 ms
-slower on mimir. The esp32dev's p99 also tightens, from 18–66 ms to ~21–23 ms. Why the esp32dev still sits ~9 ms behind the esp32s3 on
-the same interval isn't settled. One outlier: **esp32s3 `default`** timed
-13.4 ms p50 (p99 39 ms, max 110 ms) while its axis p50 (4.7 ms) and the other
-four esp32s3 profiles (~4.6 ms) were normal; treat it as a noisy run until a
-re-run says otherwise. Latency still doesn't track report size (5–28 B) within
-a board. p99 is connection-interval jitter, so treat p50 as the signal.
+win**: the esp32dev gains ~4 ms, but profile for profile the esp32c3 is
+~0.7–2.1 ms and the esp32s3 ~0.2–0.4 ms (its `default` outlier aside) slower on
+mimir. The esp32dev's p99 also tightens, from 18–66 ms to ~21–23 ms. Why the
+esp32dev still sits ~9 ms behind the esp32s3 on the same interval isn't
+settled. One outlier: **esp32s3 `default`** timed 13.4 ms p50 (p99 39 ms, max
+110 ms) while its axis p50 (4.7 ms) and the other four esp32s3 profiles (~4.6
+ms) were normal; treat it as a noisy run until a re-run says otherwise. Latency
+still doesn't track report size (5–28 B) within a board. p99 is
+connection-interval jitter, so treat p50 as the signal.
 
 **Not comparable with earlier snapshots.** Until rig 0.4.0 the bench timed from
 the firmware's serial reply, after a blocking `tcdrain`, and the esp32c3's FTDI

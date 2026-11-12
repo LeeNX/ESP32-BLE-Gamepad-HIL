@@ -21,9 +21,9 @@ This rig exists because of two open-source projects, and it tests both of them:
   tested instead (`lib_repo` / `lib_ref`).
 - **[Bluepad32](https://github.com/ricardoquesada/bluepad32)** by Ricardo
   Quesada, the ESP32 gamepad *host* library. Flashed onto a rig board as the
-  observer, it is the second, independent host, alongside Linux/BlueZ, that
-  every gamepad build is checked against
-  ([Observer matrix](#observer-matrix-bluepad32)). The matrix's per-profile
+  observer, it is the second, independent host, alongside Linux/BlueZ. Every
+  board is checked against it as a gamepad on the `minimal`, `maxfeat` and
+  `sinput` profiles ([Observer matrix](#observer-matrix-bluepad32)). The matrix's per-profile
   "gaps" also record what Bluepad32 does and doesn't expose from a generic HID
   gamepad.
 
@@ -392,7 +392,8 @@ figures below come from the Pi's `--bench` of the identical v0.6.0 bundles
   esp32dev (~17.7–18.2 ms on the Pi), all solo. The esp32s3 `default` profile
   recorded **13.4 ms** this run, treated as a noisy run until a re-bench (see
   the snapshot README). Moving off the Pi isn't a uniform win: the esp32c3 and
-  esp32s3 are ~0.2–1.5 ms slower than on the Pi. **0 dropped** across 200
+  esp32s3 are slower than on the Pi, profile for profile (esp32c3 ~0.7–2.1 ms,
+  esp32s3 ~0.2–0.4 ms with its `default` outlier aside). **0 dropped** across 200
   paced presses per profile. The v0.3.0 snapshot's ~17.8 ms for the
   esp32c3 was a measurement artifact (the bench timed from the serial reply,
   which its FTDI bridge holds up to 16 ms); figures from before rig 0.4.0 aren't
