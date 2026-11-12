@@ -225,7 +225,7 @@ git add firmware/golden/ && git commit
 | HID descriptor | the descriptor the library generated (`getHidReportDescriptor()`) == its reported size == the copy the **kernel received over GATT** == a checked-in golden per profile |
 | Device Information | model / serial / fw / hw / sw revision + manufacturer, read over GATT, match the firmware config |
 | PnP ID | `0x2A50` vendor / product / version match `setVid` / `setPid` / `setGuidVersion` |
-| Battery | `setBatteryLevel()` via raw `0x2A19`, BlueZ `Battery1` D-Bus, and `upower` where installed; nothing in `/sys/class/power_supply` (BLE Battery Service, not a HID battery usage). `setPowerStateAll()` bitfield via `0x2A1A` |
+| Battery | `setBatteryLevel()` via raw `0x2A19`, BlueZ `Battery1` D-Bus, and `upower` where installed; nothing in `/sys/class/power_supply` (BLE Battery Service, not a HID battery usage). `setPowerStateAll()` bitfield via `0x2A1A` (required; `[rig] require_power_state = false` skips it for a library without it) |
 | Feature / Output reports | `specials` profile — Feature Report both directions (`setFeatureBuffer` ↔ `HIDIOCGFEATURE`, `HIDIOCSFEATURE` ↔ `getFeatureBuffer`); Output Report host→device via `write(/dev/hidraw*)` → `getOutputBuffer` |
 | Latency / throughput | `--bench`, see below |
 

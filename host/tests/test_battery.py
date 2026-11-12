@@ -58,31 +58,56 @@ CHARGING = (3, 2, 3, 2)
 DISCHARGING = (3, 3, 2, 2)
 
 
-@pytest.fixture
-def _needs_power_state(gatt, bt_mac):
-    if gatt.read_power_state(bt_mac) is None:
-        pytest.skip("0x2A1A Battery Power State characteristic not exposed")
+def _power_state(gatt, bt_mac, rigcfg):
+    """Read 0x2A1A. Its absence fails by default -- the library dropped the characteristic once
+    (13fb3c6, 2026-08-31, fixed in d21f096) and a skip hid that for two months. A tester for a
+    library without it sets [rig] require_power_state = false to skip instead.
+
+    None also comes back when GATT can't be read at all (BlueZ/D-Bus trouble, a dropped link), so
+    Battery Level (0x2A19, same service, every library version) tells the two apart: unreadable
+    too means it's not about 0x2A1A. And a 0x2A1A that BlueZ lists but whose read failed or came
+    back empty is a read problem, not an absent characteristic. Both fail whatever
+    require_power_state says -- the opt-out only covers a characteristic that isn't there."""
+    ps = gatt.read_power_state(bt_mac)
+    if ps is not None:
+        return ps
+    assert gatt.read_battery_level(bt_mac) is not None, (
+        "GATT unreadable: Battery Level (0x2A19) is missing as well as 0x2A1A -- a BlueZ/D-Bus or"
+        " link problem, not the power-state characteristic"
+    )
+    assert not gatt.has_characteristic(bt_mac, gatt.POWER_STATE_UUID), (
+        "0x2A1A Battery Power State is exposed but its read failed or came back empty -- a read"
+        " error, not a missing characteristic"
+    )
+    if not rigcfg["rig"].get("require_power_state", True):
+        pytest.skip(
+            "0x2A1A Battery Power State characteristic not exposed (require_power_state = false)"
+        )
+    pytest.fail(
+        "0x2A1A Battery Power State characteristic not exposed -- setPowerStateAll() is a no-op"
+        " (set [rig] require_power_state = false to skip)"
+    )
 
 
-def test_power_state_charging(connected_dut, gatt, bt_mac, _needs_power_state):
+def test_power_state_charging(connected_dut, gatt, bt_mac, rigcfg):
     connected_dut.power_state(*CHARGING)
     time.sleep(1.0)
-    ps = gatt.read_power_state(bt_mac)
+    ps = _power_state(gatt, bt_mac, rigcfg)
     assert ps["info"] == 3 and ps["charging"] == 3 and ps["discharging"] == 2
     assert ps["charging_meaning"] == "charging"
 
 
-def test_power_state_discharging(connected_dut, gatt, bt_mac, _needs_power_state):
+def test_power_state_discharging(connected_dut, gatt, bt_mac, rigcfg):
     connected_dut.power_state(*DISCHARGING)
     time.sleep(1.0)
-    ps = gatt.read_power_state(bt_mac)
+    ps = _power_state(gatt, bt_mac, rigcfg)
     assert ps["discharging"] == 3 and ps["charging"] == 2
     assert ps["discharging_meaning"] == "discharging"
 
 
-def test_power_state_byte_packing(connected_dut, gatt, bt_mac, _needs_power_state):
+def test_power_state_byte_packing(connected_dut, gatt, bt_mac, rigcfg):
     connected_dut.power_state(*CHARGING)
     time.sleep(1.0)
-    ps = gatt.read_power_state(bt_mac)
+    ps = _power_state(gatt, bt_mac, rigcfg)
     want = CHARGING[0] | (CHARGING[1] << 2) | (CHARGING[2] << 4) | (CHARGING[3] << 6)
     assert ps["_byte"] == want
