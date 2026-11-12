@@ -153,6 +153,20 @@ def read_power_state(mac):
     return _decode_power_state(raw)
 
 
+async def _has_char(mac, uuid):
+    bus = await _connect_bus()
+    try:
+        return uuid.lower() in await _char_paths(bus, _dev_path(mac))
+    finally:
+        bus.disconnect()
+
+
+def has_characteristic(mac, uuid):
+    """Is uuid in the device's GATT database as BlueZ discovered it? No read -- so a read that
+    failed (a BlueZ error, an empty value) can be told apart from a characteristic that isn't there."""
+    return asyncio.run(_has_char(mac, uuid))
+
+
 async def _battery1(mac):
     """org.bluez.Battery1.Percentage -- what BlueZ ingested from the Battery
     Service, and what UPower in turn consumes. None if the interface is absent."""

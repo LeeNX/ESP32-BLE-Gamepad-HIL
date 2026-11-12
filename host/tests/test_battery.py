@@ -65,13 +65,19 @@ def _power_state(gatt, bt_mac, rigcfg):
 
     None also comes back when GATT can't be read at all (BlueZ/D-Bus trouble, a dropped link), so
     Battery Level (0x2A19, same service, every library version) tells the two apart: unreadable
-    too means it's not about 0x2A1A, and that fails whatever require_power_state says."""
+    too means it's not about 0x2A1A. And a 0x2A1A that BlueZ lists but whose read failed or came
+    back empty is a read problem, not an absent characteristic. Both fail whatever
+    require_power_state says -- the opt-out only covers a characteristic that isn't there."""
     ps = gatt.read_power_state(bt_mac)
     if ps is not None:
         return ps
     assert gatt.read_battery_level(bt_mac) is not None, (
         "GATT unreadable: Battery Level (0x2A19) is missing as well as 0x2A1A -- a BlueZ/D-Bus or"
         " link problem, not the power-state characteristic"
+    )
+    assert not gatt.has_characteristic(bt_mac, gatt.POWER_STATE_UUID), (
+        "0x2A1A Battery Power State is exposed but its read failed or came back empty -- a read"
+        " error, not a missing characteristic"
     )
     if not rigcfg["rig"].get("require_power_state", True):
         pytest.skip(
