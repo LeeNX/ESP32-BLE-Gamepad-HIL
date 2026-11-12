@@ -25,7 +25,9 @@ What a bump means:
   characteristic in 13fb3c6 (2026-08-31), which made `setPowerStateAll()` and its setters
   silent no-ops. The skip hid that as a "worth a look" note on every run for two
   months, until d21f096 restored it. It's in both LeeNX and lemmingDev `master`, so the
-  tests now expect it. A library ref between those two commits fails them.
+  tests now expect it. A library ref between those two commits fails them. A tester for
+  a library without 0x2A1A opts out with `[rig] require_power_state = false` (new key,
+  default `true`) in its `hil_config.local.toml`, which brings back the skip.
 - **Reference rig moved to mimir-u26 (x86_64 Ubuntu, kernel 7.0, BlueZ 5.85).** The Raspberry Pi 3B+ is retired: its
   shared dwc_otg USB/Ethernet controller kept wedging. mimir took over all four boards and their adapters unchanged.
   The `docs/bench/` snapshot is re-taken on it (v0.6.0 bundles, run 42984123196). The Pi comparison uses the Pi's

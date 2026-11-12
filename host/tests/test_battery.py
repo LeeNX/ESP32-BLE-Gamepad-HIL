@@ -58,35 +58,41 @@ CHARGING = (3, 2, 3, 2)
 DISCHARGING = (3, 3, 2, 2)
 
 
-def _power_state(gatt, bt_mac):
-    """Read 0x2A1A; its absence is a failure, not a skip -- the library dropped the characteristic
-    once (13fb3c6, 2026-08-31, fixed in d21f096) and a skip hid that for two months."""
+def _power_state(gatt, bt_mac, rigcfg):
+    """Read 0x2A1A. Its absence fails by default -- the library dropped the characteristic once
+    (13fb3c6, 2026-08-31, fixed in d21f096) and a skip hid that for two months. A tester for a
+    library without it sets [rig] require_power_state = false to skip instead."""
     ps = gatt.read_power_state(bt_mac)
+    if ps is None and not rigcfg["rig"].get("require_power_state", True):
+        pytest.skip(
+            "0x2A1A Battery Power State characteristic not exposed (require_power_state = false)"
+        )
     assert ps is not None, (
         "0x2A1A Battery Power State characteristic not exposed -- setPowerStateAll() is a no-op"
+        " (set [rig] require_power_state = false to skip)"
     )
     return ps
 
 
-def test_power_state_charging(connected_dut, gatt, bt_mac):
+def test_power_state_charging(connected_dut, gatt, bt_mac, rigcfg):
     connected_dut.power_state(*CHARGING)
     time.sleep(1.0)
-    ps = _power_state(gatt, bt_mac)
+    ps = _power_state(gatt, bt_mac, rigcfg)
     assert ps["info"] == 3 and ps["charging"] == 3 and ps["discharging"] == 2
     assert ps["charging_meaning"] == "charging"
 
 
-def test_power_state_discharging(connected_dut, gatt, bt_mac):
+def test_power_state_discharging(connected_dut, gatt, bt_mac, rigcfg):
     connected_dut.power_state(*DISCHARGING)
     time.sleep(1.0)
-    ps = _power_state(gatt, bt_mac)
+    ps = _power_state(gatt, bt_mac, rigcfg)
     assert ps["discharging"] == 3 and ps["charging"] == 2
     assert ps["discharging_meaning"] == "discharging"
 
 
-def test_power_state_byte_packing(connected_dut, gatt, bt_mac):
+def test_power_state_byte_packing(connected_dut, gatt, bt_mac, rigcfg):
     connected_dut.power_state(*CHARGING)
     time.sleep(1.0)
-    ps = _power_state(gatt, bt_mac)
+    ps = _power_state(gatt, bt_mac, rigcfg)
     want = CHARGING[0] | (CHARGING[1] << 2) | (CHARGING[2] << 4) | (CHARGING[3] << 6)
     assert ps["_byte"] == want
