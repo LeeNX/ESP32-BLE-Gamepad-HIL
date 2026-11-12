@@ -30,6 +30,9 @@ What a bump means:
   USB/Ethernet/storage controller is what wedged with three. A Pi 4 is untested, and an up-cycled 1-litre PC with USB on
   its own bus is the recommendation. Adds mimir's specs and keeps the Pi build notes, BOM and numbers for anyone trying
   it on a Pi. The README's architecture intro, setup notes and reference-rig mentions follow.
+- **README: "Built on" section at the top** crediting and linking the two projects this rig tests:
+  [ESP32-BLE-Gamepad](https://github.com/lemmingDev/ESP32-BLE-Gamepad) (lemmingDev; CI builds the LeeNX fork by default)
+  and [Bluepad32](https://github.com/ricardoquesada/bluepad32) (Ricardo Quesada; the observer matrix's second host).
 
 ## [0.6.0] — 2026-11-10
 

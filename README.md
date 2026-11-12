@@ -8,6 +8,27 @@ axes / hats / special buttons map correctly, does the Device Information / PnP /
 battery data reach a GATT client, does the generated HID report descriptor
 arrive intact, and how fast do reports get through the air.
 
+## Built on
+
+This rig exists because of two open-source projects, and it tests both of them:
+
+- **[ESP32-BLE-Gamepad](https://github.com/lemmingDev/ESP32-BLE-Gamepad)** by
+  lemmingDev, the Arduino library that turns an ESP32 into a BLE HID gamepad.
+  It's the code under test: every `hil_runner` bundle is built against it, and
+  the suite checks what it puts on the air. CI builds
+  [LeeNX's fork](https://github.com/LeeNX/ESP32-BLE-Gamepad) by default, where
+  the HIL-driven changes land before going upstream. Any repo/ref can be
+  tested instead (`lib_repo` / `lib_ref`).
+- **[Bluepad32](https://github.com/ricardoquesada/bluepad32)** by Ricardo
+  Quesada, the ESP32 gamepad *host* library. Flashed onto a rig board as the
+  observer, it is the second, independent host, alongside Linux/BlueZ, that
+  every gamepad build is checked against
+  ([Observer matrix](#observer-matrix-bluepad32)). The matrix's per-profile
+  "gaps" also record what Bluepad32 does and doesn't expose from a generic HID
+  gamepad.
+
+Thanks to both projects and their contributors.
+
 The rig is split into two roles so the BLE host can be a small, cheap Linux
 box (an up-cycled 1-litre PC, or a Raspberry Pi for one or two boards) that
 doesn't need to build firmware:
@@ -33,7 +54,7 @@ doesn't need to build firmware:
 - Command injection is over USB serial, **not** BLE — an independent channel,
   so the harness never depends on the thing under test being up.
 
-BlueZ on the Pi is one host. The **observer matrix** adds a second: another rig
+BlueZ on the tester is one host. The **observer matrix** adds a second: another rig
 ESP32 running [Bluepad32](https://github.com/ricardoquesada/bluepad32), the
 controller library many ESP32 projects use as their host, pairs with a gamepad
 board and reports what it parsed. Each board takes turns as that observer, so
@@ -186,7 +207,7 @@ regenerate the goldens with [`scripts/update-goldens.py`](scripts/update-goldens
 it builds, flashes one board, reads the descriptor back over serial (`RMAP?` —
 no BLE, no Linux), and writes `firmware/golden/<profile>.hiddesc`, refusing any
 that overruns the 150-byte buffer. Runs on any dev box with PlatformIO + a wired
-board (the Pi rig can't build):
+board (the tester has no PlatformIO; it only flashes prebuilt bundles):
 
 ```bash
 desktop/.venv/bin/python scripts/update-goldens.py specials minimal
@@ -242,7 +263,7 @@ and evdev, under hid-generic and under the `sinput` driver — and writes
 
 ## Observer matrix (Bluepad32)
 
-BlueZ on the Pi is one host. The observer matrix adds a second: another rig
+BlueZ on the tester is one host. The observer matrix adds a second: another rig
 ESP32 running [Bluepad32](https://github.com/ricardoquesada/bluepad32). Flashed
 with the **observer** firmware, a board pairs with a gamepad board over BLE and
 prints what Bluepad32 parsed — buttons, D-pad, sticks, triggers, IMU, the SInput
@@ -251,9 +272,9 @@ feature response — as `HIL ...` lines on its serial console.
 sends player LED, RGB and rumble back through Bluepad32.
 
 ```text
- gamepad A (hil_runner) ──BLE──► BlueZ on the Pi ──────────────► test.sh / sinput_hil.py   BlueZ lane
+ gamepad A (hil_runner) ──BLE──► BlueZ on tester ──────────────► test.sh / sinput_hil.py   BlueZ lane
  gamepad B (hil_runner) ──BLE──► observer board (Bluepad32) ─USB─► bp32_hil.py              Bluepad32 lane
-       ▲ both gamepads are driven over USB serial from the Pi
+       ▲ both gamepads are driven over USB serial from the tester
 ```
 
 **Rotations.** `tester/test-matrix.sh` makes each board in turn the observer and
