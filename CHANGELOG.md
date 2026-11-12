@@ -18,6 +18,23 @@ What a bump means:
 
 ## [Unreleased]
 
+### Changed
+
+- **Reference rig moved to mimir-u26 (x86_64 Ubuntu, kernel 7.0, BlueZ 5.85).** The Raspberry Pi 3B+ is retired: its
+  shared dwc_otg USB/Ethernet controller kept wedging. mimir took over all four boards and their adapters unchanged.
+  The `docs/bench/` snapshot is re-taken on it (v0.6.0 bundles, run 42984123196). The Pi comparison uses the Pi's
+  bench of the identical bundles (run 42814840087). Every board now connects at 8.75 ms, the classic esp32dev included
+  (48.75 ms on the Pi with the same firmware), so its button p50 drops ~17.7 → ~13.5 ms and its clean rate roughly
+  doubles. The esp32c3/esp32s3 come out slower than on the Pi, profile for profile: ~0.7–2.1 ms and ~0.2–0.4 ms. The
+  README's bench findings and the `test_conn_interval_recorded` comment follow; no gate changed.
+- **`docs/rig-build.md`: "Choosing a tester host".** A Pi 3B+ is good for one ESP32, maybe two. Its shared
+  USB/Ethernet/storage controller is what wedged with three. A Pi 4 is untested, and an up-cycled 1-litre PC with USB on
+  its own bus is the recommendation. Adds mimir's specs and keeps the Pi build notes, BOM and numbers for anyone trying
+  it on a Pi. The README's architecture intro, setup notes and reference-rig mentions follow.
+- **README: "Built on" section at the top** crediting and linking the two projects this rig tests:
+  [ESP32-BLE-Gamepad](https://github.com/lemmingDev/ESP32-BLE-Gamepad) (lemmingDev; CI builds the LeeNX fork by default)
+  and [Bluepad32](https://github.com/ricardoquesada/bluepad32) (Ricardo Quesada; the observer matrix's second host).
+
 ## [0.6.0] — 2026-11-10
 
 ### Added

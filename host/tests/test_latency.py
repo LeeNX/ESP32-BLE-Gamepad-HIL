@@ -55,8 +55,10 @@ def test_button_latency_reasonable(sweep):
 
 def test_conn_interval_recorded(sweep):
     ci = sweep["conn_interval_ms"]
-    # ~48.75 ms observed on the Pi -- the library doesn't request a fast
-    # interval, which is the throughput ceiling. Just sanity-bound it.
+    # The library doesn't request an interval -- the host settles it, and it's
+    # the throughput ceiling: 8.75 ms on mimir-u26 for every board, but the
+    # retired Pi 3B+ gave the classic esp32dev 43.75-48.75 ms. Just
+    # sanity-bound it.
     assert ci is None or 5 <= ci <= 100, f"odd connection interval {ci} ms"
 
 

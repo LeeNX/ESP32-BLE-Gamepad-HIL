@@ -8,11 +8,33 @@ axes / hats / special buttons map correctly, does the Device Information / PnP /
 battery data reach a GATT client, does the generated HID report descriptor
 arrive intact, and how fast do reports get through the air.
 
-The rig is split into two roles so the BLE host can be a small board (a
-Raspberry Pi) that can't build firmware in reasonable time:
+## Built on
+
+This rig exists because of two open-source projects, and it tests both of them:
+
+- **[ESP32-BLE-Gamepad](https://github.com/lemmingDev/ESP32-BLE-Gamepad)** by
+  lemmingDev, the Arduino library that turns an ESP32 into a BLE HID gamepad.
+  It's the code under test: every `hil_runner` bundle is built against it, and
+  the suite checks what it puts on the air. CI builds
+  [LeeNX's fork](https://github.com/LeeNX/ESP32-BLE-Gamepad) by default, where
+  the HIL-driven changes land before going upstream. Any repo/ref can be
+  tested instead (`lib_repo` / `lib_ref`).
+- **[Bluepad32](https://github.com/ricardoquesada/bluepad32)** by Ricardo
+  Quesada, the ESP32 gamepad *host* library. Flashed onto a rig board as the
+  observer, it is the second, independent host, alongside Linux/BlueZ. Every
+  board is checked against it as a gamepad on the `minimal`, `maxfeat` and
+  `sinput` profiles ([Observer matrix](#observer-matrix-bluepad32)). The matrix's per-profile
+  "gaps" also record what Bluepad32 does and doesn't expose from a generic HID
+  gamepad.
+
+Thanks to both projects and their contributors.
+
+The rig is split into two roles so the BLE host can be a small, cheap Linux
+box (an up-cycled 1-litre PC, or a Raspberry Pi for one or two boards) that
+doesn't need to build firmware:
 
 ```text
- BUILDER (CI runner / dev machine)          TESTER (Raspberry Pi + ESP32 + BLE)
+ BUILDER (CI runner / dev machine)          TESTER (Linux box + ESP32 + BLE)
  ┌────────────────────────────┐   bundle   ┌──────────────────────────────────┐
  │ builder/build.sh:          │  (rsync/   │ tester/test.sh:                  │
  │  pio run  (lib under test) │   CI       │  tester/flash.py  (esptool only) │
@@ -27,12 +49,12 @@ Raspberry Pi) that can't build firmware in reasonable time:
   against the library under test and writes a **bundle**: the flashable `.bin`
   parts + `manifest.json` (chip, flash offsets, sha256s, lib git sha).
 - **tester** needs only `esptool` + the pytest deps (all pure-Python /
-  lightweight — fine on a Pi). `tester/test.sh` flashes a bundle and runs the
+  lightweight — fine on a Pi or a small PC). `tester/test.sh` flashes a bundle and runs the
   suite.
 - Command injection is over USB serial, **not** BLE — an independent channel,
   so the harness never depends on the thing under test being up.
 
-BlueZ on the Pi is one host. The **observer matrix** adds a second: another rig
+BlueZ on the tester is one host. The **observer matrix** adds a second: another rig
 ESP32 running [Bluepad32](https://github.com/ricardoquesada/bluepad32), the
 controller library many ESP32 projects use as their host, pairs with a gamepad
 board and reports what it parsed. Each board takes turns as that observer, so
@@ -132,10 +154,15 @@ tester/bootstrap.sh
 
 Still manual:
 
+- **Host choice**: a Raspberry Pi 3B+ handles one ESP32, maybe two. Its USB,
+  Ethernet and any USB storage share one controller, which wedged with three
+  boards. The reference rig is now an up-cycled 1-litre PC with USB on its own
+  bus. See [`docs/rig-build.md`](docs/rig-build.md) "Choosing a tester host".
 - **Power**: a Pi 3B+ can't reliably power an ESP32 doing BLE off its own USB —
   brownouts show up as a reset loop that never advertises. Use a **powered USB
-  hub** for the ESP32.
-- BLE: a built-in Pi adapter works; a USB BT dongle is steadier for a rig.
+  hub** for the ESP32s on any host.
+- BLE: a built-in adapter works (the Pi's, or the PC's onboard Intel one on
+  the reference rig); a USB BT dongle is steadier on a Pi.
 - `hil_config.local.toml` sets the real `[board.<b>].port`
   (`ls -l /dev/serial/by-id/`).
 
@@ -180,7 +207,7 @@ regenerate the goldens with [`scripts/update-goldens.py`](scripts/update-goldens
 it builds, flashes one board, reads the descriptor back over serial (`RMAP?` —
 no BLE, no Linux), and writes `firmware/golden/<profile>.hiddesc`, refusing any
 that overruns the 150-byte buffer. Runs on any dev box with PlatformIO + a wired
-board (the Pi rig can't build):
+board (the tester has no PlatformIO; it only flashes prebuilt bundles):
 
 ```bash
 desktop/.venv/bin/python scripts/update-goldens.py specials minimal
@@ -236,7 +263,7 @@ and evdev, under hid-generic and under the `sinput` driver — and writes
 
 ## Observer matrix (Bluepad32)
 
-BlueZ on the Pi is one host. The observer matrix adds a second: another rig
+BlueZ on the tester is one host. The observer matrix adds a second: another rig
 ESP32 running [Bluepad32](https://github.com/ricardoquesada/bluepad32). Flashed
 with the **observer** firmware, a board pairs with a gamepad board over BLE and
 prints what Bluepad32 parsed — buttons, D-pad, sticks, triggers, IMU, the SInput
@@ -245,9 +272,9 @@ feature response — as `HIL ...` lines on its serial console.
 sends player LED, RGB and rumble back through Bluepad32.
 
 ```text
- gamepad A (hil_runner) ──BLE──► BlueZ on the Pi ──────────────► test.sh / sinput_hil.py   BlueZ lane
+ gamepad A (hil_runner) ──BLE──► BlueZ on tester ──────────────► test.sh / sinput_hil.py   BlueZ lane
  gamepad B (hil_runner) ──BLE──► observer board (Bluepad32) ─USB─► bp32_hil.py              Bluepad32 lane
-       ▲ both gamepads are driven over USB serial from the Pi
+       ▲ both gamepads are driven over USB serial from the tester
 ```
 
 **Rotations.** `tester/test-matrix.sh` makes each board in turn the observer and
@@ -349,18 +376,25 @@ was carrying during that sweep (normally `1`); `bench.py` records it as
 `adapter_links` so a number taken while another bond lingered isn't mistaken
 for a clean solo measurement.
 
-### Findings (3 boards × 5 suite profiles, Raspberry Pi 3B+, kernel 6.18, BlueZ 5.82)
+### Findings (3 boards × 5 suite profiles, x86_64 mimir-u26, kernel 7.0, BlueZ 5.85)
 
-From the v0.4.0 snapshot in [`docs/bench/`](docs/bench/README.md) (library
-0.8.0), the first timed from the serial write; its README has the full table
-and the caveats.
+From the 2026-11-11 snapshot in [`docs/bench/`](docs/bench/README.md) (the
+v0.6.0 bundles), the first on mimir-u26, which replaced the Raspberry Pi 3B+
+as the reference rig; its README has the full table and the caveats. The Pi
+figures below come from the Pi's `--bench` of the identical v0.6.0 bundles
+([run 42814840087](https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/actions/runs/42814840087)), so only the host differs.
 
-- **Connection interval 8.75 ms on the esp32c3/esp32s3, 48.75 ms on the
-  esp32dev this run, MTU 255.** BlueZ settles the interval per connection, so
-  it moves between runs (43.75 ms on the esp32dev in the v0.3.0 snapshot).
-- Single button press → host: **~4.2–4.5 ms** median on the esp32s3, **~8.0–8.5
-  ms** on the esp32c3 and **~17.7 ms** on the esp32dev, all solo. **0 dropped**
-  across 200 paced presses per profile. The v0.3.0 snapshot's ~17.8 ms for the
+- **Connection interval 8.75 ms on all three boards, MTU 255–256.** With the
+  same bundles the Pi negotiated 48.75 ms for the esp32dev. That was the
+  host/adapter with a classic ESP32, not the library or the core.
+- Single button press → host: **~4.6–4.7 ms** median on the esp32s3 for four
+  of its five profiles, **~8.9–10.4 ms** on the esp32c3 and **~13.5 ms** on the
+  esp32dev (~17.7–18.2 ms on the Pi), all solo. The esp32s3 `default` profile
+  recorded **13.4 ms** this run, treated as a noisy run until a re-bench (see
+  the snapshot README). Moving off the Pi isn't a uniform win: the esp32c3 and
+  esp32s3 are slower than on the Pi, profile for profile (esp32c3 ~0.7–2.1 ms,
+  esp32s3 ~0.2–0.4 ms with its `default` outlier aside). **0 dropped** across 200
+  paced presses per profile. The v0.3.0 snapshot's ~17.8 ms for the
   esp32c3 was a measurement artifact (the bench timed from the serial reply,
   which its FTDI bridge holds up to 16 ms); figures from before rig 0.4.0 aren't
   comparable.
@@ -371,7 +405,7 @@ and the caveats.
 - **Latency is flat vs HID report size** (5–28 B) within a board. p99 is
   connection-interval jitter and swings run to run; p50 is the signal. The
   interval bounds *latency*, not paced *rate*: NimBLE sends several packets per
-  connection event, and the esp32s3 paces **~258–267 Hz** clean. The esp32c3's
+  connection event, and the esp32s3 paces **~389–398 Hz** clean. The esp32c3's
   ~63 Hz is its serial bridge, not BLE.
 - **Unpaced `sendReport()` bursts overflow and drop silently** — at gap=0 only
   ~2% of a 500-report burst survives. Don't call `sendReport()` faster than you
@@ -637,7 +671,7 @@ red test. Locally the same:
 
 `tester/test-all.sh --by-board` runs one **lane per board** concurrently — each
 lane flashes + tests its own profiles sequentially, but the boards overlap. On
-the 3-board reference rig the old 18-bundle functional matrix ran in **~12 min**
+the 3-board Raspberry Pi rig the old 18-bundle functional matrix ran in **~12 min**
 (measured, `-k "buttons or descriptor"`) versus ~35 min sequential — about 3x,
 bounded by the slowest board's lane. Every push now runs 2 suite profiles
 (`minimal maxfeat`, 6 bundles), so it's quicker still, plus a quick observer
@@ -714,12 +748,12 @@ above are the software half; these are physical additions:
   `builder/build.sh` (the bundle path CI/the tester use) and `conftest.py`'s
   direct-from-source build.
 - **Ambient box temperature/humidity sensor** (e.g. BME280/SHT31 on I2C to
-  the Pi): cheap, and drops straight into `tester/rig-lock.sh`'s
+  a Pi tester, or a USB one on a PC): cheap, and drops straight into `tester/rig-lock.sh`'s
   `health-timeline-*.csv` sampler as one more column.
-- **Clean power-off button**: `dtoverlay=gpio-shutdown` in the Pi's
+- **Clean power-off button** (Pi tester): `dtoverlay=gpio-shutdown` in the Pi's
   `config.txt` + a momentary switch on GPIO3/GND — no code, built into
   Raspberry Pi OS, does a proper clean shutdown.
-- **Hard reset/power-cycle button**: no native reset line on the Pi, so this
+- **Hard reset/power-cycle button** (Pi tester): no native reset line on the Pi, so this
   means a relay or smart-plug cutting 5V. Pair it with `gpio-shutdown` (press
   = clean shutdown first) rather than a raw kill switch — cutting power to a
   live system is the same risk as the crash that prompted this list.
@@ -736,8 +770,8 @@ not a failure. So `esp32c3` and `esp32s3` ship with their ports still
 see [ESP32-C3 serial bridge](#esp32-c3-serial-bridge) /
 [ESP32-S3 dual-USB-C setup](#esp32-s3-dual-usb-c-setup)), and a newly-wired
 board starts running with no CI change. All three are verified green on the
-reference rig (Raspberry Pi 3B+ — photos and what it takes to run all three
-concurrently: `docs/rig-build.md`).
+reference rig (an up-cycled 1-litre PC since 2026-11-11, a Raspberry Pi 3B+
+before that — photos, specs, and why it moved: `docs/rig-build.md`).
 
 ```bash
 PYTHONPATH=host python3 -m hil.detect            # table of present / absent + why
