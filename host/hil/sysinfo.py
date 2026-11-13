@@ -103,8 +103,20 @@ def _loadavg():
         return None
 
 
+# The zone that is the CPU itself: x86 package sensor (coretemp), the Pi's SoC sensor. ACPI zones
+# (acpitz) on a PC are board/chassis sensors that sit ~25 degC below the CPU -- the fallback only.
+_CPU_ZONES = ("x86_pkg_temp", "cpu-thermal", "cpu_thermal", "soc_thermal")
+
+
 def _cpu_temp_c():
-    for p in glob.glob("/sys/class/thermal/thermal_zone*/temp"):
+    zones = []
+    for z in sorted(glob.glob("/sys/class/thermal/thermal_zone*")):
+        try:
+            zones.append((open(f"{z}/type").read().strip(), f"{z}/temp"))
+        except Exception:
+            pass
+    zones.sort(key=lambda t: t[0] not in _CPU_ZONES)  # stable: CPU zones first, else glob order
+    for _, p in zones:
         try:
             return round(int(open(p).read()) / 1000, 1)
         except Exception:
@@ -159,13 +171,44 @@ def _boot_id():
 
 
 def _dwc_warnings():
-    """dwc_otg dequeue timeouts in the kernel log since boot (hil.usbhealth's count), or None."""
+    """dwc_otg dequeue timeouts in the kernel log since boot (hil.usbhealth's count), or None -- also
+    None on a host with no dwc_otg controller (anything but a Pi <= 3), where the count is always a
+    meaningless 0. A non-zero count is always reported."""
     try:
         from hil.usbhealth import dwc_warnings
 
-        return dwc_warnings()
+        n = dwc_warnings()
     except Exception:
         return None
+    if n == 0 and not os.path.isdir("/sys/bus/platform/drivers/dwc_otg"):
+        return None
+    return n
+
+
+# One line per Bluetooth controller wedge: the controller stops taking HCI commands, the kernel resets
+# it and every LE link on it drops. mimir's Intel 8087:07da does it during esp32dev pairing
+# (hil-phase2-link-drop memory); a run's failures in that window are the adapter, not the firmware.
+# The kernel logs it as "hciN: hardware error 0x.." (hci_core, as on mimir) or, when the driver installs
+# its own handler (btintel on newer Intel parts), "hciN: Hardware error 0x.." -- one or the other per
+# event, never both, so matching either case can't double-count. ("Injecting HCI hardware error event"
+# and "Controller not accepting commands" accompany it but don't match.)
+_BT_HW_ERROR = re.compile(r"\bhci\d+: hardware error\b", re.IGNORECASE)
+
+
+def count_bt_hw_errors(log):
+    """Bluetooth controller hardware-error lines in kernel-log text."""
+    return sum(bool(_BT_HW_ERROR.search(ln)) for ln in log.splitlines())
+
+
+def _bt_hw_errors():
+    """Bluetooth controller hardware errors in the kernel log since boot, or None if it can't be read."""
+    try:
+        r = subprocess.run(["dmesg"], capture_output=True, text=True, timeout=8)
+    except Exception:
+        return None
+    if r.returncode != 0:
+        return None
+    return count_bt_hw_errors(r.stdout)
 
 
 def _dwc_burst():
@@ -181,13 +224,15 @@ def _dwc_burst():
 
 def dynamic():
     """A one-shot sample of everything that could skew a timing measurement, plus the host's
-    uptime and dwc_otg warning count (a USB bus degrading since the last reboot)."""
+    uptime, its dwc_otg warning count (a Pi USB bus degrading since the last reboot) and its
+    Bluetooth controller hardware-error count. Pi-only fields are None elsewhere."""
     return {
         "sampled_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "uptime_s": _uptime_s(),
         "boot_id": _boot_id(),
         "dwc_otg_warnings": _dwc_warnings(),
         "dwc_otg_burst": _dwc_burst(),
+        "bt_hw_errors": _bt_hw_errors(),
         "loadavg": _loadavg(),
         "cpu_temp_c": _cpu_temp_c(),
         "cpu_freq_mhz": _cpu_freq_mhz(),
