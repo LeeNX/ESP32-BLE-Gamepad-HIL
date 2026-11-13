@@ -5,7 +5,8 @@ nothing but esptool. No PlatformIO, no toolchain -- fine on a Raspberry Pi.
     tester/flash.py <bundle_dir> --port /dev/ttyUSB0 [--console-port /dev/ttyUSB1]
 
 Multi-slot (the default, docs/multislot-ota.md): the board's flash holds four apps in OTA slots behind a shared
-partition table (firmware/partitions/multislot.csv), and this treats them as a cache:
+partition table (firmware/partitions/multislot.csv; eight, multislot-8mb.csv, when the runner bootloader says 8 MB+ --
+the esp32s3), and this treats them as a cache:
 
   1. the bundle's app already in a slot -> boot it: over the console (`BOOT <n>`, no esptool, no USB bulk transfer,
      no native-USB re-enumeration) when --console-port answers, else an 8 KB otadata write with esptool;
@@ -239,7 +240,12 @@ def multislot_bootloader(bundle, manifest):
 
 def multislot(args, manifest, base, rec):
     """The slot cache -- see the module docstring."""
-    lay = ms.layout()
+    boot = multislot_bootloader(args.bundle, manifest)
+    if not boot:
+        raise SystemExit(f"{args.bundle}: no bootloader.bin")
+    # The table goes by the flash size in the bootloader this board gets (and keeps): what its apps can address.
+    flash_size = ms.bootloader_flash_size(boot[1].read_bytes()) or 4 << 20
+    lay = ms.layout(ms.table_for(flash_size), flash_size)
     slots, nslots = lay["slots"], len(lay["slots"])
     fw = args.bundle / "firmware.bin"
     try:
@@ -354,9 +360,6 @@ def multislot(args, manifest, base, rec):
 
         # 2. esptool verify, one session: is the table ours, the bootloader the runner's, and which slot (if any)
         # holds the app?
-        boot = multislot_bootloader(args.bundle, manifest)
-        if not boot:
-            raise SystemExit(f"{args.bundle}: no bootloader.bin")
         boot_off, boot_bin = int(boot[0], 16), boot[1]
         regions = [hex(ms.TABLE_OFFSET), str(tmp / "partitions.bin"), hex(boot_off), str(boot_bin)]
         for s in slots:
