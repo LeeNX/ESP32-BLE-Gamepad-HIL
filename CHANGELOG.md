@@ -18,6 +18,8 @@ What a bump means:
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-11-13
+
 ### Fixed
 
 - **The observer matrix resets the previous rotation's observer before flashing anything.** With three boards, the
@@ -925,7 +927,8 @@ descriptor + latency suite, and the Tailscale-based CI. Plus:
   `HIL_RIG_ENABLED=true` is set — so a fork with no tester wired gets a clean
   skipped run, not a failure on the missing Tailscale secret.
 
-[Unreleased]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.7.0
 [0.6.0]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.6.0
 [0.5.0]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.5.0
 [0.4.1]: https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/releases/tag/v0.4.1
