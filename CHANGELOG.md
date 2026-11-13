@@ -41,8 +41,9 @@ What a bump means:
 
 - **Rig health block fits an x86 tester.** The Pi-only rows (`dwc_otg` timeouts, `throttled`, `undervoltage now`)
   are left out when the tester has no dwc_otg controller / `vcgencmd` / `rpi_volt` sensor; on mimir they were always
-  `0` / `?`. `hil.sysinfo` samples a new `bt_hw_errors`: `hciN: hardware error` lines in the kernel log since boot,
-  one per Bluetooth controller wedge (the failure behind the phase-2 fix above). The block shows it with **+N this
+  `0` / `?`. `hil.sysinfo` samples a new `bt_hw_errors`: `hciN: hardware error` lines in this boot's kernel log,
+  one per Bluetooth controller wedge. It reads the journal, falling back to dmesg, whose ring buffer on mimir is
+  too small to hold a whole boot (the count went down mid-run) (the failure behind the phase-2 fix above). The block shows it with **+N this
   run** and warns on any new one. `cpu_temp_c` now reads the CPU's own zone (`x86_pkg_temp`, the Pi's `cpu-thermal`)
   rather than whichever thermal zone came first, which on a PC can be an ACPI board sensor ~25 °C cooler.
 - **A missing Battery Power State (0x2A1A) characteristic now fails `test_battery.py`'s

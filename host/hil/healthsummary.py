@@ -17,7 +17,7 @@ host rebooted, or the kernel log wrapped).
 
 Off a Pi (mimir, an x86 PC, is the reference rig since 2026-11-11) there's no dwc_otg controller and no
 vcgencmd/rpi_volt: sysinfo samples those as None and their rows are left out. What matters there is the
-Bluetooth controller: `hciN: hardware error` lines in the kernel log, one per wedge (the controller stops
+Bluetooth controller: `hciN: hardware error` lines in this boot's kernel log (the journal, else dmesg), one per wedge (the controller stops
 taking commands and the kernel resets it, dropping every BLE link). Any new one during a run is a warning.
 """
 
