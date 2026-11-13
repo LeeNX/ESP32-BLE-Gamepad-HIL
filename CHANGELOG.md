@@ -20,6 +20,11 @@ What a bump means:
 
 ### Fixed
 
+- **The matrix's sinput BlueZ lane no longer fails with `found ['pad']` when the driver's nodes come up one at a
+  time.** `sinput_hil.py` returned as soon as `SInput Gamepad` had an event node. The driver registers the Gamepad,
+  IMU and Touchpad in one probe, but udev creates their `/dev/input` nodes one by one, so the check could run
+  before the IMU/Touchpad existed (twice on mimir, both esp32dev observer / esp32c3 gamepad, after a fresh write).
+  It now waits for every node the check needs.
 - **`--by-board` phase 2 reconnects a dropped link instead of failing the bundle.** Phase 2 (`--no-pair`) trusted the
   link phase 1 left up and never touched the adapter. A drop in between failed every test, and every retry failed the
   same way. On mimir the drop comes from the Intel controller wedging during another lane's pairing (`hci0: Controller
