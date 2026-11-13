@@ -20,6 +20,12 @@ What a bump means:
 
 ### Fixed
 
+- **The observer matrix resets the previous rotation's observer before flashing anything.** With three boards, the
+  previous observer is always the next rotation's Bluepad32 gamepad and is flashed second. Until then it still ran
+  Bluepad32 with its last `allow <addr>` filter and autoconnect, so it could take the BlueZ gamepad (its own last
+  gamepad) as that board booted, and BlueZ never saw it advertise. That was `observer=esp32c3 minimal bluez
+  gamepad=esp32s3` failing with "no BLE device named HILpad esp32s3" on 2026-11-11 and 2026-11-13. `test-matrix.sh`
+  only reset a board that sat a rotation out; it now also resets any non-observer board still on observer firmware.
 - **The matrix's sinput BlueZ lane no longer fails with `found ['pad']` when the driver's nodes come up one at a
   time.** `sinput_hil.py` returned as soon as `SInput Gamepad` had an event node. The driver registers the Gamepad,
   IMU and Touchpad in one probe, but udev creates their `/dev/input` nodes one by one, so the check could run

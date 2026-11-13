@@ -179,6 +179,14 @@ for obs in "${ROTATIONS[@]}"; do
   echo; echo "==== rotation: observer=$obs  BlueZ<-$bz  Bluepad32<-$bp${idle[*]:+  idle: ${idle[*]}}"
   unbond
   for b in "${idle[@]}"; do reset_board "$b"; done
+  # The previous rotation's observer plays a gamepad in this one, but it isn't reflashed until after the BlueZ
+  # gamepad -- with 3 boards it's always the Bluepad32 gamepad, flashed second. Until then it still runs the
+  # observer with its last lane's `allow <addr>` and autoconnect, and can take the BlueZ gamepad (its last
+  # Bluepad32 gamepad) as that board boots: BlueZ never sees it advertise (2026-11-11 run 42984123196 and
+  # 2026-11-13 run 43382407914, both observer=esp32c3 minimal bluez gamepad=esp32s3). A reset drops the filter.
+  for b in "${BOARDS[@]}"; do
+    [[ $b != "$obs" && ${FAMILY[$b]:-} == observer && " ${idle[*]} " != *" $b "* ]] && reset_board "$b"
+  done
   flash "$obs" "$obs_bundle"
   guard "flash observer $obs"
 
