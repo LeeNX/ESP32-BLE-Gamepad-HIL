@@ -16,6 +16,8 @@ import time
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 DEFAULT_TABLE = REPO / "firmware" / "partitions" / "multislot.csv"
+# 8 MB+ boards (the esp32s3): the same partitions plus ota_4..ota_7 -- see table_for().
+TABLE_8MB = REPO / "firmware" / "partitions" / "multislot-8mb.csv"
 
 # esptool's image chip ids (extended header), by esptool --chip name.
 CHIP_IDS = {
@@ -215,6 +217,19 @@ def parse_image(data, chip):
     }
 
 
+def bootloader_flash_size(data):
+    """Flash size in a bootloader image's header (byte 3, high nibble): the size the chip is set up for at boot, and
+    so the most any app on it can address. None when the data isn't an ESP image."""
+    if len(data) < 4 or data[0] != 0xE9:
+        return None
+    return FLASH_SIZES.get(data[3] >> 4)
+
+
+def table_for(flash_size):
+    """The multi-slot table for a board whose bootloader says flash_size: 8 slots from 8 MB up, else 4."""
+    return TABLE_8MB if (flash_size or 0) >= 8 << 20 else DEFAULT_TABLE
+
+
 def layout(path=DEFAULT_TABLE, flash_size=4 << 20):
     """The checked table: parts, OTA slots (in order), otadata, nvs, and its binary."""
     parts = parse_table(path)
@@ -248,6 +263,8 @@ def parse_slots(rest):
                 out["slots"][idx] = None
             else:
                 sha, state, proj, ver = (val.split("/") + ["", "", ""])[:4]
+                if not re.fullmatch(r"[0-9a-f]{64}", sha):
+                    continue  # cut short: a firmware whose line buffer ran out mid-slot -- unknown, not a digest
                 out["slots"][idx] = {"sha256": sha, "state": state, "project": proj, "version": ver}
         elif "=" in tok:
             k, v = tok.split("=", 1)
@@ -279,8 +296,14 @@ class Console:
         self.ser.reset_input_buffer()
         self.ser.write((line + "\n").encode())
         end = time.monotonic() + timeout
+        part = b""
         while time.monotonic() < end:
-            got = self.ser.readline().decode(errors="replace").strip()
+            # readline() gives up after the port's 0.2 s timeout with whatever arrived: an 8-slot SLOTS line (~1 KB,
+            # ~90 ms at 115200, more through a USB bridge) can straddle that. Keep the piece until its newline.
+            part += self.ser.readline()
+            if not part.endswith(b"\n"):
+                continue
+            got, part = part.decode(errors="replace").strip(), b""
             m = REPLY.match(got)
             if m:
                 return m.group(1).lower(), m.group(2)

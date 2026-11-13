@@ -18,6 +18,16 @@ What a bump means:
 
 ## [Unreleased]
 
+### Added
+
+- **The esp32s3 keeps eight apps in its slots, not four.** Every image a run uses (six runner profiles and the
+  observer) now stays on the S3, so a warm run switches between them without writing to it. `tester/flash.py` picks
+  the new `firmware/partitions/multislot-8mb.csv` when the runner bootloader it writes says 8 MB or more (the S3's
+  does). The 4 MB boards keep `multislot.csv`. The new table keeps every offset of the old one, so slots 0-3 survive
+  the one-time conversion. The `SLOTS?` line buffer in hil_runner and the observer grows from 512 bytes (about full
+  at four slots) to room for all 16. The host now joins a reply that arrives in more than one read, and drops a slot
+  whose digest was cut short.
+
 ### Fixed
 
 - **The matrix's sinput BlueZ lane no longer fails with `found ['pad']` when the driver's nodes come up one at a

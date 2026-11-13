@@ -1,0 +1,18 @@
+# Multi-slot layout for 8 MB+ boards (the esp32s3; docs/multislot-ota.md): multislot.csv plus ota_4..ota_7, so every
+# image a run uses (six hil_runner profiles and the Bluepad32 observer) stays in its own slot and a warm run writes
+# nothing. tester/flash.py picks this table when the runner bootloader it writes says 8 MB or more (the S3 runner's,
+# from board esp32-s3-devkitc-1); every partition of multislot.csv keeps its offset, so slots 0-3 survive the switch.
+# 8 MB, not 16: the bootloader's header (8 MB) is the size the apps can address, whatever the chip has.
+# Name,   Type, SubType,  Offset,   Size
+nvs,      data, nvs,      0x9000,   0x6000
+otadata,  data, ota,      0xf000,   0x2000
+phy_init, data, phy,      0x11000,  0x1000
+ota_0,    app,  ota_0,    0x20000,  0xf0000
+ota_1,    app,  ota_1,    0x110000, 0xf0000
+ota_2,    app,  ota_2,    0x200000, 0xf0000
+ota_3,    app,  ota_3,    0x2f0000, 0xf0000
+coredump, data, coredump, 0x3f0000, 0x10000
+ota_4,    app,  ota_4,    0x400000, 0xf0000
+ota_5,    app,  ota_5,    0x4f0000, 0xf0000
+ota_6,    app,  ota_6,    0x5e0000, 0xf0000
+ota_7,    app,  ota_7,    0x6d0000, 0xf0000

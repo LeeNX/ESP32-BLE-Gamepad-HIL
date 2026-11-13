@@ -121,7 +121,7 @@ static void print_help(void) {
 static void handle_command(char* line) {
     unsigned a, b, c;
     char addr[32], extra[8];
-    static char slots[512];
+    static char slots[HIL_SLOTS_LINE];
     int n, end1 = 0, end2 = 0;
 
     if (strcmp(line, "help") == 0 || strcmp(line, "?") == 0) {

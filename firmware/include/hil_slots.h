@@ -29,6 +29,10 @@
 #include <esp_partition.h>
 #include <esp_system.h>
 
+// Room for the SLOTS? line body with all 16 OTA slots at their longest (" 15=" + 64-hex digest + "/undefined/" + 32-char
+// project and version: 144 bytes a slot) plus the running/boot/count head. The old 512 held about four slots.
+#define HIL_SLOTS_LINE 2400
+
 static const esp_partition_t *hil_slot_partition(int idx)
 {
     if (idx < 0 || idx > 15) return NULL;

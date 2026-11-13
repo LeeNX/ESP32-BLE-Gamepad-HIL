@@ -1,7 +1,9 @@
 # Multi-slot OTA flashing
 
 Every rig board's flash holds **four apps** — the run's hil_runner profiles and the Bluepad32 observer — each in its
-own OTA slot behind a shared bootloader and partition table (`firmware/partitions/multislot.csv`).
+own OTA slot behind a shared bootloader and partition table (`firmware/partitions/multislot.csv`). A board with 8 MB
+or more (the esp32s3) holds **eight** (`multislot-8mb.csv`, see [8 MB boards](#8-mb-boards-eight-slots)): every image a
+run uses, so a warm run writes nothing to it.
 `tester/flash.py` treats the slots as a cache: an app already in a slot is *booted*, not written again; a new one
 is written into the least recently used slot, ~0.6 MB, never a whole board image. A board changes profile or role
 (gamepad ↔ observer) in ~1.3–8 s, and on the C3/S3 — 115200 baud — without minutes of flashing.
@@ -28,6 +30,17 @@ board, their bootloader).
 | phy_init | – | 0x11000 | 0x11000 |
 | apps | ota_0 0x10000, ota_1 0x150000 (1.25 MB) | factory 0x20000, ota_0/1 | ota_0..3 at 0x20000, 0x110000, 0x200000, 0x2f0000 (960 KB each) |
 | other | spiffs, coredump 0x3f0000 | – | coredump 0x3f0000 |
+
+### 8 MB boards: eight slots
+
+`multislot-8mb.csv` is `multislot.csv` with `ota_4..ota_7` after the coredump (0x400000, 0x4f0000, 0x5e0000,
+0x6d0000). Every partition the 4 MB table has keeps its offset, so a board moving to it keeps slots 0-3. `flash.py`
+picks it when the runner bootloader it writes to the board says 8 MB or more in its header: that's the size the
+bootloader sets the chip up for, and the most any app on it can address. The S3 runner's bootloader (board
+`esp32-s3-devkitc-1`) says 8 MB; the esp32dev's and C3's say 4 MB. Eight slots hold all six runner profiles plus the
+observer. A 16 MB chip (the rig's S3, an N16R8) still gets eight: more would need a bootloader built for 16 MB, and
+there are no more images to keep. A board going from the 4-slot table to the 8-slot one is converted once (table, otadata,
+NVS, the app in slot 0; the old slots 1-3 stay readable).
 
 No factory partition: with a blank otadata the bootloader starts ota_0. Images today are 0.57–0.73 MB; the esp32
 observer, the largest, fills ~74% of a slot. `flash.py` refuses an image that doesn't fit.

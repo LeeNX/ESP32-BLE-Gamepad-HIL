@@ -260,7 +260,7 @@ static void handle(const String &cmd)
     {
         // OTA app slots (multi-slot layout, docs/multislot-ota.md): which one runs, which boots next, and each
         // slot's image digest, so the host can check them against the multislot bundle's manifest.
-        static char buf[512];
+        static char buf[HIL_SLOTS_LINE];
         hil_slots_describe(buf, sizeof(buf));
         Serial.printf("SLOTS %s\n", buf);
         return;
