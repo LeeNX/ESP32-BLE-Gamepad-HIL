@@ -294,30 +294,44 @@ def raw_checks(raw):
 
 # ---------------------------------------------------------------------------------------------------------------
 # Driver observer (sinput): evdev, power_supply, FF
-def sinput_inputs(timeout=10):
-    """{'pad': InputDevice, 'imu': ..., 'touch': ...} for the sinput driver's input devices."""
+def sinput_inputs(want=("pad", "imu", "touch"), timeout=10):
+    """{'pad': InputDevice, 'imu': ..., 'touch': ...} for the sinput driver's input devices.
+
+    Polls until every role in `want` has an openable node, else returns what it found at the timeout. The driver
+    registers all three in the same probe, but each /dev/input/eventN node appears only once udev has processed it:
+    returning at the first one ('pad') failed section B with found ['pad'] while the kernel log showed all three
+    (2026-11-12 run 43209180170, 2026-11-13 run 43376905331, both right after a fresh write).
+    """
     end = time.monotonic() + timeout
     found = {}
-    while time.monotonic() < end:
+    while True:
+        for d in found.values():
+            d.close()
         found = {}
         for path in evdev.list_devices():
             try:
                 d = evdev.InputDevice(path)
             except OSError:
                 continue
-            if not d.name.startswith("SInput "):
-                continue
-            if d.name == "SInput Gamepad":
-                found["pad"] = d
-            elif d.name == "SInput IMU":
-                found["imu"] = d
-            elif "ouch" in d.name:
-                found["touch"] = d
-        if "pad" in found:
+            role = (
+                "pad"
+                if d.name == "SInput Gamepad"
+                else "imu"
+                if d.name == "SInput IMU"
+                else "touch"
+                if d.name.startswith("SInput ") and "ouch" in d.name
+                else None
+            )
+            if role and role not in found:
+                found[role] = d
+            else:
+                d.close()
+        if all(k in found for k in want):
             time.sleep(0.3)
             return found
+        if time.monotonic() >= end:
+            return found
         time.sleep(0.25)
-    return found
 
 
 def settle(*devs, wait=0.4, until=None):
@@ -733,7 +747,7 @@ for i in range(args.cycles):
     sin = wait_driver("sinput")
     keys = None
     if sin:
-        dev = sinput_inputs()
+        dev = sinput_inputs(want=("pad",))  # this check only presses on the gamepad
         pad = dev.get("pad")
         if pad:
             cmd("PRESS 1")
