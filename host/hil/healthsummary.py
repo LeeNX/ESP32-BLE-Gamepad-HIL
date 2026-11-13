@@ -180,7 +180,7 @@ def render(start, end):
         warnings.append(
             f"{bt_delta} Bluetooth controller hardware error(s) during the run: the adapter wedged and"
             " dropped every BLE link -- failures around then are likely the tester's adapter, not the"
-            " firmware (`journalctl -k -g 'hci0: hardware error'` on the tester for the times)"
+            " firmware (`journalctl -k --case-sensitive=false -g 'hci[0-9]+: hardware error'` on the tester for the times)"
         )
     if end and end.get("throttled") not in (None, "0x0"):
         warnings.append(

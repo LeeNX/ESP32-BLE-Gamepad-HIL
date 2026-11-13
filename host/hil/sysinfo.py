@@ -188,7 +188,16 @@ def _dwc_warnings():
 # One line per Bluetooth controller wedge: the controller stops taking HCI commands, the kernel resets
 # it and every LE link on it drops. mimir's Intel 8087:07da does it during esp32dev pairing
 # (hil-phase2-link-drop memory); a run's failures in that window are the adapter, not the firmware.
-_BT_HW_ERROR = re.compile(r"\bhci\d+: hardware error\b")
+# The kernel logs it as "hciN: hardware error 0x.." (hci_core, as on mimir) or, when the driver installs
+# its own handler (btintel on newer Intel parts), "hciN: Hardware error 0x.." -- one or the other per
+# event, never both, so matching either case can't double-count. ("Injecting HCI hardware error event"
+# and "Controller not accepting commands" accompany it but don't match.)
+_BT_HW_ERROR = re.compile(r"\bhci\d+: hardware error\b", re.IGNORECASE)
+
+
+def count_bt_hw_errors(log):
+    """Bluetooth controller hardware-error lines in kernel-log text."""
+    return sum(bool(_BT_HW_ERROR.search(ln)) for ln in log.splitlines())
 
 
 def _bt_hw_errors():
@@ -199,7 +208,7 @@ def _bt_hw_errors():
         return None
     if r.returncode != 0:
         return None
-    return sum(bool(_BT_HW_ERROR.search(ln)) for ln in r.stdout.splitlines())
+    return count_bt_hw_errors(r.stdout)
 
 
 def _dwc_burst():
