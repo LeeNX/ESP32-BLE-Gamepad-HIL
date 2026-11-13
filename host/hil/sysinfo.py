@@ -201,14 +201,22 @@ def count_bt_hw_errors(log):
 
 
 def _bt_hw_errors():
-    """Bluetooth controller hardware errors in the kernel log since boot, or None if it can't be read."""
-    try:
-        r = subprocess.run(["dmesg"], capture_output=True, text=True, timeout=8)
-    except Exception:
-        return None
-    if r.returncode != 0:
-        return None
-    return count_bt_hw_errors(r.stdout)
+    """Bluetooth controller hardware errors in the kernel log since boot, or None if it can't be read.
+
+    From the journal (this boot's kernel messages) when it's readable, else dmesg. The dmesg ring buffer is too small
+    to hold a whole boot on a busy host: on mimir, Wi-Fi deauth churn pushed old lines out, so the count dropped
+    between a run's two samples (9 -> 8) and the run had no delta. Reading the journal needs the systemd-journal
+    group (or root); without it journalctl prints nothing from the kernel, which falls through to dmesg.
+    """
+    for args in (["journalctl", "-k", "-b", "-q", "--no-pager", "-o", "cat"], ["dmesg"]):
+        try:
+            r = subprocess.run(args, capture_output=True, text=True, timeout=8)
+        except Exception:
+            continue
+        # a kernel log since boot is never empty: empty output means no access, not "no errors"
+        if r.returncode == 0 and r.stdout.strip():
+            return count_bt_hw_errors(r.stdout)
+    return None
 
 
 def _dwc_burst():
