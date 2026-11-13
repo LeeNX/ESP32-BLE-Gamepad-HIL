@@ -14,6 +14,11 @@ the count has been accumulating. A burst of at least [rig] health_dwc_burst (the
 recorded in the sample; else this checkout's hil_config.toml), a non-zero `vcgencmd get_throttled`
 or an undervoltage alarm at the end renders as a warning, and so does a count that went down (the
 host rebooted, or the kernel log wrapped).
+
+Off a Pi (mimir, an x86 PC, is the reference rig since 2026-11-11) there's no dwc_otg controller and no
+vcgencmd/rpi_volt: sysinfo samples those as None and their rows are left out. What matters there is the
+Bluetooth controller: `hciN: hardware error` lines in the kernel log, one per wedge (the controller stops
+taking commands and the kernel resets it, dropping every BLE link). Any new one during a run is a warning.
 """
 
 import datetime
@@ -109,6 +114,10 @@ def render(start, end):
     ]
 
     def row(label, key, unit="", end_extra=""):
+        # a field neither sample has (None = not this platform: no dwc_otg/vcgencmd off a Pi,
+        # or an older sample from before the field existed) gets no row at all
+        if all((x or {}).get(key) is None for x in (start, end)):
+            return
         s = _fmt((start or {}).get(key), unit) if start else "—"
         e = _fmt((end or {}).get(key), unit) if end else "—"
         lines.append(f"| {label} | {s} | {e}{end_extra} |")
@@ -117,22 +126,30 @@ def render(start, end):
         f"| uptime | {_duration(start.get('uptime_s')) if start else '—'} "
         f"| {_duration(end.get('uptime_s')) if end else '—'} |"
     )
-    dwc_s = (start or {}).get("dwc_otg_warnings")
-    dwc_e = (end or {}).get("dwc_otg_warnings")
-    delta = dwc_e - dwc_s if isinstance(dwc_s, int) and isinstance(dwc_e, int) else None
-    # The count is dmesg lines since boot: it goes down if the host rebooted between the samples
-    # (_rebooted) or the kernel ring buffer wrapped. Either way there's no usable delta.
+    # Both counters are kernel-log lines since boot: they go down if the host rebooted between the
+    # samples (_rebooted) or the kernel ring buffer wrapped. Either way there's no usable delta.
     rebooted = _rebooted(start, end)
-    reset = (
-        "host rebooted"
-        if rebooted
-        else "kernel log wrapped"
-        if delta is not None and delta < 0
-        else None
-    )
-    if reset:
-        delta = None
+
+    def counter(key):
+        a, b = (start or {}).get(key), (end or {}).get(key)
+        delta = b - a if isinstance(a, int) and isinstance(b, int) else None
+        reset = (
+            "host rebooted"
+            if rebooted
+            else "kernel log wrapped"
+            if delta is not None and delta < 0
+            else None
+        )
+        return (None if reset else delta), reset
+
+    delta, reset = counter("dwc_otg_warnings")
     row("dwc_otg timeouts since boot", "dwc_otg_warnings", end_extra=_delta(delta, reset))
+    bt_delta, bt_reset = counter("bt_hw_errors")
+    row(
+        "BT controller hardware errors since boot",
+        "bt_hw_errors",
+        end_extra=_delta(bt_delta, bt_reset),
+    )
     row("CPU temp", "cpu_temp_c", " °C")
     row("load (1/5/15 min)", "loadavg")
     row("throttled", "throttled")
@@ -144,9 +161,9 @@ def render(start, end):
             "the tester host rebooted during the run -- a crash or power loss,"
             " not a test failure; check its journal"
         )
-    elif reset:
+    elif reset or bt_reset:
         warnings.append(
-            "the dwc_otg count went down (kernel log wrapped): a very noisy bus, this run's delta is unknown"
+            "a kernel-log count went down (the log wrapped): a very noisy host, this run's delta is unknown"
         )
     # the tester's own threshold (its hil_config.local.toml applies there, not here); older samples lack it
     burst = next(
@@ -158,6 +175,12 @@ def render(start, end):
     if delta is not None and delta >= burst:
         warnings.append(
             f"{delta} new dwc_otg timeouts during the run (>= {burst}): the USB bus is struggling"
+        )
+    if bt_delta:
+        warnings.append(
+            f"{bt_delta} Bluetooth controller hardware error(s) during the run: the adapter wedged and"
+            " dropped every BLE link -- failures around then are likely the tester's adapter, not the"
+            " firmware (`journalctl -k -g 'hci0: hardware error'` on the tester for the times)"
         )
     if end and end.get("throttled") not in (None, "0x0"):
         warnings.append(

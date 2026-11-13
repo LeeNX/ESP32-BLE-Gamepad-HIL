@@ -631,11 +631,14 @@ routine "this profile has no rz axis" skips are counted, not listed. Times are
 the pytest phase only (the flash + first pair, in `tester/test.sh`, aren't in
 them). `dorny/test-reporter` still creates the per-test check that gates the job.
 Below it, a **Rig health** block (`host/hil/healthsummary.py results/`) shows the
-tester host at the start and end of the run: uptime and boot time, `dwc_otg`
-dequeue timeouts since boot with **+N this run**, CPU temperature, load and
-throttling. A burst of at least `[rig] health_dwc_burst` in one run is flagged, and
-so is throttling or undervoltage. The count keeps rising until the next reboot, so
-"+N" is the number to compare between runs.
+tester host at the start and end of the run: uptime and boot time, Bluetooth
+controller hardware errors (`hciN: hardware error`, one per adapter wedge) since
+boot with **+N this run**, CPU temperature and load. Any new BT hardware error in
+a run is flagged: the adapter dropped every BLE link, so failures around then are
+the tester's, not the firmware's. On a Raspberry Pi it also shows `dwc_otg`
+dequeue timeouts (+N, flagged at `[rig] health_dwc_burst`), throttling and
+undervoltage; elsewhere those rows are left out. The counts keep rising until the
+next reboot, so "+N" is the number to compare between runs.
 
 **Two run modes.** Push, `repository_dispatch` (the library's correctness gate),
 and a plain `workflow_dispatch` run `tester/test-all.sh --by-board` — the parallel
