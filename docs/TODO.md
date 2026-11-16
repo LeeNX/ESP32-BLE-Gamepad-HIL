@@ -24,6 +24,7 @@ These ESP32-BLE-Gamepad features have **no firmware command and no test**:
   Output reports.
 - [ ] **Nordic UART Service** (`sendDataOverNUS`, NUS receive callback) — the
   HIL firmware uses a *wired* serial channel, so this needs a BLE-side test.
+  Prior art on the `bluepad32-observer` branch (see below).
 - [ ] **SInput protocol** (`setEnableSInput`) — an alternate input report
   format; scope depends on whether it's a shipped feature. Prep work done:
   `host/hil/sdlreport.py` (Linux rig) + `desktop/sdlgamepad.py`'s `rumble()`
@@ -59,3 +60,22 @@ These ESP32-BLE-Gamepad features have **no firmware command and no test**:
   `test_output_report`, `test_special_buttons`, `test_sdl_report`; some
   overlap `desktop/gatt.py` / `test_hid_reports.py`). Then decide whether
   desktop gets a lint/smoke job in CI or stays a manual, documented path.
+  **Goal: one codebase, not two.** Linux CI and desktop should share the same
+  firmware build (`builder/build.sh`, `firmware/`), the same `host/hil/`
+  helpers and, where the transport allows, the same test files — only a thin
+  platform adapter (hidraw/evdev vs `hidapi`/`bleak`) should differ. Prefer
+  moving a desktop test into `host/tests/` behind a transport fixture over
+  keeping a parallel copy, and fold the desktop-only `local` profile into a
+  shared one if its only reason to exist is history.
+- [ ] **NuS / OTA testing from the old `bluepad32-observer` branch.** The
+  branch (gitea only, 7 commits, kept on purpose) predates the
+  `firmware/observer` rewrite and has hardware-verified work that never landed:
+  a NuS second host mirroring the HIL output and commands, OTA over NuS
+  (authenticated / unauthenticated, arming via GPIO0 / gamepad chord / serial,
+  rollback, factory reset, factory + ota_0 + ota_1 partitions), a NuS access
+  gate, and runners `ota_client.py`, `ota_test.py`, `gate_test.py`,
+  `chord_test.py` plus `PARTITIONS.md` and BLE-vs-serial OTA timings. Worth
+  mining for the **Nordic UART Service** gap above and for an OTA-over-BLE
+  test next to the multi-slot flashing. Port the ideas onto
+  `firmware/observer` / `hil_runner`, don't merge the branch (its layout is
+  obsolete).
