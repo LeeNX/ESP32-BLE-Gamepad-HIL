@@ -34,10 +34,11 @@ problem. **USB is.**
   onboard PCIe NIC. You also get plenty of RAM and x86 cores, often for less
   than a new Pi 4/5 with a PSU, case and SD card. No USB hangs have shown up
   since the move (early days: 2026-11-11 onwards). It also changed BLE: with
-  identical v0.6.0 firmware, the classic esp32dev connects at 8.75 ms instead
-  of the Pi's 48.75 ms (button p50 ~13.5 vs ~17.7 ms). The esp32c3/esp32s3
-  were already at 8.75 ms on the Pi and came out slightly slower here
-  (`docs/bench/README.md`).
+  identical v0.6.0 firmware, the classic esp32dev connected at 8.75 ms on the
+  onboard Intel instead of the Pi's 48.75 ms (button p50 ~13.5 vs ~17.7 ms).
+  The esp32c3/esp32s3 were already at 8.75 ms on the Pi and came out slightly
+  slower. The Intel then wedged under parallel pairing, so the rig now uses a
+  USB dongle. With it every board connects at 7.5 ms (`docs/bench/README.md`).
 
 Whatever you pick: keep the ESP32 boards' USB controller free of unrelated
 load (especially storage), use a powered hub for the boards, and prefer
@@ -52,8 +53,8 @@ the choice (README "ESP32-S3 dual-USB-C setup").
 | RAM | 8 GB (7.0 GiB usable) | ~6 GiB available; memory is a non-issue |
 | Storage | 120 GB SATA SSD (root on LVM) | 10 GB used |
 | Network | onboard Gigabit Ethernet (`eno1`, PCIe) plus Wi-Fi as a backup address | not on any USB bus |
-| USB | boards and bridges on the xHCI controller (direct ports plus two chained powered hubs). The Bluetooth adapter is on a separate EHCI controller | no USB controller errors so far |
-| BLE | onboard Intel 8087:07da (Centrino) Bluetooth, BlueZ 5.85 | 8.75 ms connection interval on all three boards |
+| USB | boards, bridges and the BT dongle on the xHCI controller (direct ports plus two chained powered hubs). The disabled onboard Intel BT sits on a separate EHCI controller | no USB controller errors so far |
+| BLE | TP-Link UB500 USB dongle (Realtek RTL8761BU, `hci1`, `HIL_BT_ADAPTER`), BlueZ 5.85. The onboard Intel 8087:07da is de-authorized by a udev rule: it wedged under parallel pairing | 7.5 ms connection interval on all three boards (8.75 ms on the Intel) |
 
 It carries all four boards the Pi had (esp32dev, esp32c3, esp32s3 and the
 observer-matrix-only esp32dev2), with the same serial adapters. Their

@@ -185,7 +185,7 @@ several. Everything follows the setting: the `bluetoothctl` pairing session
 health report's `adapter` block.
 
 ```bash
-PYTHONPATH=host ~/.venvs/hil/bin/python -m hil.bluetooth adapter   # -> hci0 18:69:45:F3:4C:D3
+PYTHONPATH=host ~/.venvs/hil/bin/python -m hil.bluetooth adapter   # -> hci1 18:69:45:F3:4C:D3
 ```
 
 It has to be in the environment of the CI's non-interactive ssh session.
@@ -405,28 +405,31 @@ was carrying during that sweep (normally `1`); `bench.py` records it as
 `adapter_links` so a number taken while another bond lingered isn't mistaken
 for a clean solo measurement.
 
-### Findings (3 boards × 5 suite profiles, x86_64 mimir-u26, kernel 7.0, BlueZ 5.85)
+### Findings (3 boards × 5 suite profiles, x86_64 mimir-u26 + UB500, kernel 7.0, BlueZ 5.85)
 
-From the 2026-11-11 snapshot in [`docs/bench/`](docs/bench/README.md) (the
-v0.6.0 bundles), the first on mimir-u26, which replaced the Raspberry Pi 3B+
-as the reference rig; its README has the full table and the caveats. The Pi
-figures below come from the Pi's `--bench` of the identical v0.6.0 bundles
-([run 42814840087](https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/actions/runs/42814840087)), so only the host differs.
+From the 2026-11-16 snapshot in [`docs/bench/`](docs/bench/README.md) (the
+v0.6.0 bundles) on mimir-u26 with its TP-Link UB500 (RTL8761BU) dongle; that
+README has the full table and the caveats. The Intel figures below are the
+2026-11-11 snapshot of the identical bundles on the same host through its
+onboard Intel 8087:07da
+([run 42984123196](https://github.com/LeeNX/ESP32-BLE-Gamepad-HIL/actions/runs/42984123196)),
+so only the Bluetooth adapter differs.
 
-- **Connection interval 8.75 ms on all three boards, MTU 255–256.** With the
-  same bundles the Pi negotiated 48.75 ms for the esp32dev. That was the
-  host/adapter with a classic ESP32, not the library or the core.
-- Single button press → host: **~4.6–4.7 ms** median on the esp32s3 for four
-  of its five profiles, **~8.9–10.4 ms** on the esp32c3 and **~13.5 ms** on the
-  esp32dev (~17.7–18.2 ms on the Pi), all solo. The esp32s3 `default` profile
-  recorded **13.4 ms** this run, treated as a noisy run until a re-bench (see
-  the snapshot README). Moving off the Pi isn't a uniform win: the esp32c3 and
-  esp32s3 are slower than on the Pi, profile for profile (esp32c3 ~0.7–2.1 ms,
-  esp32s3 ~0.2–0.4 ms with its `default` outlier aside). **0 dropped** across 200
-  paced presses per profile. The v0.3.0 snapshot's ~17.8 ms for the
-  esp32c3 was a measurement artifact (the bench timed from the serial reply,
-  which its FTDI bridge holds up to 16 ms); figures from before rig 0.4.0 aren't
-  comparable.
+- **Connection interval 7.5 ms on all three boards, MTU 255–256.** The Intel
+  negotiated 8.75 ms, and the retired Pi 3B+ gave the esp32dev 48.75 ms with
+  the same bundles. The interval is the host/adapter's choice, not the
+  library's or the core's.
+- Single button press → host: **~7.4–7.6 ms** median on the esp32dev for four
+  of its five profiles, **~8.7–8.9 ms** on the esp32c3 and **~6.7–7.4 ms** on
+  the esp32s3 (Intel: ~13.5, ~8.9–10.4 and ~4.6–4.7 ms), all solo. The
+  esp32dev `default` profile recorded **12.7 ms** this run. That outlier moves
+  between profiles from run to run, so it's treated as noise (see the snapshot
+  README). The dongle isn't a uniform win at the median: the esp32s3 is
+  ~2–2.7 ms slower, but its p99 drops from ~13.7 to **~7.8 ms**, and p99
+  improves on every board. **0 dropped** across 200 paced presses per profile.
+  The v0.3.0 snapshot's ~17.8 ms for the esp32c3 was a measurement artifact
+  (the bench timed from the serial reply, which its FTDI bridge holds up to
+  16 ms); figures from before rig 0.4.0 aren't comparable.
 - **The kernel driver doesn't change latency.** `sinput_hil.py --latency`
   times the same report on hidraw and evdev, under hid-generic and under the
   `sinput` driver: evdev adds 0.003–0.1 ms over hidraw, and the two drivers
@@ -434,7 +437,7 @@ figures below come from the Pi's `--bench` of the identical v0.6.0 bundles
 - **Latency is flat vs HID report size** (5–28 B) within a board. p99 is
   connection-interval jitter and swings run to run; p50 is the signal. The
   interval bounds *latency*, not paced *rate*: NimBLE sends several packets per
-  connection event, and the esp32s3 paces **~389–398 Hz** clean. The esp32c3's
+  connection event, and the esp32s3 paces **~403–412 Hz** clean. The esp32c3's
   ~63 Hz is its serial bridge, not BLE.
 - **Unpaced `sendReport()` bursts overflow and drop silently** — at gap=0 only
   ~2% of a 500-report burst survives. Don't call `sendReport()` faster than you

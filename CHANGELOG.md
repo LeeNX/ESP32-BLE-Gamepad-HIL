@@ -33,6 +33,13 @@ What a bump means:
   bluetoothd's default. The one-shot queries and actions (bonded, connected, trust, disconnect, remove, device list)
   now use D-Bus directly instead of one-shot `bluetoothctl`, which can only see the default controller.
   `test-matrix.sh` / `bp32_swap.sh` unbond through the new `python -m hil.bluetooth remove-matching`.
+- **Reference rig's Bluetooth is now a TP-Link UB500 USB dongle (Realtek RTL8761BU).** mimir's onboard Intel 8087:07da
+  wedged under parallel pairing (`Controller not accepting commands anymore`), which caused the phase-2 link drops. It's
+  de-authorized by a udev rule. The `docs/bench/` snapshot is re-taken on the dongle (same v0.6.0 bundles, run
+  43869977278), so the adapter is the only change. Every board now connects at 7.5 ms (8.75 ms on the Intel). Button
+  p50 drops on the esp32dev (~13.5 → ~7.5 ms) and esp32c3 (~8.9–10.4 → ~8.7–8.9 ms) but rises on the esp32s3 (~4.6 →
+  ~6.7–7.4 ms), whose p99 falls ~13.7 → ~7.8 ms. p99 improves on every board. The README findings, `docs/rig-build.md`
+  and the `test_conn_interval_recorded` comment follow; no gate changed.
 
 ## [0.7.0] — 2026-11-13
 
