@@ -225,8 +225,19 @@ What that means:
   buying one, that's the cheapest efficiency gain on offer.
 - In the BIOS, enable C-states and turn off anything you don't use (Wi-Fi if
   you're wired, serial/parallel ports, Wake-on-LAN if you don't need it).
-  `powertop --auto-tune` lowers idle further, but **don't** let it enable USB
-  autosuspend on the boards' serial bridges or the BT dongle.
+  Avoid `powertop --auto-tune`: it applies every tunable, including USB
+  autosuspend, which can disconnect the boards' serial bridges and the BT
+  dongle mid-run. Pick tunables one by one in powertop's "Tunables" tab
+  instead, and leave the rig's USB devices alone. If something has already
+  turned autosuspend on, a udev rule turns it back off for each device
+  (vendor:product from `lsusb`; one line per device):
+
+  ```text
+  # /etc/udev/rules.d/71-hil-usb-no-autosuspend.rules
+  ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="2357", ATTR{idProduct}=="0604", ATTR{power/control}="on"
+  ```
+
+  `cat /sys/bus/usb/devices/<device>/power/control` should read `on`.
 
 **Measure your own.** A plug-in energy meter for a PC, or an inline USB-C
 meter for a Pi. Read it idle, during a `--by-board` run, and during
@@ -279,8 +290,14 @@ done
 
 Check three things:
 
-- Are the boards on a different controller (`Bus 00N`) from storage and
-  network?
+- Are the boards on a different host controller from storage and network?
+  Different `Bus 00N` numbers don't prove it: one xHCI controller shows up
+  as two buses, a USB 2 one and a USB 3 one (mimir's buses 1 and 3 are the
+  same controller). Compare the PCI address in each device's sysfs path
+  instead: `readlink -f /sys/bus/usb/devices/<device>` gives something like
+  `/sys/devices/pci0000:00/0000:00:14.0/usb1/1-1/...`, where
+  `0000:00:14.0` is the controller. For a block device,
+  `readlink -f /sys/block/sda` shows the same thing.
 - How many hub tiers sit between the host and each board?
 - What else is sharing their controller? Seen on this rig: mimir had a small
   USB flash drive on the same xHCI root as the boards and the BT dongle. It
