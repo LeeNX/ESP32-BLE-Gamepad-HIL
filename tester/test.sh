@@ -133,7 +133,7 @@ PYTHONPATH=host "$VENV/bin/python" -m hil.sysinfo --dynamic-only \
 # best-effort: needs persistent journald storage + a readable journal (see
 # hil-rig-usb-bus-crash-sep11 memory) -- silently empty otherwise, non-fatal.
 journalctl --since "$since_iso" --no-pager 2>/dev/null \
-  | grep -aiE 'dwc_otg|ftdi_sio|usb[0-9].*(reset|error)|bluetoothd|hci0' \
+  | grep -aiE 'dwc_otg|ftdi_sio|usb[0-9].*(reset|error)|bluetoothd|hci[0-9]' \
   > "results/usb-bt-${tag}.txt" || true
 
 "$VENV/bin/python" host/hil/summarize.py "$xml" --out "results/summary-${tag}.md" >/dev/null || true

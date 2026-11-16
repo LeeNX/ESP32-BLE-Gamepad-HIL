@@ -16,6 +16,8 @@ import asyncio
 import re
 import subprocess
 
+from hil.bluetooth import device_path as _dev_path
+
 BLUEZ = "org.bluez"
 
 
@@ -65,10 +67,6 @@ def _decode_power_state(raw):
         **vals,
         **{f"{f}_meaning": _POWER_MEANING[f][vals[f]] for f in _POWER_FIELDS},
     }
-
-
-def _dev_path(mac):
-    return f"/org/bluez/hci0/dev_{mac.upper().replace(':', '_')}"
 
 
 async def _char_paths(bus, dev_path):

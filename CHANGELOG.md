@@ -18,6 +18,22 @@ What a bump means:
 
 ## [Unreleased]
 
+### Added
+
+- **`HIL_BT_ADAPTER` picks the Bluetooth controller.** Set it to a BD address (`18:69:45:F3:4C:D3`, recommended: it
+  stays the same across re-plugging) or an hci name (`hci1`). Unset, the suite uses the only controller if there's
+  just one, or `hci0` with a warning if there are several, so single-adapter rigs behave as before.
+  `python -m hil.bluetooth adapter` prints what it resolves to. The health report's `adapter` block now names the
+  controller actually used (`hci`, `address`).
+
+### Changed
+
+- **No more hardcoded `hci0`.** BlueZ D-Bus paths (`hil.bluetooth`, `hil.gatt`) follow the chosen adapter. The
+  pairing session `select`s it, and fails if that controller isn't available instead of quietly falling back to
+  bluetoothd's default. The one-shot queries and actions (bonded, connected, trust, disconnect, remove, device list)
+  now use D-Bus directly instead of one-shot `bluetoothctl`, which can only see the default controller.
+  `test-matrix.sh` / `bp32_swap.sh` unbond through the new `python -m hil.bluetooth remove-matching`.
+
 ## [0.7.0] — 2026-11-13
 
 ### Fixed
