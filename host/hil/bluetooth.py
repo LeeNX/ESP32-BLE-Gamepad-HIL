@@ -133,7 +133,9 @@ def is_connected(mac):
 
 
 def _devices():
-    """{mac: Device1 properties} for every device under the chosen adapter."""
+    """{mac: Device1 properties} for every device under the chosen adapter.
+    Raises RuntimeError if BlueZ can't be enumerated -- an empty dict means
+    "no devices", never "couldn't ask" (remove_matching relies on that)."""
     r = _run(
         [
             "busctl",
@@ -146,7 +148,7 @@ def _devices():
         ]
     )
     if r.returncode != 0:
-        return {}
+        raise RuntimeError(f"can't enumerate BlueZ devices: {(r.stdout + r.stderr).strip()}")
     prefix = adapter_path() + "/dev_"
     out = {}
     for path, ifaces in json.loads(r.stdout)["data"][0].items():
@@ -220,7 +222,8 @@ def trust(mac):
 
 
 def remove(mac):
-    """One-shot: forget the device (bond included) -- `bluetoothctl remove`."""
+    """One-shot: forget the device (bond included) -- `bluetoothctl remove`.
+    Raises RuntimeError with BlueZ's reason if it refuses."""
     r = _run(
         [
             "busctl",
@@ -234,15 +237,24 @@ def remove(mac):
         ],
         timeout=20,
     )
-    return (r.stdout + r.stderr).strip()
+    if r.returncode != 0:
+        raise RuntimeError(f"RemoveDevice {mac} failed: {(r.stdout + r.stderr).strip()}")
 
 
 def remove_matching(name_contains):
     """Remove every device under this adapter whose name contains
-    `name_contains` (test-matrix.sh / bp32_swap.sh's unbond). Returns the MACs."""
-    gone = [m for m, n in known_devices().items() if name_contains in n]
-    for m in gone:
-        remove(m)
+    `name_contains` (test-matrix.sh / bp32_swap.sh's unbond). Returns the MACs
+    removed. Tries every match, then raises RuntimeError naming any that
+    failed -- a bond left behind is exactly what the unbond is there to clear."""
+    gone, failed = [], []
+    for m in [m for m, n in known_devices().items() if name_contains in n]:
+        try:
+            remove(m)
+            gone.append(m)
+        except RuntimeError as e:
+            failed.append(str(e))
+    if failed:
+        raise RuntimeError(f"removed {gone or 'none'}; " + "; ".join(failed))
     return gone
 
 
@@ -345,7 +357,7 @@ class BtCtl:
         time.sleep(1.5)
         # `select` is silent on success; on failure bluetoothctl prints this and
         # carries on with its default controller -- the wrong radio, quietly.
-        if f"Controller {addr} not available" in self._tail():
+        if f"Controller {addr} not available" in self._tail(self._buf.maxlen):
             self.close()
             raise RuntimeError(
                 f"bluetoothctl can't select controller {addr} -- gone since it was resolved?"
@@ -415,7 +427,11 @@ class BtCtl:
         deadline = time.time() + timeout
         last_kick = 0.0
         while time.time() < deadline:
-            for mac, nm in known_devices().items():
+            try:
+                devs = known_devices()
+            except RuntimeError:  # bluetoothd busy for a moment -- just look again
+                devs = {}
+            for mac, nm in devs.items():
                 if name_matches(nm, name_contains):
                     return mac
             if time.time() - last_kick > 10:
