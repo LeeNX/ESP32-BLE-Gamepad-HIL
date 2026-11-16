@@ -43,10 +43,17 @@ on:
   push:
     branches: [main, "hil-*"]
   schedule:
-    # Mon 02:00 UTC = 04:00 SAST -- the weekly --bench sweep on main. ~40 min of
-    # rig time plus build/queue; comfortably done before the workday. GitHub can
-    # delay a cron run 30-60 min under load, which still lands well before 08:00.
-    - cron: "0 2 * * 1"
+    # Mon 02:17 UTC = 04:17 SAST -- the weekly --bench sweep + full observer
+    # matrix on main, ~50-60 min of rig time plus build/queue.
+    # Scheduled runs are best-effort: GitHub queues them and starts them late
+    # under load, worst at the top of the hour when every repo's "0 * * * *"
+    # fires. With "0 2" ours started 5-10 h late (07:35-11:45 UTC, Sep-Nov
+    # 2026), i.e. mid-workday, holding the rig lock and queueing pushes behind
+    # it. An odd minute dodges the :00 rush. If it still slips past ~06:00 UTC,
+    # move it earlier (Sunday night) rather than adding retries -- the
+    # concurrency group already serializes it against pushes. GitHub also
+    # disables schedules after 60 days with no repo activity.
+    - cron: "17 2 * * 1"
   workflow_dispatch:
     inputs:
       lib_repo:
