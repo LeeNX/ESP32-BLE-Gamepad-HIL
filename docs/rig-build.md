@@ -45,6 +45,9 @@ load (especially storage), use a powered hub for the boards, and prefer
 flashing through a UART bridge over a board's native USB port where you have
 the choice (README "ESP32-S3 dual-USB-C setup").
 
+Before buying hardware, read `docs/rig-host-selection.md`. It covers hubs,
+the Bluetooth dongle, power use per host, and how to track down a USB reset.
+
 ## Current reference rig: mimir-u26 (1-litre PC)
 
 | Resource | What it has | Observed under a full run |
