@@ -643,8 +643,9 @@ next reboot, so "+N" is the number to compare between runs.
 **Two run modes.** Push, `repository_dispatch` (the library's correctness gate),
 and a plain `workflow_dispatch` run `tester/test-all.sh --by-board` — the parallel
 functional matrix, ~15 min. The sequential `--bench` latency/throughput sweep
-(~40 min, solo) runs only on the **weekly `schedule`** (Mondays 02:00 UTC /
-04:00 SAST) and on a `workflow_dispatch` with `bench: true` — its gates are
+(~40 min, solo) runs only on the **weekly `schedule`** (Mondays 02:17 UTC /
+04:17 SAST; GitHub starts scheduled runs late under load, so expect it to land
+some hours after that) and on a `workflow_dispatch` with `bench: true` — its gates are
 loose, so gating every push on it wasn't worth the rig time. Regenerate
 `docs/bench/bench-table.md` from a bench run's `results/` at release time (see
 [RELEASE.md](RELEASE.md)).

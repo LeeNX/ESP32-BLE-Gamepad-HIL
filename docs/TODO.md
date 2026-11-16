@@ -46,3 +46,16 @@ These ESP32-BLE-Gamepad features have **no firmware command and no test**:
 - [ ] **Bench trend history.** `--bench` numbers are only ever compared to the
   checked-in `docs/bench/` snapshot. A small time series (per board / profile,
   p50 / p99 / clean-rate) would catch slow drift, not just step regressions.
+- [ ] **Re-check desktop testing against the current Linux CI/CD flow.**
+  `desktop/` (macOS / Windows) was last touched 2026-10-07 (v0.4.0); the rig
+  side has moved on since: `sinput` profile + observer matrix, multi-slot
+  flashing, power-state (0x2A1A) required by default, `CONFIG?` libsha
+  mismatch check, retry/backoff, rig health. Walk `desktop/README.md` end to
+  end on real hardware and sync it up: does `builder/build.sh --profiles local`
+  still produce what the desktop suite expects; do the shared
+  `hil.serialdev` / `hil.hidraw` helpers still match the firmware's serial
+  protocol; and which `host/tests/` the desktop subset now lacks
+  (`test_battery`, `test_descriptor`, `test_device_info`,
+  `test_output_report`, `test_special_buttons`, `test_sdl_report`; some
+  overlap `desktop/gatt.py` / `test_hid_reports.py`). Then decide whether
+  desktop gets a lint/smoke job in CI or stays a manual, documented path.
