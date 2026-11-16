@@ -58,10 +58,22 @@ def _bluez_version():
 
 
 def _adapter():
-    out = _cmd(["bluetoothctl", "show"])
+    """The controller the suite actually used (HIL_BT_ADAPTER, else the
+    default -- hil.bluetooth.adapter()), not just bluetoothd's default one."""
+    try:
+        from hil.bluetooth import adapter
+
+        hci, addr = adapter()
+    except Exception:  # noqa: BLE001 -- no BlueZ / no adapter: report what we can
+        hci, addr = None, None
+    out = _cmd(["bluetoothctl", "show", addr] if addr else ["bluetoothctl", "show"])
     name = re.search(r"Name:\s*(.+)", out)
-    mfr = re.search(r"Manufacturer:.*\((\d+)\)", _cmd(["hciconfig", "-a"]))
+    mfr = re.search(
+        r"Manufacturer:.*\((\d+)\)", _cmd(["hciconfig", "-a", hci] if hci else ["hciconfig", "-a"])
+    )
     return {
+        "hci": hci,
+        "address": addr,
         "name": name.group(1).strip() if name else None,
         "manufacturer_id": int(mfr.group(1)) if mfr else None,
     }

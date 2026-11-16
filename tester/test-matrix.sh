@@ -147,9 +147,8 @@ guard() {  # <where>
   printf '%s\n' "${summary[@]}"
   exit 3
 }
-unbond() {
-  local m
-  for m in $(bluetoothctl devices | awk '/HILpad/ {print $2}'); do bluetoothctl remove "$m" >/dev/null; done
+unbond() {  # on the HIL_BT_ADAPTER controller, not just bluetoothd's default (host/hil/bluetooth.py)
+  PYTHONPATH=host "$PY" -m hil.bluetooth remove-matching HILpad >/dev/null
 }
 
 OUT=results/matrix

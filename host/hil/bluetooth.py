@@ -14,12 +14,24 @@ session (`BtCtl`):
    issued after `scan off` fails with "not available". `BtCtl` therefore keeps
    discovery running for its whole lifetime and only stops it in `close()`.
 
-Read-only queries (`info`, `devices`) still shell out one-shot.
+One-shot queries and actions (bonded? connected? trust, disconnect, remove)
+go straight to BlueZ's D-Bus objects via `busctl`, addressed under the chosen
+adapter's object path -- a one-shot `bluetoothctl info` / `devices` can only
+ever see bluetoothd's *default* controller.
 
-Manual equivalent: `bluetoothctl` -> `scan on` / `pair` / `trust` / `connect`
-(answer the pairing prompt `yes`); see README "Setup / Tester".
+**Which adapter.** `HIL_BT_ADAPTER` (env) picks the controller: an hci name
+(`hci1`) or, better, its BD address (`18:69:45:F3:4C:D3`) -- the address
+survives re-enumeration, the index doesn't. Unset: the only controller if
+there's just one, else `hci0` (with a warning). `python -m hil.bluetooth
+adapter` prints what that resolves to. See README "Bluetooth adapter".
+
+Manual equivalent: `bluetoothctl` -> `select <addr>` / `scan on` / `pair` /
+`trust` / `connect` (answer the pairing prompt `yes`); see README "Setup /
+Tester".
 """
 
+import functools
+import json
 import os
 import re
 import subprocess
@@ -32,26 +44,117 @@ from hil.names import name_matches
 
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
+ADAPTER_ENV = "HIL_BT_ADAPTER"
+_BLUEZ = "org.bluez"
+_HCI_PATH = re.compile(r"^/org/bluez/(hci\d+)$")
+_MAC = re.compile(r"^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$")
+
 
 def _run(args, timeout=15):
     return subprocess.run(args, capture_output=True, text=True, timeout=timeout)
 
 
-def info(mac):
-    return _run(["bluetoothctl", "info", mac]).stdout
+def _busctl_value(out):
+    """`busctl get-property` prints `s "18:69:.."` / `b true` -- the value part."""
+    v = out.strip().split(" ", 1)[-1]
+    return v[1:-1] if v.startswith('"') and v.endswith('"') else v
+
+
+def _get_prop(path, iface, prop):
+    """One D-Bus property as busctl's text value, or None if the object (or the
+    property) doesn't exist -- e.g. a device BlueZ has never seen."""
+    r = _run(["busctl", "get-property", _BLUEZ, path, iface, prop])
+    return _busctl_value(r.stdout) if r.returncode == 0 else None
+
+
+def adapters():
+    """{hciN: BD address} for every controller bluetoothd has registered."""
+    r = _run(["busctl", "--list", "tree", _BLUEZ])
+    found = {}
+    for line in r.stdout.splitlines():
+        m = _HCI_PATH.match(line.strip())
+        if m:
+            found[m.group(1)] = _get_prop(line.strip(), "org.bluez.Adapter1", "Address")
+    return found
+
+
+@functools.lru_cache(maxsize=1)
+def adapter():
+    """(hci name, BD address) of the controller every helper here uses -- see
+    the module docstring. Cached for the process: restart_adapter() clears it,
+    since that's the one place a controller can come back under a new index."""
+    found = adapters()
+    want = os.environ.get(ADAPTER_ENV, "").strip()
+    if want:
+        for name, addr in found.items():
+            if want.lower() in (name.lower(), (addr or "").lower()):
+                return name, addr
+        kind = "address" if _MAC.match(want) else "name"
+        raise RuntimeError(
+            f"{ADAPTER_ENV}={want!r} matches no bluetooth controller by {kind} "
+            f"(bluetoothd has: {found or 'none'}) -- adapter unplugged or disabled?"
+        )
+    if not found:
+        raise RuntimeError(
+            "no bluetooth controller registered with bluetoothd "
+            "(adapter attached? bluetooth.service running? `bluetoothctl list`)"
+        )
+    if len(found) == 1:
+        return next(iter(found.items()))
+    name = "hci0" if "hci0" in found else sorted(found)[0]
+    print(
+        f"[bt] WARNING: {len(found)} controllers ({found}) and {ADAPTER_ENV} unset "
+        f"-- using {name}; set {ADAPTER_ENV} to the BD address of the one to test with",
+        file=sys.stderr,
+    )
+    return name, found[name]
+
+
+def adapter_path():
+    return f"/org/bluez/{adapter()[0]}"
+
+
+def device_path(mac):
+    return f"{adapter_path()}/dev_{mac.upper().replace(':', '_')}"
+
+
+def _device_prop(mac, prop):
+    return _get_prop(device_path(mac), "org.bluez.Device1", prop)
 
 
 def is_bonded(mac):
-    t = info(mac)
-    return "Paired: yes" in t or "Bonded: yes" in t
+    # Bonded (BlueZ >= 5.67) is the real "keys stored" flag; older BlueZ only
+    # has Paired -- either one true means there's a bond to reconnect.
+    return "true" in (_device_prop(mac, "Paired"), _device_prop(mac, "Bonded"))
 
 
 def is_connected(mac):
-    return "Connected: yes" in info(mac)
+    return _device_prop(mac, "Connected") == "true"
 
 
-def _device_path(mac):
-    return "/org/bluez/hci0/dev_" + mac.replace(":", "_")
+def _devices():
+    """{mac: Device1 properties} for every device under the chosen adapter."""
+    r = _run(
+        [
+            "busctl",
+            "--json=short",
+            "call",
+            _BLUEZ,
+            "/",
+            "org.freedesktop.DBus.ObjectManager",
+            "GetManagedObjects",
+        ]
+    )
+    if r.returncode != 0:
+        return {}
+    prefix = adapter_path() + "/dev_"
+    out = {}
+    for path, ifaces in json.loads(r.stdout)["data"][0].items():
+        dev = ifaces.get("org.bluez.Device1")
+        if dev and path.startswith(prefix) and "/" not in path[len(prefix) :]:
+            props = {k: v.get("data") for k, v in dev.items()}
+            out[props.get("Address", "")] = props
+    return out
 
 
 def is_services_resolved(mac):
@@ -65,17 +168,7 @@ def is_services_resolved(mac):
     line at all (checked live against a fully-resolved device), even though
     the property itself -- what `[CHG] ... ServicesResolved: yes` in an
     interactive session is sourced from -- is right there and correct."""
-    r = _run(
-        [
-            "busctl",
-            "get-property",
-            "org.bluez",
-            _device_path(mac),
-            "org.bluez.Device1",
-            "ServicesResolved",
-        ]
-    )
-    return r.returncode == 0 and "true" in r.stdout
+    return _device_prop(mac, "ServicesResolved") == "true"
 
 
 def wait_services_resolved(mac, timeout=20):
@@ -88,22 +181,69 @@ def wait_services_resolved(mac, timeout=20):
 
 
 def known_devices():
-    devs = {}
-    for line in _run(["bluetoothctl", "devices"]).stdout.splitlines():
-        m = re.match(r"Device ([0-9A-F:]{17}) (.+)", line.strip())
-        if m:
-            devs[m.group(1)] = m.group(2)
-    return devs
+    """{mac: name} -- what `bluetoothctl devices` lists, for this adapter only.
+    Alias falls back to the address when a device never sent a name, as
+    bluetoothctl's own listing does."""
+    return {mac: p.get("Alias") or p.get("Name") or mac for mac, p in _devices().items() if mac}
+
+
+def _device_call(mac, method, timeout=20):
+    r = _run(["busctl", "call", _BLUEZ, device_path(mac), "org.bluez.Device1", method], timeout)
+    return (r.stdout + r.stderr).strip()
+
+
+def _set_trusted(mac, on, timeout=10):
+    r = _run(
+        [
+            "busctl",
+            "set-property",
+            _BLUEZ,
+            device_path(mac),
+            "org.bluez.Device1",
+            "Trusted",
+            "b",
+            "true" if on else "false",
+        ],
+        timeout,
+    )
+    return (r.stdout + r.stderr).strip()
 
 
 def disconnect(mac):
     """One-shot: drop the live link but keep the bond, so the next session
     gets a fast reconnect instead of a full re-pair."""
-    return _run(["bluetoothctl", "disconnect", mac], timeout=20).stdout
+    return _device_call(mac, "Disconnect")
 
 
 def trust(mac):
-    return _run(["bluetoothctl", "trust", mac], timeout=10).stdout
+    return _set_trusted(mac, True)
+
+
+def remove(mac):
+    """One-shot: forget the device (bond included) -- `bluetoothctl remove`."""
+    r = _run(
+        [
+            "busctl",
+            "call",
+            _BLUEZ,
+            adapter_path(),
+            "org.bluez.Adapter1",
+            "RemoveDevice",
+            "o",
+            device_path(mac),
+        ],
+        timeout=20,
+    )
+    return (r.stdout + r.stderr).strip()
+
+
+def remove_matching(name_contains):
+    """Remove every device under this adapter whose name contains
+    `name_contains` (test-matrix.sh / bp32_swap.sh's unbond). Returns the MACs."""
+    gone = [m for m, n in known_devices().items() if name_contains in n]
+    for m in gone:
+        remove(m)
+    return gone
 
 
 def untrust(mac):
@@ -113,19 +253,27 @@ def untrust(mac):
     disconnect() (and recreate the /dev/input/js* node) unless untrusted
     first. A plain `connect()` at the start of the next run doesn't need
     Trusted, so this is safe to leave off until ensure_paired() re-trusts."""
-    return _run(["bluetoothctl", "untrust", mac], timeout=10).stdout
+    return _set_trusted(mac, False)
 
 
 def connected_devices():
-    """MACs with a live link on the adapter right now (BlueZ >= 5.65's
-    `devices Connected`) -- lets a bench sweep record how many gamepads were
-    actually on the air, not just how many it was driving. Best-effort: an
-    older bluetoothctl that rejects the filter just yields an empty list."""
+    """MACs with a live link on the adapter right now -- lets a bench sweep
+    record how many gamepads were actually on the air, not just how many it
+    was driving. Best-effort: any failure just yields an empty list."""
     try:
-        out = _run(["bluetoothctl", "devices", "Connected"]).stdout
+        return [m for m, p in _devices().items() if m and p.get("Connected")]
     except Exception:
         return []
-    return re.findall(r"Device ([0-9A-F:]{17})", out)
+
+
+def _adapter_powered():
+    """Is the chosen controller back and powered? Re-resolves it (cache
+    cleared) -- the index it comes back under is what matters from here on."""
+    adapter.cache_clear()
+    try:
+        return _get_prop(adapter_path(), "org.bluez.Adapter1", "Powered") == "true"
+    except RuntimeError:  # not re-registered yet
+        return False
 
 
 def restart_adapter(timeout=30):
@@ -162,10 +310,7 @@ def restart_adapter(timeout=30):
     deadline = time.time() + timeout
     while time.time() < deadline:
         active = _run(["systemctl", "is-active", "bluetooth"], timeout=5).stdout.strip()
-        if (
-            active == "active"
-            and "Powered: yes" in _run(["bluetoothctl", "show"], timeout=5).stdout
-        ):
+        if active == "active" and _adapter_powered():
             return
         time.sleep(1)
     raise RuntimeError("bluetooth service restarted but the adapter did not come back up in time")
@@ -176,6 +321,7 @@ class BtCtl:
     discovery running, and auto-confirms pairing prompts."""
 
     def __init__(self):
+        addr = adapter()[1]  # resolve first -- a bad HIL_BT_ADAPTER raises before spawning anything
         self.p = subprocess.Popen(
             ["bluetoothctl"],
             stdin=subprocess.PIPE,
@@ -188,19 +334,29 @@ class BtCtl:
         self._io = threading.Lock()
         self._reader = threading.Thread(target=self._pump, daemon=True)
         self._reader.start()
+        # Pin this session to the chosen controller first -- every command
+        # below (scan, pair, connect, remove) acts on the selected one.
+        self.send(f"select {addr}")
+        time.sleep(0.3)
         for cmd in ("power on", "agent NoInputNoOutput", "default-agent"):
             self.send(cmd)
             time.sleep(0.3)
         self._scan(True)  # stays on until close() -- see module docstring
         time.sleep(1.5)
+        # `select` is silent on success; on failure bluetoothctl prints this and
+        # carries on with its default controller -- the wrong radio, quietly.
+        if f"Controller {addr} not available" in self._tail():
+            self.close()
+            raise RuntimeError(
+                f"bluetoothctl can't select controller {addr} -- gone since it was resolved?"
+            )
 
     def _scan(self, on):
         self.send("scan on" if on else "scan off")
 
     def _ensure_scanning(self):
         """BlueZ discovery can stop on its own; re-arm it if it has."""
-        out = _run(["bluetoothctl", "show"]).stdout
-        if "Discovering: yes" not in out:
+        if _get_prop(adapter_path(), "org.bluez.Adapter1", "Discovering") != "true":
             self._scan(True)
             time.sleep(2)
 
@@ -427,17 +583,36 @@ def ensure_paired(btctl, name_contains, known_mac=None, want_fresh=False):
     raise RuntimeError(f"{mac} bonded but never connected")
 
 
+_USAGE = "usage: python -m hil.bluetooth {adapter | restart-adapter | remove-matching <name>}"
+
+
 def main(argv):
-    """`python -m hil.bluetooth restart-adapter` -- lets tester/test-all.sh
-    call restart_adapter() as a retry-recovery step without a Python one-liner
-    in bash. Only ever invoked where the caller already knows the adapter is
-    exclusively theirs right now (phase 1 / a solo run) -- see
-    tester/test-all.sh's retry_run/round_barrier comments for why a
-    concurrent --by-board phase 2 lane must never do this."""
-    if len(argv) == 1 and argv[0] == "restart-adapter":
-        restart_adapter()
-        return 0
-    print("usage: python -m hil.bluetooth restart-adapter", file=sys.stderr)
+    """CLI for the shell scripts:
+
+    - `adapter` -- print the controller HIL_BT_ADAPTER resolves to
+      (`hci0 18:69:45:F3:4C:D3`); exits 1 with the reason if it can't.
+    - `restart-adapter` -- tester/test-all.sh's retry recovery. Only ever
+      invoked where the caller already knows the adapter is exclusively
+      theirs right now (phase 1 / a solo run) -- see tester/test-all.sh's
+      retry_run/round_barrier comments for why a concurrent --by-board
+      phase 2 lane must never do this.
+    - `remove-matching <name>` -- forget every device whose name contains
+      <name> (test-matrix.sh / bp32_swap.sh's unbond)."""
+    try:
+        if argv == ["adapter"]:
+            print(*adapter())
+            return 0
+        if argv == ["restart-adapter"]:
+            restart_adapter()
+            return 0
+        if len(argv) == 2 and argv[0] == "remove-matching":
+            for m in remove_matching(argv[1]):
+                print(f"removed {m}")
+            return 0
+    except RuntimeError as e:
+        print(f"hil.bluetooth: {e}", file=sys.stderr)
+        return 1
+    print(_USAGE, file=sys.stderr)
     return 2
 
 

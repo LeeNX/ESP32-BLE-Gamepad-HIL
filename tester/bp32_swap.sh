@@ -17,10 +17,10 @@ ET=("$V" -m esptool --chip esp32 --port "$DEVP" --baud 460800)
 H=${1:?usage: bp32_swap.sh <bluepad32 host image dir> <esp32c3 sinput bundle dir>}
 SINPUT_BUNDLE=${2:?usage: bp32_swap.sh <bluepad32 host image dir> <esp32c3 sinput bundle dir>}
 newest() { local d=("$@"); echo "${d[-1]}"; }  # globs sort, so the last match is the newest lib sha
-unbond() {
-  local n m
+unbond() {  # on the HIL_BT_ADAPTER controller, not just bluetoothd's default (host/hil/bluetooth.py)
+  local n
   for n in "HILpad esp32c3" "HILpad esp32dev"; do
-    for m in $(bluetoothctl devices | awk -v n="$n" 'index($0, n) {print $2}'); do bluetoothctl remove "$m" >/dev/null; done
+    PYTHONPATH=host "$V" -m hil.bluetooth remove-matching "$n" >/dev/null
   done
 }
 

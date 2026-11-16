@@ -161,14 +161,43 @@ Still manual:
 - **Power**: a Pi 3B+ can't reliably power an ESP32 doing BLE off its own USB —
   brownouts show up as a reset loop that never advertises. Use a **powered USB
   hub** for the ESP32s on any host.
-- BLE: a built-in adapter works (the Pi's, or the PC's onboard Intel one on
-  the reference rig); a USB BT dongle is steadier on a Pi.
+- BLE: a built-in adapter works, but a USB BT dongle is steadier. The
+  reference rig's onboard Intel `8087:07da` wedged under parallel pairing
+  (`hci0: Controller not accepting commands anymore`). It now runs a TP-Link
+  UB500 (Realtek RTL8761BU) with the Intel disabled. See "Bluetooth adapter"
+  below.
 - `hil_config.local.toml` sets the real `[board.<b>].port`
   (`ls -l /dev/serial/by-id/`).
 
 First run pairs the device automatically (`NoInputNoOutput` agent, Just Works).
 To pair by hand: `bluetoothctl` → `scan on`, wait for `HILpad <board>`, then
 `pair` / `trust` / `connect` and answer the agent prompt `yes`.
+
+#### Bluetooth adapter
+
+`HIL_BT_ADAPTER` picks the controller the suite pairs and talks through. Set
+it to the controller's BD address (`18:69:45:F3:4C:D3`) or its hci name
+(`hci1`). Prefer the address: it stays the same when the adapter is
+re-plugged, while the `hciN` index doesn't. Unset, the suite uses the only
+controller if there's just one, or `hci0` (with a warning) if there are
+several. Everything follows the setting: the `bluetoothctl` pairing session
+(`select`), the D-Bus queries, the GATT reads, the matrix's unbond, and the
+health report's `adapter` block.
+
+```bash
+PYTHONPATH=host ~/.venvs/hil/bin/python -m hil.bluetooth adapter   # -> hci0 18:69:45:F3:4C:D3
+```
+
+It has to be in the environment of the CI's non-interactive ssh session.
+On Ubuntu, `/etc/environment` does that (pam_env), so
+`HIL_BT_ADAPTER=18:69:45:F3:4C:D3` there is enough. Confirm with
+`ssh <rig> 'echo $HIL_BT_ADAPTER'`.
+
+A second controller that's still powered keeps its own bonds with the boards
+and can win the reconnect race. So disable the one you're not using rather
+than just pointing at the other. A udev rule de-authorizing it by USB
+`idVendor`/`idProduct` survives reboots, for example
+`ATTR{idVendor}=="8087", ATTR{idProduct}=="07da", ATTR{authorized}="0"`.
 
 ### Local (one box)
 
