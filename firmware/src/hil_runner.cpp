@@ -136,7 +136,11 @@ static const uint32_t RGB_ERROR_MS = 200;
 static HilRgb rgbShown = RGB_OFF;
 static bool rgbShownValid = false;
 static HilRgb rgbFlash = RGB_OFF;
-static uint32_t rgbFlashUntilMs = 0;
+// A flash is requested while a command runs, but its time only starts when
+// ledService() can show it: a long command (BURST with a large gap) would
+// otherwise use up the whole 30 ms before the LED is ever written.
+static uint32_t rgbFlashPendingMs = 0;  // 0 = nothing requested
+static uint32_t rgbFlashUntilMs = 0;    // 0 = no flash showing
 static bool rgbFlashIsError = false;
 static bool rgbOverride = false;
 static HilRgb rgbOverrideColour = RGB_OFF;
@@ -149,10 +153,10 @@ static void rgbShow(const HilRgb &c)
     rgbShownValid = true;
 }
 
-static void rgbStartFlash(const HilRgb &c, uint32_t ms, bool isError)
+static void rgbRequestFlash(const HilRgb &c, uint32_t ms, bool isError)
 {
     rgbFlash = c;
-    rgbFlashUntilMs = (millis() + ms) | 1;  // 0 means "no flash"
+    rgbFlashPendingMs = ms;
     rgbFlashIsError = isError;
 }
 
@@ -165,15 +169,25 @@ static void ledPulse()
 {
     rgbOverride = false;
     // Don't let the next command's white flash cut an error flash short.
-    if (rgbFlashUntilMs && rgbFlashIsError) return;
-    rgbStartFlash(RGB_ACTIVITY, RGB_ACTIVITY_MS, false);
+    if (rgbFlashIsError && (rgbFlashPendingMs || rgbFlashUntilMs)) return;
+    rgbRequestFlash(RGB_ACTIVITY, RGB_ACTIVITY_MS, false);
 }
 
-static void ledError() { rgbStartFlash(RGB_ERROR, RGB_ERROR_MS, true); }
+static void ledError() { rgbRequestFlash(RGB_ERROR, RGB_ERROR_MS, true); }
 
 static void ledService()
 {
-    if (rgbFlashUntilMs && (int32_t)(millis() - rgbFlashUntilMs) >= 0) rgbFlashUntilMs = 0;
+    uint32_t now = millis();
+    if (rgbFlashPendingMs)
+    {
+        rgbFlashUntilMs = (now + rgbFlashPendingMs) | 1;  // | 1: never 0, which means "no flash"
+        rgbFlashPendingMs = 0;
+    }
+    else if (rgbFlashUntilMs && (int32_t)(now - rgbFlashUntilMs) >= 0)
+    {
+        rgbFlashUntilMs = 0;
+        rgbFlashIsError = false;
+    }
     if (rgbOverride) rgbShow(rgbOverrideColour);
     else if (rgbFlashUntilMs) rgbShow(rgbFlash);
     else rgbShow(bleGamepad.isConnected() ? RGB_CONNECTED : RGB_ADVERTISING);
@@ -183,7 +197,9 @@ static void ledSet(uint8_t r, uint8_t g, uint8_t b)
 {
     rgbOverride = true;
     rgbOverrideColour = {r, g, b};
+    rgbFlashPendingMs = 0;
     rgbFlashUntilMs = 0;
+    rgbFlashIsError = false;
 }
 
 // Shown synchronously: BOOT restarts straight after, loop() never runs again.
@@ -540,7 +556,11 @@ static void handle(const String &cmd)
             int v[3];
             for (int i = 0; i < 3; i++)
             {
-                if (!isDigit(t[i + 1][0])) { reply("ERR args"); return; }
+                // Every character a digit (String::toInt() would take "12junk" as 12), at most 3 of them.
+                const String &tok = t[i + 1];
+                bool digits = tok.length() >= 1 && tok.length() <= 3;
+                for (unsigned k = 0; digits && k < tok.length(); k++) digits = isDigit(tok[k]);
+                if (!digits) { reply("ERR args"); return; }
                 v[i] = t[i + 1].toInt();
                 if (v[i] < 0 || v[i] > 255) { reply("ERR range"); return; }
             }

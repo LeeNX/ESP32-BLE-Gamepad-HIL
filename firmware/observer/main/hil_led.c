@@ -4,8 +4,9 @@
 //
 // The Bluepad32 callbacks (BTstack thread) only set the volatile state below; a low-priority task polls it every
 // 10 ms and writes the LED when the colour changes. That keeps the RMT write (~30 us) and any GPIO work off the
-// Bluetooth thread. The fields are written by one thread and read by the other; a torn read costs at most one 10 ms
-// frame of the wrong colour, so there's no lock.
+// Bluetooth thread. Each field has one writer: the callbacks publish (g_flash_until first, then g_flash) and led_task
+// only reads -- it never clears a flash, it just stops showing it once g_flash_until has passed, so a flash published
+// mid-frame can't be wiped. A torn read costs at most one 10 ms frame of the wrong colour, so there's no lock.
 #include <stdbool.h>
 #include <stdio.h>
 
@@ -66,6 +67,12 @@ static volatile bool g_override;
 static volatile hil_rgb_t g_override_rgb;
 static volatile bool g_boot_slot;
 
+// The flash showing at `now`, if any. Read-only: see the comment at the top.
+static flash_t flash_active(TickType_t now) {
+    flash_t kind = g_flash;
+    return kind != FLASH_NONE && (int32_t)(now - g_flash_until) < 0 ? kind : FLASH_NONE;
+}
+
 #if HIL_LED_IS_RGB
 static rmt_channel_handle_t g_chan;
 static rmt_encoder_handle_t g_enc;
@@ -96,7 +103,7 @@ static void rgb_write(hil_rgb_t c) {
     uint8_t grb[3] = {c.g, c.r, c.b};  // WS2812 wire order, like Arduino's rgbLedWrite() default
     rmt_transmit_config_t tx = {.loop_count = 0};
     if (rmt_transmit(g_chan, g_enc, grb, sizeof(grb), &tx) == ESP_OK)
-        rmt_tx_wait_all_done(g_chan, pdMS_TO_TICKS(POLL_MS));
+        rmt_tx_wait_all_done(g_chan, POLL_MS);  // takes ms, not ticks
     // The >50 us low latch gap comes free: the next write is at least one POLL_MS later.
 }
 #endif
@@ -133,9 +140,7 @@ static void led_task(void* arg) {
 #endif
     for (;;) {
         TickType_t now = xTaskGetTickCount();
-        if (g_flash != FLASH_NONE && (int32_t)(now - g_flash_until) >= 0)
-            g_flash = FLASH_NONE;
-        flash_t flash = g_flash;
+        flash_t flash = flash_active(now);
 
         // Activity LED.
         hil_rgb_t want;
@@ -211,7 +216,8 @@ static void start_flash(flash_t kind, uint32_t ms) {
 
 void hil_led_activity(void) {
     TickType_t now = xTaskGetTickCount();
-    if (g_flash == FLASH_ERROR || (int32_t)(now - g_activity_at) < (int32_t)pdMS_TO_TICKS(ACTIVITY_MIN_GAP_MS))
+    if (flash_active(now) == FLASH_ERROR ||
+        (int32_t)(now - g_activity_at) < (int32_t)pdMS_TO_TICKS(ACTIVITY_MIN_GAP_MS))
         return;
     g_activity_at = now;
     start_flash(FLASH_ACTIVITY, ACTIVITY_MS);

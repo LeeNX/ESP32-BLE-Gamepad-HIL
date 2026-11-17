@@ -18,6 +18,8 @@ board_led_setting() {  # <board> <config key> <env prefix, e.g. LED_PIN>
   cfg "board.$1.$2"
 }
 
+# GPIOs are emitted in decimal: "RGB048" -> 48, never -DHIL_LED_PIN=048 (an octal literal in C, invalid here; and
+# "010" would silently be GPIO8).
 # board_leds <board>: sets LED_GPIO (activity LED GPIO, "" if none), LED_RGB (1 for an RGB LED, else 0) and
 # CONN_LED_GPIO ("" if none), and prints what it found. Returns 2, with a message, on a value it can't parse.
 # shellcheck disable=SC2034  # LED_GPIO / LED_RGB / CONN_LED_GPIO are read by the sourcing script
@@ -26,10 +28,10 @@ board_leds() {
   LED_GPIO=""; LED_RGB=0; CONN_LED_GPIO=""
   v=$(board_led_setting "$board" led_pin LED_PIN)
   if [[ "$v" =~ ^[Rr][Gg][Bb]:?([0-9]+)$ ]]; then
-    LED_GPIO=${BASH_REMATCH[1]}; LED_RGB=1
+    LED_GPIO=$((10#${BASH_REMATCH[1]})); LED_RGB=1
     echo "== $board activity LED: RGB on GPIO $LED_GPIO"
   elif [[ "$v" =~ ^[0-9]+$ ]]; then
-    LED_GPIO=$v
+    LED_GPIO=$((10#$v))
     echo "== $board activity LED: GPIO $LED_GPIO"
   elif [[ -n "$v" ]]; then
     echo "!! $board: led_pin '$v' is neither <gpio> nor RGB<gpio>" >&2
@@ -37,7 +39,7 @@ board_leds() {
   fi
   c=$(board_led_setting "$board" conn_led_pin CONN_LED_PIN)
   if [[ "$c" =~ ^[0-9]+$ ]]; then
-    CONN_LED_GPIO=$c
+    CONN_LED_GPIO=$((10#$c))
     echo "== $board connection LED: GPIO $CONN_LED_GPIO"
   elif [[ -n "$c" ]]; then
     echo "!! $board: conn_led_pin '$c' is not a <gpio>" >&2

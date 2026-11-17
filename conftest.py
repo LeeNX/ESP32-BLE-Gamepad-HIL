@@ -190,15 +190,18 @@ def firmware(rigcfg, pytestconfig):
     led_pin = str(os.environ.get(f"HIL_LED_PIN_{board_upper}") or rigcfg.get("led_pin") or "")
     # `RGB<gpio>` (RGB48 / rgb:48) = a WS2812-style RGB LED (builder/build.sh has the same rule).
     rgb = re.fullmatch(r"rgb:?(\d+)", led_pin, re.IGNORECASE)
+    # int(): emit decimal, so "RGB010" is GPIO10, not the C octal literal 010 (= 8). Same as builder/led-pin.sh.
     if rgb:
-        led_flags += [f"-DHIL_LED_PIN={rgb.group(1)}", "-DHIL_LED_RGB"]
+        led_flags += [f"-DHIL_LED_PIN={int(rgb.group(1))}", "-DHIL_LED_RGB"]
     elif led_pin.isdigit():
-        led_flags.append(f"-DHIL_LED_PIN={led_pin}")
+        led_flags.append(f"-DHIL_LED_PIN={int(led_pin)}")
     elif led_pin:
         raise ValueError(f"led_pin {led_pin!r} for {board_upper} is neither <gpio> nor RGB<gpio>")
     conn_led_pin = os.environ.get(f"HIL_CONN_LED_PIN_{board_upper}") or rigcfg.get("conn_led_pin")
     if conn_led_pin:
-        led_flags.append(f"-DHIL_CONN_LED_PIN={conn_led_pin}")
+        if not str(conn_led_pin).isdigit():
+            raise ValueError(f"conn_led_pin {conn_led_pin!r} for {board_upper} is not a <gpio>")
+        led_flags.append(f"-DHIL_CONN_LED_PIN={int(conn_led_pin)}")
     if led_flags:
         env["PLATFORMIO_BUILD_FLAGS"] = (
             f"{env.get('PLATFORMIO_BUILD_FLAGS', '')} {' '.join(led_flags)}".strip()

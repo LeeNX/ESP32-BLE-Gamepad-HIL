@@ -88,10 +88,29 @@ static const char* const HIL_BT_TASKS[] = {"btController", "main", NULL};
 static hil_stats_state_t g_stats;
 static hil_task_window_t g_tasks;
 
+// Which device slots are ready, for the status LED: it shows the best state of *all* devices, not just g_dev (the
+// one console commands go to), so a second device staying ready keeps it green when the first one leaves.
+static bool g_ready[CONFIG_BLUEPAD32_MAX_DEVICES];
+
 static void forget_state(uni_hid_device_t* d) {
     int idx = uni_hid_device_get_idx_for_instance(d);
     if (idx >= 0 && idx < CONFIG_BLUEPAD32_MAX_DEVICES)
         g_prev_valid[idx] = false;
+}
+
+static void set_ready(uni_hid_device_t* d, bool ready) {
+    int idx = uni_hid_device_get_idx_for_instance(d);
+    if (idx >= 0 && idx < CONFIG_BLUEPAD32_MAX_DEVICES)
+        g_ready[idx] = ready;
+}
+
+static void update_led_state(void) {
+    for (int i = 0; i < CONFIG_BLUEPAD32_MAX_DEVICES; i++)
+        if (g_ready[i]) {
+            hil_led_set_state(HIL_LED_READY);
+            return;
+        }
+    hil_led_set_state(g_conns > 0 ? HIL_LED_CONNECTED : HIL_LED_SCANNING);
 }
 
 // A device name, safe inside name="...": '"', '\\' and non-printable characters become '?'.
@@ -305,8 +324,8 @@ static uni_error_t hil_on_device_discovered(bd_addr_t addr, const char* name, ui
 static void hil_on_device_connected(uni_hid_device_t* d) {
     forget_state(d);
     g_conns++;
-    if (!g_dev)
-        hil_led_set_state(HIL_LED_CONNECTED);
+    set_ready(d, false);
+    update_led_state();
     printf("HIL connected idx=%d\n", uni_hid_device_get_idx_for_instance(d));
 }
 
@@ -316,14 +335,16 @@ static void hil_on_device_disconnected(uni_hid_device_t* d) {
     forget_state(d);
     if (g_conns > 0)
         g_conns--;
-    hil_led_set_state(g_dev ? HIL_LED_READY : HIL_LED_SCANNING);
+    set_ready(d, false);
+    update_led_state();
     printf("HIL disconnected idx=%d\n", uni_hid_device_get_idx_for_instance(d));
 }
 
 static uni_error_t hil_on_device_ready(uni_hid_device_t* d) {
     if (!g_dev)
         g_dev = d;
-    hil_led_set_state(HIL_LED_READY);
+    set_ready(d, true);
+    update_led_state();
     char safe[64];
     printf("HIL ready idx=%d type=%d vid=0x%04x pid=0x%04x name=\"%s\"\n", uni_hid_device_get_idx_for_instance(d),
            (int)d->controller_type, d->vendor_id, d->product_id, safe_name(d->name, safe, sizeof(safe)));

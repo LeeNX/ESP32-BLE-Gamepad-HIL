@@ -79,5 +79,7 @@ def test_led_rgb_colours(dut):
         assert dut.led_rgb(*rgb), f"LED {rgb} rejected"
     assert dut.command("LED 256 0 0") == "ERR range"
     assert dut.command("LED x 0 0") == "ERR args"
+    assert dut.command("LED 12junk 0 0") == "ERR args"  # not 12: the whole token must be digits
+    assert dut.command("LED 0 0 0016") == "ERR args"  # at most 3 digits
     # Hand the LED back to the automatic state colours.
     assert dut.command("PING") == "PONG"
