@@ -40,6 +40,8 @@ FIELDS = (
 _INT_KEYS = {
     "up",
     "conn",
+    "conns",
+    "states",
     "heap",
     "heap_min",
     "heap_big",
@@ -117,7 +119,9 @@ def row_from_stats(stats, board, profile, phase, test=""):
         "test": test,
         "up_ms": stats.get("up"),
         "reset": stats.get("reset"),
-        "conn": stats.get("conn"),
+        # The observer reports conns= (devices connected) and states= (state lines printed) where hil_runner has
+        # conn= and reports=: same columns.
+        "conn": stats.get("conn", stats.get("conns")),
         "temp_c": stats.get("temp"),
         "cpu0": stats.get("cpu0"),
         "cpu1": stats.get("cpu1"),
@@ -127,7 +131,7 @@ def row_from_stats(stats, board, profile, phase, test=""):
         "heap_big": stats.get("heap_big"),
         "stack_loop": stats.get("stack_loop"),
         "stack_ble": stats.get("stack_ble"),
-        "reports": stats.get("reports"),
+        "reports": stats.get("reports", stats.get("states")),
         "took_us": stats.get("took_us"),
     }
 
