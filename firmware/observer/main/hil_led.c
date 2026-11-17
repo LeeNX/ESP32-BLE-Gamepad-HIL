@@ -194,8 +194,9 @@ void hil_led_init(void) {
 #if defined(HIL_CONN_LED_PIN)
     gpio_out(HIL_CONN_LED_PIN);
 #endif
-    // Lowest useful priority: below BTstack's task, so a busy Bluetooth stack always wins.
-    xTaskCreate(led_task, "hil_led", 2560, NULL, tskIDLE_PRIORITY + 1, NULL);
+    // Lowest useful priority: below BTstack's task, so a busy Bluetooth stack always wins. 4 KB: rmt_new_tx_channel()
+    // and its logging overflowed 2.5 KB on an S3 (stack-overflow panic at boot, found on the rig).
+    xTaskCreate(led_task, "hil_led", 4096, NULL, tskIDLE_PRIORITY + 1, NULL);
 #endif
 }
 
