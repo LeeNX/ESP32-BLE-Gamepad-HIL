@@ -29,6 +29,7 @@ REPLY_PREFIXES = (
     "SLOTS",
     "STATS",
     "TASKS",
+    "LED",
 )
 
 
@@ -207,6 +208,18 @@ class SerialDev:
         configured for this board (firmware replies ERR unsupported)."""
         r = self.command(f"LED {'ON' if on else 'OFF'}")
         return r == "OK"
+
+    def led_kind(self):
+        """`LED?` -> ("rgb"|"mono", gpio), or (None, None) when no activity LED is
+        configured (`LED none`, or an older firmware that replies ERR unknown)."""
+        parts = self.command("LED?").split()
+        if len(parts) == 3 and parts[0] == "LED" and parts[1] in ("rgb", "mono"):
+            return parts[1], int(parts[2])
+        return None, None
+
+    def led_rgb(self, r, g, b):
+        """`LED <r> <g> <b>` -> True if applied (RGB builds only; held until the next non-LED command)."""
+        return self.command(f"LED {r} {g} {b}") == "OK"
 
     def bonds(self):
         """`BONDS?` -> list of bonded peer MACs the firmware has stored."""

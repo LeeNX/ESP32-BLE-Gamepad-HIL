@@ -9,6 +9,7 @@
 #   PUSH=1 builder/build.sh                            # also rsync bundles to [tester].ssh_host
 #   HIL_LED_PIN_ESP32DEV=2 builder/build.sh             # activity LED for one board, no config edit
 #   HIL_CONN_LED_PIN_ESP32DEV=4 builder/build.sh        # connection LED, same idea
+#   HIL_LED_PIN_ESP32S3=RGB48 builder/build.sh          # RGB (WS2812) activity LED -- docs/rig-hardware.md
 #
 # SC2206: BOARDS / PROFILES are space-separated lists we deliberately word-split.
 # shellcheck disable=SC2206
@@ -117,9 +118,22 @@ for board in "${BOARDS[@]}"; do
   chip=$(board_chip "$board")
   board_flags="${PLATFORMIO_BUILD_FLAGS:-}"
   led_pin=$(board_gpio "$board" led_pin LED_PIN)
-  if [[ -n "$led_pin" ]]; then
+  # `RGB<gpio>` (any case, optional colon: RGB48 / rgb:48) = a WS2812-style RGB
+  # LED on that GPIO, e.g. the S3 DevKitC-1's onboard one (RGB48, or RGB38 on a
+  # v1.1 board). Same setting, no extra env var: build.sh just adds the
+  # internal -DHIL_LED_RGB so the firmware drives it with colours
+  # (docs/rig-hardware.md "RGB status LED"). A plain number stays a
+  # single-colour LED.
+  if [[ "$led_pin" =~ ^[Rr][Gg][Bb]:?([0-9]+)$ ]]; then
+    led_pin="${BASH_REMATCH[1]}"
+    board_flags="$board_flags -DHIL_LED_PIN=$led_pin -DHIL_LED_RGB"
+    echo "== $board activity LED: RGB on GPIO $led_pin"
+  elif [[ "$led_pin" =~ ^[0-9]+$ ]]; then
     board_flags="$board_flags -DHIL_LED_PIN=$led_pin"
     echo "== $board activity LED: GPIO $led_pin"
+  elif [[ -n "$led_pin" ]]; then
+    echo "!! $board: led_pin '$led_pin' is neither <gpio> nor RGB<gpio>" >&2
+    exit 2
   fi
   conn_led_pin=$(board_gpio "$board" conn_led_pin CONN_LED_PIN)
   if [[ -n "$conn_led_pin" ]]; then

@@ -495,6 +495,8 @@ banner and any debug lines are skipped by the host.
 | `STATS?` | `STATS up=<ms> reset=<reason> temp=<°C> cpu0=<%> [cpu1=<%>] bt=<%> heap=<b> heap_min=<b> heap_big=<b> conn=<0\|1> stack_loop=<b> stack_ble=<b> reports=<n> took_us=<us>` — MCU health for the trend log (`host/hil/mcustats.py`). CPU figures are % of one core since the previous `STATS?`: `cpuN` = 100 − that core's idle task (the loop task polls serial without sleeping, so its core reads ~100%); `bt` = the Bluetooth tasks (`nimble_host` + `btController`). `heap_min` = lowest free heap since boot; `stack_*` = least free stack ever, bytes; `reports` = input reports sent since boot; `reset` = why the chip last restarted (`brownout`, `panic`, `task_wdt`, …). Unmeasurable values read `na`. Takes ~5 ms on the MCU |
 | `TASKS?` | `TASKS span_ms=<n> <task>:<cpu %>:<least free stack> …` — a one-line "top": every FreeRTOS task's share of one core since the previous `TASKS?`, and its stack low-water mark in bytes |
 | `LED ON\|OFF` | `OK` / `ERR unsupported` — explicit override of the activity LED; `ERR unsupported` until `HIL_LED_PIN` is wired + set for that board (see "Rig hardware TODO") |
+| `LED <r> <g> <b>` | `OK` / `ERR range` / `ERR unsupported` — set an RGB activity LED (`led_pin = "RGB<gpio>"`) to a colour, 0..255 each; `ERR unsupported` on a single-colour LED. Held until the next non-LED command |
+| `LED?` | `LED rgb <gpio>` / `LED mono <gpio>` / `LED none` — which kind of activity LED this build drives |
 
 Every command also pulses the same LED for ~30ms as a received-activity
 indicator (non-blocking — see `ledPulse()`/`ledService()` in
@@ -502,6 +504,10 @@ indicator (non-blocking — see `ledPulse()`/`ledService()` in
 to it and goes dark if the link dies mid-run. A second, independent LED
 (`HIL_CONN_LED_PIN`, no serial command — it just mirrors `CONN?`) stays
 steady on while BLE-connected. Wiring guide for both: `docs/rig-hardware.md`.
+With `led_pin = "RGB<gpio>"` (e.g. the ESP32-S3 DevKitC-1's onboard RGB LED,
+`RGB48`) the one activity LED shows both: a state colour (blue advertising,
+green connected) with white/red flashes for commands/errors — see
+`docs/rig-hardware.md` "RGB status LED".
 
 `begin()` runs in `setup()` (like `TestAll.ino`): calling it lazily from
 `loop()` on the BEGIN command wedged the NimBLE server task on the classic

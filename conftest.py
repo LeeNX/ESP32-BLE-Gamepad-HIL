@@ -9,6 +9,7 @@ import fcntl
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import time
@@ -186,9 +187,15 @@ def firmware(rigcfg, pytestconfig):
     # direct-from-source one.
     board_upper = rigcfg["name"].upper()
     led_flags = []
-    led_pin = os.environ.get(f"HIL_LED_PIN_{board_upper}") or rigcfg.get("led_pin")
-    if led_pin:
+    led_pin = str(os.environ.get(f"HIL_LED_PIN_{board_upper}") or rigcfg.get("led_pin") or "")
+    # `RGB<gpio>` (RGB48 / rgb:48) = a WS2812-style RGB LED (builder/build.sh has the same rule).
+    rgb = re.fullmatch(r"rgb:?(\d+)", led_pin, re.IGNORECASE)
+    if rgb:
+        led_flags += [f"-DHIL_LED_PIN={rgb.group(1)}", "-DHIL_LED_RGB"]
+    elif led_pin.isdigit():
         led_flags.append(f"-DHIL_LED_PIN={led_pin}")
+    elif led_pin:
+        raise ValueError(f"led_pin {led_pin!r} for {board_upper} is neither <gpio> nor RGB<gpio>")
     conn_led_pin = os.environ.get(f"HIL_CONN_LED_PIN_{board_upper}") or rigcfg.get("conn_led_pin")
     if conn_led_pin:
         led_flags.append(f"-DHIL_CONN_LED_PIN={conn_led_pin}")
