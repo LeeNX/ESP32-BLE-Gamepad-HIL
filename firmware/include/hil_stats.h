@@ -113,6 +113,9 @@ static inline const char* hil_stats_reset_name(esp_reset_reason_t r) {
 // --- per-task run time ---------------------------------------------------------------------------------------------
 
 #define HIL_STATS_MAX_TASKS 32
+// A TASKS line body: the span_ms= head (24) plus HIL_STATS_MAX_TASKS items of at most
+// " <15-char name>:<100.0>:<65535>" (29 bytes), rounded up.
+#define HIL_STATS_TASKS_BUF 1024
 
 // The previous call's counters, so the next call can report run time since then.
 typedef struct {
@@ -133,9 +136,15 @@ static inline int64_t hil_stats_task_window(hil_task_window_t* w, hil_task_fn fn
     if (!st) return -1;
     configRUN_TIME_COUNTER_TYPE total = 0;
     UBaseType_t got = uxTaskGetSystemState(st, cap, &total);
+    if (got == 0) {
+        // More tasks than cap right now: keep the previous window as it is. Replacing it would drop every task's
+        // history but advance prev_us, and the next call would then divide lifetime counters by one interval.
+        free(st);
+        return -1;
+    }
     int64_t now = esp_timer_get_time();
     int64_t span = now - w->prev_us;
-    bool ok = got > 0 && span > 0 && span < 0xFFFFFFFFLL;
+    bool ok = span > 0 && span < 0xFFFFFFFFLL;
     hil_task_window_t next;
     next.n = 0;
     next.prev_us = now;
@@ -246,8 +255,8 @@ static inline void hil_stats_task_item(const TaskStatus_t* t, float pct, void* c
     }
 }
 
-// Writes "span_ms=<n> <task>:<cpu>:<stack> ..." to buf. Returns the length, or -1 if the window couldn't be measured
-// (buf then holds nothing useful).
+// Writes "span_ms=<n> <task>:<cpu>:<stack> ..." to buf (size it HIL_STATS_TASKS_BUF). Returns the length, or -1 if the
+// window couldn't be measured or the list didn't fit (buf then holds nothing useful).
 static inline int hil_stats_tasks(hil_task_window_t* w, char* buf, size_t size) {
     // The items are written first (the callback runs during the walk), then the span is known: leave room for it.
     const int head = 24;  // "span_ms=" + up to 10 digits, padded below
@@ -256,7 +265,9 @@ static inline int hil_stats_tasks(hil_task_window_t* w, char* buf, size_t size) 
     o.buf[0] = '\0';
     int64_t span = hil_stats_task_window(w, hil_stats_task_item, &o);
     if (span < 0) return -1;
-    if (o.n >= (int)o.size) o.n = (int)o.size - 1;  // truncated: snprintf returned the length it wanted
+    // Truncated (snprintf returned the length it wanted): fail rather than report a list with tasks missing. Callers
+    // size buf for HIL_STATS_TASKS_BUF, which fits HIL_STATS_MAX_TASKS items of the longest shape.
+    if (o.n >= (int)o.size) return -1;
     int h = snprintf(buf, head, "span_ms=%lu", (unsigned long)(span / 1000));
     memmove(buf + h, buf + head, (size_t)o.n + 1);
     return h + o.n;

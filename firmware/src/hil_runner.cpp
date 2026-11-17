@@ -80,7 +80,7 @@ static void printStats()
 // TASKS span_ms=<n> <task>:<cpu %>:<least free stack> ... -- a one-line "top" since the previous TASKS?.
 static void printTasks()
 {
-    static char buf[768];
+    static char buf[HIL_STATS_TASKS_BUF];
     if (hil_stats_tasks(&tasksWindow, buf, sizeof buf) < 0)
     {
         reply("ERR tasks");

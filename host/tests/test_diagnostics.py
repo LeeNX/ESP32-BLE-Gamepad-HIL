@@ -48,6 +48,9 @@ def test_stats_reply(dut):
 
 
 def test_tasks_reply(dut):
+    # Prime the window: the first TASKS? measures from boot, and past ~71 minutes of uptime (the 32-bit counters)
+    # it replies ERR tasks. The C3/S3 aren't reset by opening their port, so that's a healthy board's normal state.
+    dut.command("TASKS?")
     span, tasks = parse_tasks(dut.command("TASKS?"))
     assert span is not None and span > 0
     names = {t[0] for t in tasks}

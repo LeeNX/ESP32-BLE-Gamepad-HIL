@@ -172,7 +172,7 @@ static void handle_command(char* line) {
                      (unsigned long)(esp_timer_get_time() - t0));
         printf("HIL stats %s\n", buf);
     } else if (strcmp(line, "tasks?") == 0) {
-        static char buf[768];
+        static char buf[HIL_STATS_TASKS_BUF];
         if (hil_stats_tasks(&g_tasks, buf, sizeof(buf)) < 0)
             printf("HIL err tasks\n");
         else

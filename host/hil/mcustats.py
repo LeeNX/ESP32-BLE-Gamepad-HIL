@@ -149,6 +149,11 @@ class McuLog:
         try:
             stats = parse_stats(dut.command("STATS?", timeout=2.0, retries=0))
         except Exception:  # noqa: BLE001 -- a dropped reply is a missing sample, nothing more
+            self._resync(dut)
+            if phase in SESSION_START:
+                # Keep the session boundary even without numbers, or the summary would compare this session's
+                # uptimes with the previous one's and report a restart that was only the port reopening.
+                self.write(row_from_stats({}, self.board, self.profile, phase, test))
             return {}
         if not stats:
             # ERR unknown: firmware from before STATS? existed. Stop asking for the rest of the session.
@@ -156,6 +161,16 @@ class McuLog:
             return {}
         self.write(row_from_stats(stats, self.board, self.profile, phase, test))
         return stats
+
+    @staticmethod
+    def _resync(dut):
+        """After a query that timed out, its reply may still arrive -- and SerialDev's next command would take that
+        late STATS/TASKS line as its own reply. A PING that only accepts PONG reads past it (replies come in order).
+        Best effort: failing here is the next command's problem, not this sample's."""
+        try:
+            dut.command("PING", timeout=2.0, prefixes=("PONG",), retries=0)
+        except Exception:  # noqa: BLE001
+            pass
 
     def write(self, row):
         try:
@@ -176,6 +191,7 @@ class McuLog:
         try:
             line = dut.command("TASKS?", timeout=2.0, retries=0)
         except Exception:  # noqa: BLE001
+            self._resync(dut)
             return
         if not line.startswith("TASKS"):
             return
@@ -255,13 +271,14 @@ def summarize_group(rows):
     prev = None
     prev_file = None
     for r in rows:
+        # Boundary first: a session-start row with no numbers (its sample failed) still starts a session.
+        if r.get("phase") in SESSION_START or r.get("_file") != prev_file:
+            prev = None
+        prev_file = r.get("_file")
         try:
             up = int(r["up_ms"])
         except (KeyError, ValueError, TypeError):
             continue
-        if r.get("phase") in SESSION_START or r.get("_file") != prev_file:
-            prev = None
-        prev_file = r.get("_file")
         if prev is not None and up < prev:
             restarts += 1
         prev = up
