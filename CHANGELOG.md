@@ -47,6 +47,16 @@ What a bump means:
   N100), powered and `uhubctl`-capable hubs, Bluetooth dongle choice (a known model from a reputable seller, not the cheapest) and placement, sourcing a reliable hub, idle/busy power and yearly kWh per
   host, a kernel-log table for tracking down USB resets, and a pre-purchase checklist. Linked from README and
   `docs/rig-build.md`.
+- **Buyer's guide: a hub-port case study and a "Parts tried on this rig" table.** On 2026-11-17 one esp32dev on a
+  second-tier port of mimir's 7-port hub (two cascaded GL850G chips) broke every C3-observer Bluepad32 pairing with it
+  (`Reason=0x3e`) for most of a day, and showed up in the kernel log only as rare `cp210x … -121` lines. Moving the
+  cable to another port fixed it. The guide now explains that 7-port hubs are often two chips, adds `-121` to the
+  kernel-log table, and has a table of every hub, bridge and dongle tried, with its USB ID and verdict. The checklist
+  adds `lsusb -t` on arrival. `docs/rig-build.md` gets a photo of the current mimir rig (metadata stripped, the
+  host's serial-number label masked) and an up-to-date mimir section: one 7-port hub, not two, and three boards
+  since the CP2102 DevKit became `esp32dev`. `docs/TODO.md` gains two follow-ups: retry a Bluepad32 lane once with diagnostics, and
+  NimBLE-Arduino's `getPeerInfo()` fix (on `master`, not in 2.5.2) plus the breaking changes waiting there for the
+  unpinned dependency.
 - **`HIL_BT_ADAPTER` picks the Bluetooth controller.** Set it to a BD address (`18:69:45:F3:4C:D3`, recommended: it
   stays the same across re-plugging) or an hci name (`hci1`). Unset, the suite uses the only controller if there's
   just one, or `hci0` with a warning if there are several, so single-adapter rigs behave as before.

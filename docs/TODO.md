@@ -47,6 +47,32 @@ These ESP32-BLE-Gamepad features have **no firmware command and no test**:
 - [ ] **Bench trend history.** `--bench` numbers are only ever compared to the
   checked-in `docs/bench/` snapshot. A small time series (per board / profile,
   p50 / p99 / clean-rate) would catch slow drift, not just step regressions.
+- [ ] **Self-healing Bluepad32 lane.** `tester/bp32_hil.py` waits up to 90 s
+  for `HIL ready` and then fails the lane. On 2026-11-17 the C3 observer's
+  pairing with the esp32dev dropped (`Reason=0x3e`) and the gamepad then
+  stopped advertising for good, so every C3 → esp32dev lane went red for a
+  day. The cause was a bad USB hub port: the kernel logged
+  `cp210x ttyUSB0: failed to get comm status: -121`, and moving the cable
+  fixed it. Proposal: if the observer isn't ready after ~20 s, ask the gamepad
+  `CONN?` / `STATS?`, log what both sides saw (the observer's `Reason=` line and
+  the gamepad's state), reset the gamepad (RTS → EN) and retry once. Record the
+  retry in the verdict (like `gaps=`) so a flaky port shows up as a warning
+  rather than either a red run or a hidden pass. A kernel-log check for
+  `-121` / USB disconnects on the lane's ports would point at the hardware
+  directly.
+- [ ] **NimBLE-Arduino after 2.5.2.** `firmware/platformio.ini` leaves
+  `h2zero/NimBLE-Arduino` unpinned, so builds take the latest release (2.5.2,
+  2026-10-25). In 2.5.2, `NimBLEServer::getPeerInfo(index)` returns
+  `m_connectedPeers[count]` instead of the peer it found. So whenever the live
+  link isn't in slot 0, hil_runner's `PEERINFO?` reports all zeros
+  (`interval=0 … mtu=0`) although the link is up. Upstream `master` already
+  has the fix (`getPeerInfoByHandle(peer)`). Until the next release, don't
+  trust an all-zero `PEERINFO?`. `master` also carries `[Breaking]` callback
+  changes (write-callback value parameter, `setCallbacks` renames), and an
+  unpinned dependency picks up the next release, major version included, on
+  the next CI build. So decide whether to pin `h2zero/NimBLE-Arduino@~2.5.2`
+  until ESP32-BLE-Gamepad has been checked against the new API. Then move up
+  deliberately and re-run the suite.
 - [ ] **Re-check desktop testing against the current Linux CI/CD flow.**
   `desktop/` (macOS / Windows) was last touched 2026-10-07 (v0.4.0); the rig
   side has moved on since: `sinput` profile + observer matrix, multi-slot

@@ -95,14 +95,24 @@ boards.
   back up the upstream cable, which can stop a Pi from rebooting or powering
   off cleanly. Unplug the host's PSU with the hub still connected: if the
   host's LEDs stay lit, the hub is back-feeding.
-- **One 7-port hub beats two chained 4-port hubs.** Every tier is another
-  chip, another cable and another power supply that can glitch. Seen on this
-  rig: mimir currently has two chained Genesys GL850G hubs (`05e3:0608`).
-  They work, but they're the cheapest single-TT hub chip there is.
+- **Fewer hub tiers is better, and a 7-port hub is often two.** Every tier is
+  another chip, and a cascade adds another cable and power supply that can
+  glitch. Many 7-port USB 2.0 hubs are two 4-port controller chips chained
+  inside one case, and the listing won't say. Seen on this rig: mimir's
+  7-port hub (self-powered) is two Genesys GL850G chips (`05e3:0608`, the
+  cheapest single-TT hub chip there is). `lsusb -t` shows it as a hub inside a
+  hub. Ports 1–3 are on the first chip, and the second chip hangs off the
+  first chip's port 4 and serves the other four ports, so the boards on those
+  ports sit two hub tiers deep. That's where the 2026-11-17 trouble below
+  happened. When you plug in a new hub, run `lsusb -t` and label the
+  ports by tier on the case.
 - **A well-known hub is harder to source than a well-known dongle.** Hub
   listings rarely name the controller chip or the PSU rating. The same
   product name can ship with different chips between batches, and
-  brand-name hubs are often rebadged generic ones. What helps:
+  brand-name hubs are often rebadged generic ones. The specs that are
+  published are often vague, and sometimes don't match the hardware at all.
+  Trust what the host reports (`lsusb -t`, the sysfs check below) and what a
+  full rig run shows, not the listing. What helps:
   - Buy from a seller with a decent return policy, and check the chip
     (`lsusb`, then `bDeviceProtocol` below) as soon as it arrives.
   - Prefer hubs whose chip is documented: `uhubctl`'s supported list names
@@ -112,7 +122,8 @@ boards.
   - Treat the hub's power supply as part of the hub. Replace a weak
     bundled brick with a known-good one of the same voltage and polarity.
   - Once you have a hub that behaves, note the exact model and buy a
-    spare.
+    spare. Record what didn't behave too, in "Parts tried on this rig"
+    below, so the next purchase starts from evidence.
 - **Single-TT vs multi-TT.** Every board's serial bridge is a 12 Mbit/s
   full-speed device. Behind a USB 2.0 hub, a single-TT hub runs all of them
   through one translator; a multi-TT hub gives each port its own. Serial
@@ -269,6 +280,7 @@ host**. Change one thing at a time, and do a full run between changes.
 | Log line | Usually means |
 |---|---|
 | `status: -71`, `failed to get modem status: -71`, `device descriptor read/64, error -71` | EPROTO: a signal-integrity problem. Cable, connector, or hub port. Swap the cable first. |
+| `cp210x ttyUSBn: failed to get comm status: -121` | EREMOTEIO: the bridge didn't answer a control request properly. Same suspects as `-71`: port, cable, hub. Seen on this rig 2026-11-17 on a second-tier hub port (case study below). |
 | `usb X-Y: USB disconnect` for **one** device, then it comes back | That board reset or browned out. Normal during a flash; a problem if it happens mid-test. |
 | `USB disconnect` for **every device behind one hub** at once | The hub lost power or reset. Check its PSU and how many boards it's carrying. |
 | `over-current change` on a hub port | That port's power budget was exceeded. Move the board to a powered hub or a different port. |
@@ -277,6 +289,41 @@ host**. Change one thing at a time, and do a full run between changes.
 | `xhci_hcd … HC died; cleaning up` | A whole controller died. Reboot, then suspect power or a misbehaving device on that controller. |
 | `hciN: Controller not accepting commands anymore`, `hciN: hardware error 0x..` | The Bluetooth controller wedged. This is a radio problem, not USB power, if the rest of the bus stays up. Try a different dongle. |
 | `Bluetooth: hciN: RTL: firmware file … not found` | Install `linux-firmware`. |
+
+### Case study: one bad hub port looked like a Bluetooth bug (2026-11-17)
+
+One esp32dev (onboard CP2102, the white cable in the photo in
+`docs/rig-build.md`) on mimir's hub, at `1-1.4.1`, the second chip's first
+port:
+
+- **Symptoms**: over about 7.5 hours, all but one of the observer-matrix lanes
+  with the esp32c3 as Bluepad32 observer and that esp32dev as gamepad failed
+  "device ready". The C3's log showed pairing start, then `Pairing failed,
+  disconnected … Reason=0x3e` ("connection failed to be established"), and
+  the gamepad didn't advertise again until it was reset. One BlueZ lane got a
+  garbled serial reply from the same board. The other boards, and the S3 as
+  observer of the same esp32dev, were fine.
+- **What it looked like**: a Bluetooth or library bug. It cost a day of
+  firmware comparisons, NimBLE debug builds and reproduction scripts.
+- **The only USB evidence**: six `cp210x ttyUSB0: failed to get comm status:
+  -121` lines in `journalctl -k`, hours apart. No disconnects, no
+  over-current messages, and the hub is self-powered.
+- **The fix**: the same cable moved to a first-tier port (`1-1.1`). From then
+  on every replay paired and the real lanes passed. The `by-id` path didn't
+  change, so no config edits were needed.
+- **Lessons**:
+  - A flaky port doesn't have to drop the device. It can show up first as
+    radio trouble on that one board, because the board's power, and the radio
+    on it, are only as clean as the port.
+  - Read `journalctl -k | grep -E 'cp210x|ch341|ftdi_sio|cdc_acm'` (and
+    `-71` / `-121`) before debugging firmware. Rare, quiet errors on one
+    bridge are a reason to move that board to another port first.
+  - When one board pair fails and every other combination passes, swap that
+    board's port before anything else. It's the cheapest experiment.
+- **Still unknown**: whether the port, the second hub chip, or its power
+  distribution was at fault. The three boards still on second-tier ports have
+  been fine. If one of them starts flaking, move it to a first-tier port and
+  note it here.
 
 ### Know your USB tree
 
@@ -304,11 +351,31 @@ Check three things:
   isn't mounted, but every device on that root is something that can
   misbehave during a reset storm.
 
+## Parts tried on this rig
+
+Data sheets and listings for this class of gear are often vague, and
+sometimes simply wrong. What a part did on a real rig is the most reliable
+information there is. Add a row whenever a part is added, removed or misbehaves.
+Use the USB IDs from `lsusb`, because product names change between batches.
+
+| Part | USB ID | Verdict | Notes |
+|---|---|---|---|
+| TP-Link UB500 Bluetooth dongle (Realtek RTL8761BU) | `2357:0604` | Good | The reference rig's radio since 2026-11-16 (`HIL_BT_ADAPTER`). |
+| Intel onboard Bluetooth (mimir) | `8087:07da` | Avoid for the rig | Wedged under parallel pairing (`Controller not accepting commands anymore`). Disabled with a udev rule. |
+| 7-port USB 2.0 hub, self-powered, two Genesys GL850G chips | `05e3:0608` ×2 | Works, watch it | Single-TT and cascaded (see "Powered hubs"). Port `1-1.4.1` (second chip) gave `-121` errors and broken Bluetooth pairing on 2026-11-17; the other ports have been fine. |
+| CP2102 bridge on an ESP32 DevKit (esp32dev) | `10c4:ea60` | Good on a good port | Opening the port auto-resets the ESP32 (DTR/RTS to EN). Earlier, `-71` errors on a spare USB-C cable. |
+| CH340 bridge, external, previous esp32dev | `1a86:…` (`ch341` driver) | Good | Retired with its board 2026-11-17, not for a fault. |
+| CH343 bridge on the ESP32-S3 DevKitC-1 "UART" port | `1a86:55d3` | Good | Console and flashing. The S3's native USB cable is left out (see "Serial bridges and cables"). |
+| FT232R bridge (esp32c3 console) | `0403:6001` | Good | TX/RX/GND only, no reset line. The C3 is reset through its own USB. |
+| ESP32-C3 native USB-Serial/JTAG (flashing, reset) | `303a:1001` | Good | Re-enumerates on every reset, which is expected. |
+| Raspberry Pi 3B+ as host | — | Retired 2026-11-11 | One USB controller shared with Ethernet and the root disk wedged (`dwc_otg`). See "Host options". |
+
 ## Checklist before you buy
 
 - [ ] Host has wired Ethernet and SATA/NVMe storage that aren't on the boards' USB controller
 - [ ] At least 2 GB RAM (1 GB proved a hard floor on the Pi 3B+)
 - [ ] A powered USB hub with ~0.5 A per board, preferably `uhubctl`-capable, that doesn't back-power the host
+- [ ] On arrival: `lsusb -t` to see how many hub chips are inside, label the ports by tier, and add the hub to "Parts tried on this rig"
 - [ ] A well-known USB Bluetooth dongle from a reputable seller (TP-Link UB500, RTL8761BU, worked here), with `linux-firmware` installed
 - [ ] One USB port per board, plus one per separate UART bridge
 - [ ] Short, decent USB cables, plus a spare to swap in

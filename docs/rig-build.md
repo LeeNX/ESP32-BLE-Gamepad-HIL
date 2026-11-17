@@ -56,15 +56,27 @@ the Bluetooth dongle, power use per host, and how to track down a USB reset.
 | RAM | 8 GB (7.0 GiB usable) | ~6 GiB available; memory is a non-issue |
 | Storage | 120 GB SATA SSD (root on LVM) | 10 GB used |
 | Network | onboard Gigabit Ethernet (`eno1`, PCIe) plus Wi-Fi as a backup address | not on any USB bus |
-| USB | boards, bridges and the BT dongle on the xHCI controller (direct ports plus two chained powered hubs). The disabled onboard Intel BT sits on a separate EHCI controller | no USB controller errors so far |
+| USB | boards, bridges and the BT dongle on the xHCI controller: the dongle on a direct port, the boards on one self-powered 7-port hub, which is two cascaded Genesys GL850G chips (`05e3:0608`) inside. The disabled onboard Intel BT sits on a separate EHCI controller | no controller errors. One hub port gave `cp210x … -121` errors and broken Bluetooth pairing on 2026-11-17 until the board moved ports (`docs/rig-host-selection.md`, "Case study") |
 | BLE | TP-Link UB500 USB dongle (Realtek RTL8761BU, `hci1`, `HIL_BT_ADAPTER`), BlueZ 5.85. The onboard Intel 8087:07da is de-authorized by a udev rule: it wedged under parallel pairing | 7.5 ms connection interval on all three boards (8.75 ms on the Intel) |
 
-It carries all four boards the Pi had (esp32dev, esp32c3, esp32s3 and the
-observer-matrix-only esp32dev2), with the same serial adapters. Their
+It took over the Pi's boards with the same serial adapters. Their
 `/dev/serial/by-id/` names follow the adapters, so `hil_config.local.toml`
-moved across unchanged. The S3 is still flashed through its CH340 bridge, with
-its native USB unplugged. That's not strictly needed on this USB, but it keeps
-the board from re-enumerating on every flash.
+moved across unchanged. Since 2026-11-17 it carries three boards. The
+original esp32dev (on an external CH340) was removed, and the DevKit with an
+onboard CP2102 that used to be the observer-matrix-only `esp32dev2` is now
+`esp32dev`. The S3 is still flashed through its CH343 "UART" bridge
+(`1a86:55d3`), with its native USB unplugged. That's not strictly needed on
+this USB, but it keeps the board from re-enumerating on every flash.
+
+![The mimir rig: a black 1-litre Lenovo PC with a TP-Link USB Bluetooth dongle on top, and in front of it a clear plastic box holding three ESP32 boards in small clear tubs, a red FT232R UART bridge on the box's left wall, and a black 7-port USB hub behind the boards](rig-build/rig-mimir-2026-11-17.jpg)
+
+mimir on 2026-11-17. On top of the host, the TP-Link UB500 Bluetooth dongle.
+Inside the box, left to right: the C3's red FT232R console bridge on the wall;
+the **esp32s3** (RGB status LED lit green); the **esp32c3** (grey ribbon from
+the FT232R and its own USB for flashing); the **esp32dev** (white USB cable).
+The black 7-port hub sits behind the boards. The esp32dev's cable is the one
+moved from a second-tier hub port to a first-tier one in the "Case study" in
+`docs/rig-host-selection.md`. The host's serial-number label is masked.
 
 ## Photos (the original Raspberry Pi 3B+ rig)
 
