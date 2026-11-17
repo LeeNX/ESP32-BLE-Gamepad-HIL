@@ -40,7 +40,14 @@ static const int HIL_BURST_MAX = 2000;
 
 static String line;
 
-static void reply(const char *s) { Serial.println(s); }
+// Defined with the LED code below; reply() calls it so every ERR reply flashes red on an RGB status LED.
+static void ledError();
+
+static void reply(const char *s)
+{
+    Serial.println(s);
+    if (s[0] == 'E' && s[1] == 'R' && s[2] == 'R') ledError();
+}
 
 // Input reports sent since boot -- STATS? reports it as a "how busy was BLE" counter. Every sendReport() goes
 // through here.
@@ -101,7 +108,103 @@ static void printTasks()
 // BLE pairing needed. Must stay non-blocking -- this firmware also runs the
 // --bench latency/throughput sweep, and a delay() here would skew exactly
 // the timing numbers that measures.
-#if defined(HIL_LED_PIN)
+//
+// RGB variant (-D HIL_LED_RGB, set by builder/build.sh when the led_pin
+// value is `RGB<gpio>`): HIL_LED_PIN is a WS2812-style addressable LED
+// (the S3 DevKitC-1's onboard one is GPIO48 on v1.0 boards, GPIO38 on
+// v1.1), and the one LED shows state *and* activity -- see RGB_* below and
+// docs/rig-hardware.md "RGB status LED". rgbLedWrite() blocks for ~30-50us
+// on the RMT peripheral, so ledPulse()/ledError() only record what to show;
+// the write happens in ledService() from loop(), after the command (and
+// its sendReport()) is done, and only when the colour actually changes.
+#if defined(HIL_LED_PIN) && defined(HIL_LED_RGB)
+struct HilRgb
+{
+    uint8_t r, g, b;
+    bool operator==(const HilRgb &o) const { return r == o.r && g == o.g && b == o.b; }
+};
+// Kept dim on purpose: a bare WS2812 at full drive is glaring on a desk.
+static const HilRgb RGB_OFF = {0, 0, 0};
+static const HilRgb RGB_ADVERTISING = {0, 0, 12};  // dim blue: booted, not connected
+static const HilRgb RGB_CONNECTED = {0, 20, 0};    // green: BLE-connected (mirrors CONN?)
+static const HilRgb RGB_ACTIVITY = {24, 24, 24};   // white flash: a command was handled
+static const HilRgb RGB_ERROR = {40, 0, 0};        // red flash: a command replied ERR
+static const HilRgb RGB_BOOTSLOT = {32, 20, 0};    // yellow/amber: BOOT <n> slot switch, about to restart
+static const uint32_t RGB_ACTIVITY_MS = 30;
+static const uint32_t RGB_ERROR_MS = 200;
+
+static HilRgb rgbShown = RGB_OFF;
+static bool rgbShownValid = false;
+static HilRgb rgbFlash = RGB_OFF;
+// A flash is requested while a command runs, but its time only starts when
+// ledService() can show it: a long command (BURST with a large gap) would
+// otherwise use up the whole 30 ms before the LED is ever written.
+static uint32_t rgbFlashPendingMs = 0;  // 0 = nothing requested
+static uint32_t rgbFlashUntilMs = 0;    // 0 = no flash showing
+static bool rgbFlashIsError = false;
+static bool rgbOverride = false;
+static HilRgb rgbOverrideColour = RGB_OFF;
+
+static void rgbShow(const HilRgb &c)
+{
+    if (rgbShownValid && c == rgbShown) return;
+    rgbLedWrite(HIL_LED_PIN, c.r, c.g, c.b);
+    rgbShown = c;
+    rgbShownValid = true;
+}
+
+static void rgbRequestFlash(const HilRgb &c, uint32_t ms, bool isError)
+{
+    rgbFlash = c;
+    rgbFlashPendingMs = ms;
+    rgbFlashIsError = isError;
+}
+
+static void ledSetup() { rgbShow(RGB_OFF); }
+
+// Any command ends a manual LED override (LED ON/OFF/<r g b>): the override
+// is for a wiring check from miniterm, not something a test run can leave
+// stuck on. The LED command itself re-applies its override after this.
+static void ledPulse()
+{
+    rgbOverride = false;
+    // Don't let the next command's white flash cut an error flash short.
+    if (rgbFlashIsError && (rgbFlashPendingMs || rgbFlashUntilMs)) return;
+    rgbRequestFlash(RGB_ACTIVITY, RGB_ACTIVITY_MS, false);
+}
+
+static void ledError() { rgbRequestFlash(RGB_ERROR, RGB_ERROR_MS, true); }
+
+static void ledService()
+{
+    uint32_t now = millis();
+    if (rgbFlashPendingMs)
+    {
+        rgbFlashUntilMs = (now + rgbFlashPendingMs) | 1;  // | 1: never 0, which means "no flash"
+        rgbFlashPendingMs = 0;
+    }
+    else if (rgbFlashUntilMs && (int32_t)(now - rgbFlashUntilMs) >= 0)
+    {
+        rgbFlashUntilMs = 0;
+        rgbFlashIsError = false;
+    }
+    if (rgbOverride) rgbShow(rgbOverrideColour);
+    else if (rgbFlashUntilMs) rgbShow(rgbFlash);
+    else rgbShow(bleGamepad.isConnected() ? RGB_CONNECTED : RGB_ADVERTISING);
+}
+
+static void ledSet(uint8_t r, uint8_t g, uint8_t b)
+{
+    rgbOverride = true;
+    rgbOverrideColour = {r, g, b};
+    rgbFlashPendingMs = 0;
+    rgbFlashUntilMs = 0;
+    rgbFlashIsError = false;
+}
+
+// Shown synchronously: BOOT restarts straight after, loop() never runs again.
+static void ledBootSlot() { rgbShow(RGB_BOOTSLOT); }
+#elif defined(HIL_LED_PIN)
 static uint32_t ledOffAtMs = 0;
 
 static void ledSetup() { pinMode(HIL_LED_PIN, OUTPUT); digitalWrite(HIL_LED_PIN, LOW); }
@@ -120,10 +223,23 @@ static void ledService()
         ledOffAtMs = 0;
     }
 }
+
+static void ledError() {}
+
+// Single-colour LED: any non-zero colour is "on".
+static void ledSet(uint8_t r, uint8_t g, uint8_t b)
+{
+    digitalWrite(HIL_LED_PIN, (r | g | b) ? HIGH : LOW);
+    ledOffAtMs = 0;
+}
+
+static void ledBootSlot() {}
 #else
 static void ledSetup() {}
 static void ledPulse() {}
 static void ledService() {}
+static void ledError() {}
+static void ledBootSlot() {}
 #endif
 
 // Connection LED (HIL_CONN_LED_PIN): steady on while bonded+connected over
@@ -323,7 +439,8 @@ static void handle(const String &cmd)
             return;
         }
         const char *err = hil_slots_set_boot(t[1].toInt(), n > 2);
-        if (err) { Serial.printf("ERR %s\n", err); return; }
+        if (err) { Serial.printf("ERR %s\n", err); ledError(); return; }
+        ledBootSlot();
         reply("OK");
         Serial.flush();
         delay(20);
@@ -412,11 +529,48 @@ static void handle(const String &cmd)
         return;
     }
 
+    if (c == "LED?")
+    {
+        // LED? -> LED rgb <gpio> | LED mono <gpio> | LED none: which kind of
+        // activity LED this build has, so a test knows whether LED <r> <g> <b> applies.
+#if defined(HIL_LED_PIN) && defined(HIL_LED_RGB)
+        Serial.printf("LED rgb %d\n", (int)HIL_LED_PIN);
+#elif defined(HIL_LED_PIN)
+        Serial.printf("LED mono %d\n", (int)HIL_LED_PIN);
+#else
+        reply("LED none");
+#endif
+        return;
+    }
+
     if (c == "LED")
     {
+        // LED ON|OFF on any LED; LED <r> <g> <b> (0..255 each) on an RGB one.
+        // Held until the next non-LED command (see ledPulse()).
 #if defined(HIL_LED_PIN)
-        if (n >= 2 && t[1] == "ON") { digitalWrite(HIL_LED_PIN, HIGH); ledOffAtMs = 0; reply("OK"); return; }
-        if (n >= 2 && t[1] == "OFF") { digitalWrite(HIL_LED_PIN, LOW); ledOffAtMs = 0; reply("OK"); return; }
+        if (n == 2 && t[1] == "ON") { ledSet(64, 64, 64); reply("OK"); return; }
+        if (n == 2 && t[1] == "OFF") { ledSet(0, 0, 0); reply("OK"); return; }
+        if (n == 4)
+        {
+#if defined(HIL_LED_RGB)
+            int v[3];
+            for (int i = 0; i < 3; i++)
+            {
+                // Every character a digit (String::toInt() would take "12junk" as 12), at most 3 of them.
+                const String &tok = t[i + 1];
+                bool digits = tok.length() >= 1 && tok.length() <= 3;
+                for (unsigned k = 0; digits && k < tok.length(); k++) digits = isDigit(tok[k]);
+                if (!digits) { reply("ERR args"); return; }
+                v[i] = t[i + 1].toInt();
+                if (v[i] < 0 || v[i] > 255) { reply("ERR range"); return; }
+            }
+            ledSet(v[0], v[1], v[2]);
+            reply("OK");
+#else
+            reply("ERR unsupported");
+#endif
+            return;
+        }
         reply("ERR args");
 #else
         reply("ERR unsupported");

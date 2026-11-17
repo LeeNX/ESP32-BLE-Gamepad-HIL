@@ -207,8 +207,11 @@ jobs:
       (github.repository == 'LeeNX/ESP32-BLE-Gamepad-HIL' || vars.HIL_RIG_ENABLED == 'true')
       && (inputs.matrix || 'quick') != 'none'
     uses: ./.github/workflows/observer.yml
+    # For the status-LED GPIOs when they're Secrets rather than Variables (observer.yml status_leds).
+    secrets: inherit
     with:
       boards: ${{ inputs.boards || 'esp32dev esp32c3 esp32s3' }}
+      status_leds: true
 
   hil-test:
     needs: [build, observers]

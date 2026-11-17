@@ -5,6 +5,7 @@
 #
 #   builder/build-observers.sh                          # [builder] boards, paths from [observer] in hil_config
 #   builder/build-observers.sh --boards "esp32c3" --out /tmp/bundles
+#   HIL_LED_PIN_ESP32S3=RGB48 builder/build-observers.sh   # status LED, same settings as build.sh (builder/led-pin.sh)
 #
 # Bundles land in <out>/matrix/<board>-bp32obs-<bluepad32 sha8>-<rig sha8>/ -- under matrix/ so tester/test-all.sh (which only
 # runs top-level bundles) never flashes one as a gamepad. Each carries a blank NVS image, so an observer always
@@ -30,7 +31,7 @@ while [[ $# -gt 0 ]]; do
   case $1 in
     --boards) read -r -a BOARDS <<<"$2"; shift 2 ;;
     --out) OUT_ROOT=$2; shift 2 ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -54,7 +55,7 @@ part() { awk -F, -v n="$1" -v f="$2" '$1 ~ "^"n"[ \t]*$" {gsub(/[ \t]/, "", $f);
 BP32_SHA=$(git -C "$BP32_DIR" rev-parse --short=8 HEAD)
 # The observer's own source commit, not the rig HEAD: a rig commit that doesn't touch the observer then builds the
 # same image (version string included), which a multi-slot board already holds -- no write (tester/flash.py).
-OBS_PATHS=(firmware/observer firmware/include builder/build-observers.sh)
+OBS_PATHS=(firmware/observer firmware/include builder/build-observers.sh builder/led-pin.sh)
 RIG_SHA=$(git log -1 --format=%h --abbrev=8 -- "${OBS_PATHS[@]}")
 RIG_SHA=${RIG_SHA:0:8}
 [[ -z $(git status --porcelain -- "${OBS_PATHS[@]}") ]] || RIG_SHA="$RIG_SHA-dirty"
@@ -72,6 +73,9 @@ echo "== observer firmware/observer @ $(git rev-parse --short HEAD); nvs $NVS_OF
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 python3 -c 'import sys; open(sys.argv[1], "wb").write(b"\xff" * int(sys.argv[2], 0))' "$tmp/nvs_blank.bin" "$NVS_SIZE"
 
+# shellcheck source=builder/led-pin.sh
+source "$REPO/builder/led-pin.sh"
+
 mkdir -p "$OUT_ROOT/matrix"
 for board in "${BOARDS[@]}"; do
   env=$(board_env "$board"); chip=$(board_chip "$board")
@@ -79,6 +83,9 @@ for board in "${BOARDS[@]}"; do
   # The firmware version string comes from the environment, which the build doesn't track: wipe.
   rm -rf "$HOST_DIR/.pio/build/$env" "$HOST_DIR/sdkconfig.$env"
   export HIL_BLUEPAD32_DIR="$BP32_DIR" HIL_FW_VERSION="bp32obs-$BP32_SHA-$RIG_SHA"
+  # Status LEDs: the same per-board settings as hil_runner's, handed to firmware/observer/main/CMakeLists.txt.
+  board_leds "$board" || exit 2
+  export HIL_OBS_LED_PIN="$LED_GPIO" HIL_OBS_LED_RGB="$LED_RGB" HIL_OBS_CONN_LED_PIN="$CONN_LED_GPIO"
   "$PIO" run -e "$env" -d "$HOST_DIR"
   ide=$(mktemp)
   "$PIO" run -e "$env" -d "$HOST_DIR" -t idedata > "$ide" 2>/dev/null

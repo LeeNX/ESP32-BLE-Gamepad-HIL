@@ -7,7 +7,7 @@ until you wire one up and set its GPIO. See `firmware/src/hil_runner.cpp`
 
 | LED | Firmware macro | Behaviour |
 |---|---|---|
-| Activity | `HIL_LED_PIN` | Brief pulse (~30ms) on every serial command received. Explicit `LED ON`/`LED OFF` override — lets you check the wiring with `miniterm` alone, no BLE pairing needed. |
+| Activity | `HIL_LED_PIN` | Brief pulse (~30ms) on every serial command received. Explicit `LED ON`/`LED OFF` override — lets you check the wiring with `miniterm` alone, no BLE pairing needed. With an `RGB<gpio>` value it drives an RGB LED with state colours instead — see "RGB status LED" below. |
 | Connection | `HIL_CONN_LED_PIN` | Steady on while bonded+connected over BLE, off otherwise (mirrors `CONN?`). No serial override — it's state-driven, so verify it by actually pairing. |
 
 Setting the GPIO for either one is a config/env change, not a firmware edit —
@@ -53,6 +53,95 @@ being a boot-strapping pin — manufacturers use it this way at scale. The
 caution under "Picking a GPIO per board" is about wiring a *new* external LED
 to a strapping pin yourself in an unverified orientation, not about reusing
 one that's already there.
+
+## RGB status LED (esp32s3, and any board with a WS2812)
+
+Some boards have no plain LED, only an onboard addressable RGB LED (WS2812 /
+"NeoPixel"). The ESP32-S3 DevKitC-1 is one: GPIO48 on v1.0 boards, GPIO38 on
+v1.1 (the version is on the silkscreen). `digitalWrite()` on that GPIO does
+nothing useful, so give the same activity-LED setting an `RGB` prefix:
+
+```toml
+[board.esp32s3]
+led_pin = "RGB48"          # or "RGB38" on a v1.1 board; "rgb:48" works too
+```
+
+or, from CI, the existing variable: `HIL_LED_PIN_ESP32S3=RGB48`. There is no
+extra variable; `builder/build.sh` (and `conftest.py`) see the prefix and add
+an internal `-DHIL_LED_RGB` build flag. A plain number still means a
+single-colour LED, and any other value fails the build.
+
+The one LED then shows both state and activity:
+
+| Colour | Meaning |
+|---|---|
+| Dim blue, steady | Booted and advertising, not connected |
+| Green, steady | BLE-connected (mirrors `CONN?`) |
+| White flash (~30ms) | A serial command was handled |
+| Red flash (~200ms) | A command replied `ERR …` (not cut short by the next command's white flash) |
+| Amber | `BOOT <n>` slot switch accepted, about to restart |
+
+Colours are kept dim on purpose. Each LED write blocks the CPU for roughly
+30–50µs on the RMT peripheral, so the firmware only records the colour while
+it handles a command. It writes in `loop()` afterwards, and only when the
+colour changes, so the `--bench` timing path never waits on the LED.
+
+Serial checks, with no pairing needed:
+
+- `LED?` → `LED rgb 48` confirms the build picked up the prefix.
+- `LED 32 0 0`, `LED 0 32 0`, `LED 0 0 32` should show red, green and blue.
+  If the colours come out swapped, the LED isn't GRB-ordered; the core's
+  `rgbLedWrite()` assumes GRB.
+- `LED ON` / `LED OFF` work as on a single-colour LED (white / off).
+
+An override lasts until the next non-LED command, then the automatic colours
+take over again. `HIL_CONN_LED_PIN` still works alongside, if you want a
+separate connection LED as well.
+
+### Fallback: `97`, white only, no RGB code
+
+The Arduino core already maps the S3's onboard RGB LED to a virtual pin,
+`RGB_BUILTIN` = `SOC_GPIO_PIN_COUNT` (49) + 48 = **97**. `pinMode()` /
+`digitalWrite()` on 97 drive the WS2812 as plain white on/off. So
+`HIL_LED_PIN_ESP32S3=97` (plain number, no prefix) gives the normal
+single-colour activity pulse and `LED ON|OFF`, with none of the colour logic.
+It only works for an LED on GPIO48, the one the core's variant file
+(`variants/esp32s3/pins_arduino.h`) names. A v1.1 board (GPIO38) needs
+`RGB38`.
+
+## Observer firmware (Bluepad32)
+
+When a board runs the Bluepad32 observer (the observer matrix,
+`firmware/observer`), the same settings drive its status LEDs. There's nothing
+extra to set: `builder/build-observers.sh` reads `led_pin` / `conn_led_pin`
+(or `$HIL_LED_PIN_<BOARD>` / `$HIL_CONN_LED_PIN_<BOARD>`) through the same
+`builder/led-pin.sh` as `builder/build.sh`. The idle colours differ from
+hil_runner's, so you can see a board's current role at a glance:
+
+| Colour | hil_runner (gamepad) | Observer |
+|---|---|---|
+| Dim blue | Advertising | — |
+| Dim purple | — | Scanning, no gamepad |
+| Cyan | — | Gamepad connected, not ready yet |
+| Green | BLE-connected | Gamepad ready |
+| White flash | Serial command handled | Reports arriving (at most one flash per ~100ms, so a steady stream flickers) |
+| Red flash | `ERR …` reply | `HIL err …` reply |
+| Amber | `BOOT <n>` slot switch | `BOOT <n>` slot switch |
+
+On a single-colour LED the observer pulses on reports and errors only, and
+`conn_led_pin` stays on while a gamepad is ready.
+
+The observer's own console commands for its LED are `statusled?` →
+`HIL statusled rgb <gpio>` / `mono <gpio>` / `none`, and
+`statusled on|off|<r> <g> <b>`. Don't confuse these with `led <n>` / `rgb <r> <g> <b>`,
+which drive the connected *gamepad's* LEDs over Bluetooth. A `97` setting
+works there too: the observer reads any pin past the chip's last GPIO as
+"RGB LED on pin − GPIO count", like Arduino's `RGB_BUILTIN`. So with `97`,
+an S3 gets full colours as an observer but white only as a gamepad.
+
+The observer drives the WS2812 with ESP-IDF's RMT TX driver directly, with no
+extra component to download. A low-priority task does every LED write, so the
+Bluetooth thread only sets flags.
 
 ## Parts (per LED)
 

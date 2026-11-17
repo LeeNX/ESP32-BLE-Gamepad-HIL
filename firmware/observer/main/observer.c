@@ -11,11 +11,17 @@
 //   HIL init-complete | HIL version <version>
 //   HIL ok <command> | HIL err <reason>
 //
+// Status LED (optional, -DHIL_LED_PIN / -DHIL_LED_RGB / -DHIL_CONN_LED_PIN, see hil_led.h): dim purple scanning, cyan
+// connected, green ready, white flicker on reports, red flash on HIL err, amber on a BOOT slot switch.
+//
 // Commands (one per line):
 //   help                list the commands
 //   version?            firmware version (bp32obs-<bluepad32 sha8>)
 //   led <0..4>          player LED (0 = off) on the first ready device
 //   rgb <r> <g> <b>     RGB LED, 0..255 each
+//   (led / rgb drive the *gamepad's* LEDs over Bluetooth; statusled is this board's own status LED)
+//   statusled?          HIL statusled rgb <gpio> | mono <gpio> | none
+//   statusled on|off|<r> <g> <b>   manual status-LED colour until the next other command (wiring check)
 //   rumble <weak> <strong> <ms>   dual rumble, magnitudes 0..255, for ms milliseconds (0 = stop)
 //   features?           print the device's feature response
 //   allow <addr>|any    only pair with this Bluetooth address (any = clear the filter)
@@ -53,6 +59,7 @@
 
 #include "parser/uni_hid_parser_sinput.h"
 
+#include "hil_led.h"
 #include "hil_slots.h"
 #include "hil_stats.h"
 
@@ -81,10 +88,29 @@ static const char* const HIL_BT_TASKS[] = {"btController", "main", NULL};
 static hil_stats_state_t g_stats;
 static hil_task_window_t g_tasks;
 
+// Which device slots are ready, for the status LED: it shows the best state of *all* devices, not just g_dev (the
+// one console commands go to), so a second device staying ready keeps it green when the first one leaves.
+static bool g_ready[CONFIG_BLUEPAD32_MAX_DEVICES];
+
 static void forget_state(uni_hid_device_t* d) {
     int idx = uni_hid_device_get_idx_for_instance(d);
     if (idx >= 0 && idx < CONFIG_BLUEPAD32_MAX_DEVICES)
         g_prev_valid[idx] = false;
+}
+
+static void set_ready(uni_hid_device_t* d, bool ready) {
+    int idx = uni_hid_device_get_idx_for_instance(d);
+    if (idx >= 0 && idx < CONFIG_BLUEPAD32_MAX_DEVICES)
+        g_ready[idx] = ready;
+}
+
+static void update_led_state(void) {
+    for (int i = 0; i < CONFIG_BLUEPAD32_MAX_DEVICES; i++)
+        if (g_ready[i]) {
+            hil_led_set_state(HIL_LED_READY);
+            return;
+        }
+    hil_led_set_state(g_conns > 0 ? HIL_LED_CONNECTED : HIL_LED_SCANNING);
 }
 
 // A device name, safe inside name="...": '"', '\\' and non-printable characters become '?'.
@@ -98,10 +124,17 @@ static const char* safe_name(const char* in, char* out, size_t n) {
     return out;
 }
 
+// Every error reply goes through here, so the status LED flashes red on each one.
+static void hil_err(const char* why) {
+    printf("HIL err %s\n", why);
+    hil_led_error();
+}
+
 static void hil_init(int argc, const char** argv) {
     ARG_UNUSED(argc);
     ARG_UNUSED(argv);
     logi("HIL host: init\n");
+    hil_led_init();
 }
 
 static void print_features(uni_hid_device_t* d) {
@@ -124,6 +157,8 @@ static void print_help(void) {
         "HIL help   led <0..4>                  player LED (0 = off)",
         "HIL help   rgb <r> <g> <b>             RGB LED",
         "HIL help   rumble <weak> <strong> <ms> dual rumble, 0..255 each, ms 0 = stop",
+        "HIL help   statusled?                  this board's status LED: rgb <gpio>, mono <gpio> or none",
+        "HIL help   statusled on|off|<r> <g> <b> set it by hand until the next command",
         "HIL help   allow <addr>|any            only pair with this Bluetooth address",
         "HIL help   SLOTS?                      OTA app slots: running, next boot, each slot's image sha256",
         "HIL help   BOOT <n> [WIPE]             boot OTA slot n next (WIPE: erase NVS too), then restart",
@@ -139,7 +174,9 @@ static void handle_command(char* line) {
     char addr[32], extra[8];
     static char slots[512];
     int n, end1 = 0, end2 = 0;
+    char desc[16];
 
+    hil_led_command();
     if (strcmp(line, "help") == 0 || strcmp(line, "?") == 0) {
         print_help();
     } else if (strcmp(line, "SLOTS?") == 0) {
@@ -151,15 +188,16 @@ static void handle_command(char* line) {
         n = sscanf(line, "BOOT %u%n %7s%n", &a, &end1, extra, &end2);
         bool digit = n >= 1 && line[5] >= '0' && line[5] <= '9' && (line[6] == '\0' || line[6] == ' ');
         if (!digit || line[n == 2 ? end2 : end1] != '\0' || (n == 2 && strcmp(extra, "WIPE") != 0)) {
-            printf("HIL err args\n");
+            hil_err("args");
             return;
         }
         const char* err = hil_slots_set_boot((int)a, n == 2);
         if (err) {
-            printf("HIL err %s\n", err);
+            hil_err(err);
             return;
         }
         printf("HIL ok boot %u%s\n", a, n == 2 ? " wipe" : "");
+        hil_led_boot_slot();
         vTaskDelay(pdMS_TO_TICKS(20));
         hil_slots_restart();
     } else if (strcmp(line, "stats?") == 0) {
@@ -174,16 +212,38 @@ static void handle_command(char* line) {
     } else if (strcmp(line, "tasks?") == 0) {
         static char buf[HIL_STATS_TASKS_BUF];
         if (hil_stats_tasks(&g_tasks, buf, sizeof(buf)) < 0)
-            printf("HIL err tasks\n");
+            hil_err("tasks");
         else
             printf("HIL tasks %s\n", buf);
+    } else if (strcmp(line, "statusled?") == 0) {
+        hil_led_describe(desc, sizeof(desc));
+        printf("HIL statusled %s\n", desc);
+    } else if (strncmp(line, "statusled ", 10) == 0) {
+        const char* arg = line + 10;
+        bool ok;
+        if (strcmp(arg, "on") == 0)
+            ok = hil_led_override(64, 64, 64, false);
+        else if (strcmp(arg, "off") == 0)
+            ok = hil_led_override(0, 0, 0, false);
+        else if (sscanf(arg, "%u %u %u%n", &a, &b, &c, &end1) == 3 && arg[end1] == '\0' && a <= 255 && b <= 255 &&
+                 c <= 255)
+            ok = hil_led_override((uint8_t)a, (uint8_t)b, (uint8_t)c, true);
+        else {
+            hil_err("args");
+            return;
+        }
+        if (!ok) {
+            hil_err("unsupported");
+            return;
+        }
+        printf("HIL ok statusled %s\n", arg);
     } else if (strcmp(line, "version?") == 0) {
         printf("HIL version %s\n", esp_app_get_description()->version);
     } else if (strcmp(line, "features?") == 0) {
         print_features(g_dev);
     } else if (sscanf(line, "led %u", &a) == 1 && a <= 4) {
         if (!g_dev || !g_dev->report_parser.set_player_leds) {
-            printf("HIL err no device\n");
+            hil_err("no device");
             return;
         }
         // Bluepad32 player LEDs are a bitmask; player n is bit n-1.
@@ -191,14 +251,14 @@ static void handle_command(char* line) {
         printf("HIL ok led %u\n", a);
     } else if (sscanf(line, "rgb %u %u %u", &a, &b, &c) == 3 && a <= 255 && b <= 255 && c <= 255) {
         if (!g_dev || !g_dev->report_parser.set_lightbar_color) {
-            printf("HIL err no device\n");
+            hil_err("no device");
             return;
         }
         g_dev->report_parser.set_lightbar_color(g_dev, (uint8_t)a, (uint8_t)b, (uint8_t)c);
         printf("HIL ok rgb %u %u %u\n", a, b, c);
     } else if (sscanf(line, "rumble %u %u %u", &a, &b, &c) == 3 && a <= 255 && b <= 255 && c <= 65535) {
         if (!g_dev || !g_dev->report_parser.play_dual_rumble) {
-            printf("HIL err no device\n");
+            hil_err("no device");
             return;
         }
         g_dev->report_parser.play_dual_rumble(g_dev, 0, (uint16_t)c, (uint8_t)a, (uint8_t)b);
@@ -209,12 +269,12 @@ static void handle_command(char* line) {
         } else if (strlen(addr) == 17) {
             strcpy(g_allow_addr, addr);
         } else {
-            printf("HIL err bad address\n");
+            hil_err("bad address");
             return;
         }
         printf("HIL ok allow %s\n", g_allow_addr[0] ? g_allow_addr : "any");
     } else {
-        printf("HIL err unknown command\n");
+        hil_err("unknown command");
     }
 }
 
@@ -242,6 +302,7 @@ static void hil_on_init_complete(void) {
     // so keep it. Otherwise the bootloader would return to the previous slot on the next reset. A no-op when the
     // image isn't pending (factory app, flashed slot).
     esp_ota_mark_app_valid_cancel_rollback();
+    hil_led_set_state(HIL_LED_SCANNING);
     printf("HIL init-complete\n");
 }
 
@@ -263,6 +324,8 @@ static uni_error_t hil_on_device_discovered(bd_addr_t addr, const char* name, ui
 static void hil_on_device_connected(uni_hid_device_t* d) {
     forget_state(d);
     g_conns++;
+    set_ready(d, false);
+    update_led_state();
     printf("HIL connected idx=%d\n", uni_hid_device_get_idx_for_instance(d));
 }
 
@@ -272,12 +335,16 @@ static void hil_on_device_disconnected(uni_hid_device_t* d) {
     forget_state(d);
     if (g_conns > 0)
         g_conns--;
+    set_ready(d, false);
+    update_led_state();
     printf("HIL disconnected idx=%d\n", uni_hid_device_get_idx_for_instance(d));
 }
 
 static uni_error_t hil_on_device_ready(uni_hid_device_t* d) {
     if (!g_dev)
         g_dev = d;
+    set_ready(d, true);
+    update_led_state();
     char safe[64];
     printf("HIL ready idx=%d type=%d vid=0x%04x pid=0x%04x name=\"%s\"\n", uni_hid_device_get_idx_for_instance(d),
            (int)d->controller_type, d->vendor_id, d->product_id, safe_name(d->name, safe, sizeof(safe)));
@@ -286,6 +353,7 @@ static uni_error_t hil_on_device_ready(uni_hid_device_t* d) {
 }
 
 static void hil_on_controller_data(uni_hid_device_t* d, uni_controller_t* ctl) {
+    hil_led_activity();
     int idx = uni_hid_device_get_idx_for_instance(d);
     if (idx >= 0 && idx < CONFIG_BLUEPAD32_MAX_DEVICES) {
         if (g_prev_valid[idx] && memcmp(&g_prev[idx], ctl, sizeof(*ctl)) == 0)

@@ -27,6 +27,22 @@ What a bump means:
   at the end into `results/mcu-<board>-<profile>.csv`; the observer matrix logs both boards per lane. The job summary
   gets an **MCU health** table that flags mid-run restarts and brownout/panic/watchdog resets. New
   `test_mcu_thermal` (`--bench` only): quiet / busy / cool-down temperature ramp, `HIL_THERMAL_SECS` per phase.
+- **RGB status LED (`HIL_LED_PIN_<BOARD>=RGB<gpio>`, e.g. `RGB48`).** The existing activity-LED setting (config
+  `led_pin` or the env var) now accepts an `RGB` prefix for a WS2812-style addressable LED, such as the onboard one
+  on the ESP32-S3 DevKitC-1 (GPIO48 on v1.0 boards, GPIO38 on v1.1). No new variable: `builder/build.sh` /
+  `conftest.py` turn the prefix into an internal `-DHIL_LED_RGB`. The one LED then shows state and events: dim blue =
+  advertising, green = connected, white flash = command handled, red flash = `ERR` reply, amber = `BOOT <n>` slot
+  switch. LED writes are deferred to `loop()` and only made on a colour change, so the timed report path never waits
+  on them. New serial commands `LED?` (`LED rgb|mono <gpio>` / `LED none`) and `LED <r> <g> <b>` (RGB builds only;
+  held until the next non-LED command), plus `test_led_kind` / `test_led_rgb_colours`. A plain number keeps the old
+  single-colour behaviour; anything else fails the build. `docs/rig-hardware.md` also documents a white-only
+  fallback that needs none of this: `97` (`RGB_BUILTIN`, GPIO48 + 49) lights the S3's RGB LED white through plain `digitalWrite()`.
+- **Status LEDs on the Bluepad32 observer too.** `builder/build-observers.sh` applies the same per-board `led_pin` /
+  `conn_led_pin` settings, through a shared `builder/led-pin.sh` that `builder/build.sh` now uses as well. Observer
+  colours: dim purple scanning, cyan connected, green ready, white flicker on reports (one flash per ~100 ms at
+  most), red flash on `HIL err`, amber on `BOOT <n>`. New observer console commands `statusled?` and
+  `statusled on|off|<r> <g> <b>`. The WS2812 is driven with ESP-IDF's RMT TX driver from a low-priority task, so the
+  Bluetooth thread never waits on it.
 - **`docs/rig-host-selection.md`: a buyer's guide for tester hardware.** Host options (Pi 3B+/4/5, used 1-litre PC,
   N100), powered and `uhubctl`-capable hubs, Bluetooth dongle choice (a known model from a reputable seller, not the cheapest) and placement, sourcing a reliable hub, idle/busy power and yearly kWh per
   host, a kernel-log table for tracking down USB resets, and a pre-purchase checklist. Linked from README and

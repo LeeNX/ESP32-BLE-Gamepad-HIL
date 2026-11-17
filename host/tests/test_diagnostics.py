@@ -5,9 +5,10 @@ See README "Serial protocol" and "Rig hardware TODO".
 ROM function on the classic esp32. The classic esp32's reading is uncalibrated, runs well above ambient and
 moves in 0.56 C steps, hence the wide sanity range below -- it's a trend indicator, not a precise reading.
 
-`LED` is opt-in on the firmware side: only works once HIL_LED_PIN is wired +
-set in platformio.ini for that board. Not done on any board yet, so that test
-skips rather than fails until then.
+`LED` is opt-in on the firmware side: only works once HIL_LED_PIN is set for
+that board (hil_config.toml `led_pin` / $HIL_LED_PIN_<BOARD>, see
+docs/rig-hardware.md), so those tests skip rather than fail until then.
+`RGB<gpio>` makes it an RGB LED, which also takes `LED <r> <g> <b>`.
 """
 
 import pytest
@@ -25,7 +26,7 @@ def test_temp_reading(dut):
 
 def test_led_on_off(dut):
     if not dut.led(True):
-        pytest.skip("HIL_LED_PIN not wired/configured for this board (see platformio.ini)")
+        pytest.skip("HIL_LED_PIN not configured for this board (see docs/rig-hardware.md)")
     assert dut.led(False)
 
 
@@ -57,3 +58,28 @@ def test_tasks_reply(dut):
     assert "loopTask" in names, names
     assert any(n.startswith("IDLE") for n in names), names
     assert all(stack > 0 for _, _, stack in tasks)
+
+
+def test_led_kind(dut):
+    kind, pin = dut.led_kind()
+    if kind is None:
+        pytest.skip("HIL_LED_PIN not configured for this board (see docs/rig-hardware.md)")
+    assert pin >= 0
+    # A colour is only accepted by an RGB build; a single-colour LED says so.
+    reply = dut.command("LED 0 0 0")
+    assert reply == ("OK" if kind == "rgb" else "ERR unsupported")
+
+
+def test_led_rgb_colours(dut):
+    if dut.led_kind()[0] != "rgb":
+        pytest.skip(
+            "no RGB status LED on this board (led_pin = RGB<gpio>, see docs/rig-hardware.md)"
+        )
+    for rgb in ((32, 0, 0), (0, 32, 0), (0, 0, 32), (0, 0, 0)):
+        assert dut.led_rgb(*rgb), f"LED {rgb} rejected"
+    assert dut.command("LED 256 0 0") == "ERR range"
+    assert dut.command("LED x 0 0") == "ERR args"
+    assert dut.command("LED 12junk 0 0") == "ERR args"  # not 12: the whole token must be digits
+    assert dut.command("LED 0 0 0016") == "ERR args"  # at most 3 digits
+    # Hand the LED back to the automatic state colours.
+    assert dut.command("PING") == "PONG"

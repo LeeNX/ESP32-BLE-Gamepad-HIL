@@ -84,6 +84,7 @@ profile = "default"
 # override without editing config (handy from a CI runner). Unset/absent ->
 # that LED's code compiles out to a no-op; TEMP? is unaffected either way.
 # led_pin = <gpio>          # pulses on every serial command; LED ON/OFF override
+# led_pin = "RGB<gpio>"     # same, for a WS2812 RGB LED: state colours (docs/rig-hardware.md)
 # conn_led_pin = <gpio>     # steady on while BLE-connected; no override, state-driven
 # Most esp32dev-style boards already have an onboard LED on GPIO2 -- check
 # yours, then just `led_pin = 2` with nothing to wire. See docs/rig-hardware.md.
@@ -118,8 +119,10 @@ port = "/dev/serial/by-id/CHANGE-ME"
 # flash_port = "/dev/serial/by-id/CHANGE-ME"   # native "USB" port; see above
 profile = "default"
 # Status LEDs -- see board.esp32dev above. Overrides: $HIL_LED_PIN_ESP32S3 /
-# $HIL_CONN_LED_PIN_ESP32S3.
-# led_pin = <gpio>
+# $HIL_CONN_LED_PIN_ESP32S3. The DevKitC-1 has no plain LED, only an onboard
+# WS2812 RGB LED: led_pin = "RGB48" (GPIO38 on a v1.1 board: "RGB38") drives
+# it with state colours -- docs/rig-hardware.md "RGB status LED".
+# led_pin = <gpio> | "RGB<gpio>"
 # conn_led_pin = <gpio>
 
 [board.esp32dev2]

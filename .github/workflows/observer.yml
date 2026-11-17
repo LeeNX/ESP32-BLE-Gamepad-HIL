@@ -9,6 +9,7 @@ on:
     paths:
       - firmware/observer/**
       - builder/build-observers.sh
+      - builder/led-pin.sh
       - builder/fetch-bluepad32.sh
       - builder/make_bundle.py
       - hil_config.toml
@@ -17,6 +18,7 @@ on:
     paths:
       - firmware/observer/**
       - builder/build-observers.sh
+      - builder/led-pin.sh
       - builder/fetch-bluepad32.sh
       - builder/make_bundle.py
       - hil_config.toml
@@ -32,6 +34,13 @@ on:
         description: ref to build (blank = the caller's; release.yml passes its tag, which a manual re-run names)
         type: string
         default: ""
+      status_leds:
+        description: >-
+          bake in the rig's status-LED GPIOs (HIL_LED_PIN_<BOARD> / HIL_CONN_LED_PIN_<BOARD> repo Variables or
+          Secrets; the caller passes `secrets: inherit` for the latter). hil.yml sets it; release builds stay LED-free
+          like the release hil_runner bundles
+        type: boolean
+        default: false
 
 env:
   BOARDS: ${{ inputs.boards || 'esp32dev esp32c3 esp32s3' }}
@@ -69,6 +78,17 @@ jobs:
           key: bluepad32-${{ steps.bp32.outputs.ref }}
 
       - name: Build the observer bundles
+        env:
+          # Status LEDs (docs/rig-hardware.md "Observer firmware"): the same per-board settings as hil.yml's hil_runner
+          # build, only when the caller asks (status_leds). Empty -> that LED compiles out.
+          HIL_LED_PIN_ESP32DEV: ${{ inputs.status_leds && (vars.HIL_LED_PIN_ESP32DEV || secrets.HIL_LED_PIN_ESP32DEV) || '' }}
+          HIL_LED_PIN_ESP32DEV2: ${{ inputs.status_leds && (vars.HIL_LED_PIN_ESP32DEV2 || secrets.HIL_LED_PIN_ESP32DEV2) || '' }}
+          HIL_LED_PIN_ESP32C3: ${{ inputs.status_leds && (vars.HIL_LED_PIN_ESP32C3 || secrets.HIL_LED_PIN_ESP32C3) || '' }}
+          HIL_LED_PIN_ESP32S3: ${{ inputs.status_leds && (vars.HIL_LED_PIN_ESP32S3 || secrets.HIL_LED_PIN_ESP32S3) || '' }}
+          HIL_CONN_LED_PIN_ESP32DEV: ${{ inputs.status_leds && (vars.HIL_CONN_LED_PIN_ESP32DEV || secrets.HIL_CONN_LED_PIN_ESP32DEV) || '' }}
+          HIL_CONN_LED_PIN_ESP32DEV2: ${{ inputs.status_leds && (vars.HIL_CONN_LED_PIN_ESP32DEV2 || secrets.HIL_CONN_LED_PIN_ESP32DEV2) || '' }}
+          HIL_CONN_LED_PIN_ESP32C3: ${{ inputs.status_leds && (vars.HIL_CONN_LED_PIN_ESP32C3 || secrets.HIL_CONN_LED_PIN_ESP32C3) || '' }}
+          HIL_CONN_LED_PIN_ESP32S3: ${{ inputs.status_leds && (vars.HIL_CONN_LED_PIN_ESP32S3 || secrets.HIL_CONN_LED_PIN_ESP32S3) || '' }}
         run: ./builder/build-observers.sh --boards "$BOARDS"
 
       - uses: actions/upload-artifact@v6
