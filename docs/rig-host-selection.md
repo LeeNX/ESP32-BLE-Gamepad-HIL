@@ -292,8 +292,9 @@ host**. Change one thing at a time, and do a full run between changes.
 
 ### Case study: one bad hub port looked like a Bluetooth bug (2026-11-17)
 
-One esp32dev (onboard CP2102) on mimir's hub, at `1-1.4.1`, the second
-chip's first port:
+One esp32dev (onboard CP2102, the white cable in the photo in
+`docs/rig-build.md`) on mimir's hub, at `1-1.4.1`, the second chip's first
+port:
 
 - **Symptoms**: over about 7.5 hours, all but one of the observer-matrix lanes
   with the esp32c3 as Bluepad32 observer and that esp32dev as gamepad failed
