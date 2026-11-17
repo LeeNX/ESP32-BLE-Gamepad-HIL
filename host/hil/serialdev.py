@@ -48,6 +48,10 @@ class SerialDev:
     def __init__(self, port, baud=115200, boot_wait=2.0):
         self.port = port
         self.baud = baud
+        # Serial-path trouble this session, for the run log (conftest prints it at teardown): bytes outside
+        # printable ASCII that _readline() threw away, and command replies that never arrived.
+        self.junk_bytes = 0
+        self.lost_replies = 0
         self.ser = self._open()
         # Opening the port resets the ESP32; give it time to boot before we talk.
         time.sleep(boot_wait)
@@ -115,9 +119,14 @@ class SerialDev:
             if not b:
                 continue
             if b == b"\n":
-                return buf.decode("ascii", "replace").strip()
-            if b != b"\r":
+                return buf.decode("ascii").strip()
+            # The protocol is printable ASCII only. Anything else is line noise -- the esp32dev's CP2102 has been
+            # seen to deliver a 64-byte packet of 0xFF ahead of the next reply under BLE load -- and kept, it
+            # would hide that reply's prefix from reply(), turning one lost line into a run of timeouts.
+            if 0x20 <= b[0] < 0x7F or b == b"\t":
                 buf += b
+            elif b != b"\r":
+                self.junk_bytes += 1
         raise SerialError("timeout waiting for a reply line")
 
     def command(self, cmd, timeout=6.0, prefixes=REPLY_PREFIXES, retries=1):
@@ -133,6 +142,7 @@ class SerialDev:
                 return self._command_once(cmd, timeout, prefixes)
             except SerialError as e:
                 last = e
+                self.lost_replies += 1
                 if attempt < retries:
                     self.drain()
                     time.sleep(0.2)
@@ -364,8 +374,22 @@ class SerialDev:
 
     def burst(self, button, count, gap_us=0, timeout=30.0):
         """Fire <count> toggles of <button>, <gap_us> apart. Returns
-        (count, elapsed_us) from the firmware's own clock."""
-        r = self.command(f"BURST {button} {count} {gap_us}", timeout=timeout)
+        (count, elapsed_us) from the firmware's own clock -- elapsed_us is None
+        when the burst was sent but its reply line got lost on the way back.
+
+        Never re-sent: a lost reply almost always means the burst *ran* (the
+        reply is lost, not the command), and running it twice would double what
+        the host counts. Resynchronise on a PING instead, whose PONG-only
+        prefix also skips a late `BURST OK`; only a board that doesn't answer
+        that is an error."""
+        cmd = f"BURST {button} {count} {gap_us}"
+        try:
+            r = self.command(cmd, timeout=timeout, retries=0)
+        except SerialError:
+            self.drain()
+            if self.command("PING", prefixes=("PONG",)) != "PONG":
+                raise
+            return count, None
         parts = r.split()
         if len(parts) != 4 or parts[:2] != ["BURST", "OK"]:
             raise SerialError(f"BURST -> {r!r}")

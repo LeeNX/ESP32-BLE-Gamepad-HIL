@@ -83,6 +83,14 @@ What a bump means:
 
 ### Fixed
 
+- **One lost serial reply no longer cascades into a run of failures.** Under sustained BLE load the esp32dev's
+  CP2102 bridge sometimes drops a reply line and then delivers a 64-byte packet of `0xFF` ahead of the next one.
+  The junk hid that reply's prefix, so the retry timed out too and later tests errored one after another; the
+  release-prep bench on 2026-11-17 only passed on six esp32dev retries. `SerialDev` now drops any byte outside
+  printable ASCII, and `burst()` no longer re-sends a `BURST` whose reply went missing (the burst had run, so the
+  host would count it twice): it resyncs on `PING` and returns `elapsed_us=None`. The thermal test's `BURST` waits
+  15 s, not 30 s, before calling a reply lost. conftest prints `[dut] serial path: N lost replies, M junk bytes
+  dropped` at the end of a session that needed any of this.
 - **Run summary: no more "worth a look" warnings for RGB colours on single-colour LED boards.** `test_led_rgb_colours`
   skips on the esp32dev and esp32c3, which is expected: their LEDs are single-colour, and `test_led_kind` already checks
   that they reject colours. Its skip reasons are now routine, so they're counted, not listed (8 lines per full run). A

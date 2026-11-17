@@ -104,4 +104,12 @@ These ESP32-BLE-Gamepad features have **no firmware command and no test**:
   mining for the **Nordic UART Service** gap above and for an OTA-over-BLE
   test next to the multi-slot flashing. Port the ideas onto
   `firmware/observer` / `hil_runner`, don't merge the branch (its layout is
-  obsolete).
+  obsolete). A second reason since 2026-11-17: the esp32dev's CP2102 loses
+  the odd reply line (and adds a packet of `0xFF` junk) only while the radio
+  is busy, and a NuS copy of the command channel would tell "the serial path
+  lost the line" from "the board never replied" with one command. Keep it a
+  complement to serial, not a replacement, and opt-in (a build flag, off in
+  the CI profiles): it shares the radio and the connection with the HID
+  reports the bench measures, adds a GATT service the descriptor and
+  device-info tests would see, and can't help before pairing, for flashing,
+  or when BLE itself is the fault.

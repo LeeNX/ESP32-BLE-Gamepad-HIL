@@ -57,7 +57,8 @@ def test_mcu_thermal_ramp(bench_enabled, connected_dut, gamepad, pytestconfig):
         pytest.skip("firmware has no STATS? (built before it existed)")
 
     def burst():
-        dut.burst(1, BURST_COUNT, BURST_GAP_US)
+        # ~5 s of reports; twice that plus slack before calling the reply lost (burst() then resyncs, no re-send)
+        dut.burst(1, BURST_COUNT, BURST_GAP_US, timeout=2 * BURST_COUNT * BURST_GAP_US / 1e6 + 5)
         cap.drain()  # keep the evdev queue from overflowing; the events themselves aren't checked here
 
     quiet, _ = _sample_for(dut, "thermal-quiet", secs)
