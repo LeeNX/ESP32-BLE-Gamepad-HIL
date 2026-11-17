@@ -27,6 +27,8 @@ CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 #
 CONFIG_FREERTOS_USE_TRACE_FACILITY=y
 CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS=y
+# Run-time stats for stats?/tasks? (firmware/include/hil_stats.h): per-task CPU share from esp_timer microseconds.
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
 
 #
 # Bluepad32

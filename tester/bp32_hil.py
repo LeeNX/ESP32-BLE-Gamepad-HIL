@@ -40,6 +40,14 @@ ap.add_argument(
     default="",
     help="the observer's native USB-Serial/JTAG port, to reset it through when bp32_port has no RTS -> EN wiring",
 )
+ap.add_argument(
+    "--mcu-csv",
+    default="",
+    help="append both boards' MCU health (observer stats?, gamepad STATS?) after pairing and at the end"
+    " to this CSV (host/hil/mcustats.py)",
+)
+ap.add_argument("--observer-board", default="observer", help="observer board name, for --mcu-csv")
+ap.add_argument("--gamepad-board", default="gamepad", help="gamepad board name, for --mcu-csv")
 args = ap.parse_args()
 
 results, gaps = [], []
@@ -672,12 +680,57 @@ def run_generic():
     cmd("RESET")
 
 
+def mcu_sample(phase):
+    """Both boards' MCU health into --mcu-csv: the observer under profile "bp32obs", the gamepad under its own.
+    Diagnostics only: each board's queries are guarded on their own, so a serial error on one neither skips the
+    other's sample nor reaches the lane's verdict."""
+    if not args.mcu_csv:
+        return
+    try:
+        from hil import mcustats
+    except ImportError:  # run without PYTHONPATH=host
+        return
+    log = mcustats.McuLog(args.mcu_csv, args.observer_board, "bp32obs")
+
+    def record(board, profile, stats):
+        # A failed bp32-start sample still writes its (empty) row: it marks where this lane's session starts.
+        if stats or phase in mcustats.SESSION_START:
+            log.write(mcustats.row_from_stats(stats, board, profile, phase))
+
+    obs = {}
+    try:
+        m = bp.mark()
+        bp.send("stats?")
+        obs = mcustats.parse_stats(bp.wait_for("HIL stats", m, timeout=3.0) or "")
+        if phase == "bp32-end":
+            m = bp.mark()
+            bp.send("tasks?")
+            line = bp.wait_for("HIL tasks", m, timeout=3.0)
+            if line:
+                with open(args.mcu_csv.rsplit(".", 1)[0] + ".tasks.txt", "a") as f:
+                    f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {args.observer_board} {line}\n")
+    except (serial.SerialException, OSError) as e:
+        print(f"      MCU {phase}: observer query failed: {e}", flush=True)
+    record(args.observer_board, "bp32obs", obs)
+
+    pad_stats = {}
+    try:
+        pad_stats = mcustats.parse_stats(cmd("STATS?") or "")
+    except (serial.SerialException, OSError) as e:
+        print(f"      MCU {phase}: gamepad query failed: {e}", flush=True)
+    record(args.gamepad_board, args.profile, pad_stats)
+
+    print(f"      MCU {phase}: observer temp={obs.get('temp')} bt={obs.get('bt')}", flush=True)
+
+
+mcu_sample("bp32-start")
 if args.profile == "sinput":
     run_sinput()
 else:
     run_generic()
 
 cmd("RESET")
+mcu_sample("bp32-end")
 print(f"\nGAPS ({len(gaps)}): " + "; ".join(gaps) if gaps else "\nGAPS: none")
 print(
     "PASSED" if all(results) else "FAILED", f"({results.count(False)} failures of {len(results)})"

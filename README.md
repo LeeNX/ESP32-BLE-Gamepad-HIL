@@ -491,7 +491,9 @@ banner and any debug lines are skipped by the host.
 | `MOTION <gx> <gy> <gz> <ax> <ay> <az>` | `OK` / `ERR range` / `ERR disabled` — `sinput` only: raw int16 gyro + accel counts into the SInput report's IMU block |
 | `TOUCH <0\|1> <x> <y> <pressure>` | `OK` / `ERR range` / `ERR disabled` — `sinput` only: touchpad finger; pressure 0 = lifted |
 | `RUMBLE?` / `RGB?` / `PLED?` | `RUMBLE recv=0\|1 left=<n> right=<n>` / `RGB recv=0\|1 r= g= b=` / `PLED recv=0\|1 <n>` / `ERR disabled` — `sinput` only: what the host last sent (haptic type 2 amplitudes, RGB, player LED index). `recv=1` means new since the last query |
-| `TEMP?` | `TEMP <celsius>` — on-die temp sensor via `temperatureRead()`, all 3 boards (the classic esp32 goes through an undocumented ROM function and reads uncalibrated/high — trend indicator, not a precise value) |
+| `TEMP?` | `TEMP <celsius>` — on-die temp sensor, all 3 boards (`firmware/include/hil_stats.h`). C3/S3: the IDF driver over 20–100 °C (Arduino's `temperatureRead()` uses 10–50 °C, and these chips idle above 50, so it read pinned at the top). Classic esp32: an undocumented ROM function, uncalibrated, reads high, in 0.56 °C (1 °F) steps. A trend indicator, not a precise value |
+| `STATS?` | `STATS up=<ms> reset=<reason> temp=<°C> cpu0=<%> [cpu1=<%>] bt=<%> heap=<b> heap_min=<b> heap_big=<b> conn=<0\|1> stack_loop=<b> stack_ble=<b> reports=<n> took_us=<us>` — MCU health for the trend log (`host/hil/mcustats.py`). CPU figures are % of one core since the previous `STATS?`: `cpuN` = 100 − that core's idle task (the loop task polls serial without sleeping, so its core reads ~100%); `bt` = the Bluetooth tasks (`nimble_host` + `btController`). `heap_min` = lowest free heap since boot; `stack_*` = least free stack ever, bytes; `reports` = input reports sent since boot; `reset` = why the chip last restarted (`brownout`, `panic`, `task_wdt`, …). Unmeasurable values read `na`. Takes ~5 ms on the MCU |
+| `TASKS?` | `TASKS span_ms=<n> <task>:<cpu %>:<least free stack> …` — a one-line "top": every FreeRTOS task's share of one core since the previous `TASKS?`, and its stack low-water mark in bytes |
 | `LED ON\|OFF` | `OK` / `ERR unsupported` — explicit override of the activity LED; `ERR unsupported` until `HIL_LED_PIN` is wired + set for that board (see "Rig hardware TODO") |
 
 Every command also pulses the same LED for ~30ms as a received-activity
@@ -673,6 +675,19 @@ the tester's, not the firmware's. On a Raspberry Pi it also shows `dwc_otg`
 dequeue timeouts (+N, flagged at `[rig] health_dwc_burst`), throttling and
 undervoltage; elsewhere those rows are left out. The counts keep rising until the
 next reboot, so "+N" is the number to compare between runs.
+
+An **MCU health** table (`host/hil/mcustats.py results/`) follows: per board and
+profile, the on-die temperature (first → max → last), the Bluetooth tasks' peak
+CPU share, the lowest free heap and BLE-task stack, and the reset reason, from
+`STATS?` samples taken when each pytest session opens the board, before every
+test and at the end (`results/mcu-<board>-<profile>.csv`, plus a `TASKS?`
+snapshot in `.tasks.txt`). Observer-matrix lanes add both boards' figures
+(the observer under profile `bp32obs`). A board that restarted mid-session, or
+whose last reset was a brownout, panic or watchdog, is flagged. Readings are for
+trends: the classic esp32's sensor is uncalibrated. With `--bench`,
+`test_mcu_thermal` adds a ramp (connected and quiet, then sending reports flat out,
+then quiet again; `HIL_THERMAL_SECS` per phase, default 60, 20 with
+`--bench-quick`) and the table shows the quiet and busy means.
 
 **Two run modes.** Push, `repository_dispatch` (the library's correctness gate),
 and a plain `workflow_dispatch` run `tester/test-all.sh --by-board` — the parallel

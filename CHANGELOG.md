@@ -20,6 +20,13 @@ What a bump means:
 
 ### Added
 
+- **MCU health over a run: temperature, CPU and Bluetooth load, heap, stack, reset reason.** New `STATS?` and
+  `TASKS?` serial commands on hil_runner, and `stats?` / `tasks?` on the Bluepad32 observer, from one shared header
+  (`firmware/include/hil_stats.h`). CPU comes from FreeRTOS run-time stats, so it's measured, not estimated; `bt=`
+  is the Bluetooth tasks' share. conftest.py samples `STATS?` when a session opens the board, before every test and
+  at the end into `results/mcu-<board>-<profile>.csv`; the observer matrix logs both boards per lane. The job summary
+  gets an **MCU health** table that flags mid-run restarts and brownout/panic/watchdog resets. New
+  `test_mcu_thermal` (`--bench` only): quiet / busy / cool-down temperature ramp, `HIL_THERMAL_SECS` per phase.
 - **`docs/rig-host-selection.md`: a buyer's guide for tester hardware.** Host options (Pi 3B+/4/5, used 1-litre PC,
   N100), powered and `uhubctl`-capable hubs, Bluetooth dongle choice (a known model from a reputable seller, not the cheapest) and placement, sourcing a reliable hub, idle/busy power and yearly kWh per
   host, a kernel-log table for tracking down USB resets, and a pre-purchase checklist. Linked from README and
@@ -32,6 +39,9 @@ What a bump means:
 
 ### Changed
 
+- **`TEMP?` on the esp32c3/esp32s3 now reads 20–100 °C.** It used Arduino's `temperatureRead()`, which sets the sensor up
+  for 10–50 °C; these chips idle at 50–53 °C, so readings sat pinned at the top of the range (a C3 read a flat
+  52.9 °C). The classic esp32 is unchanged (an uncalibrated ROM reading in 0.56 °C steps).
 - **No more hardcoded `hci0`.** BlueZ D-Bus paths (`hil.bluetooth`, `hil.gatt`) follow the chosen adapter. The
   pairing session `select`s it, and fails if that controller isn't available instead of quietly falling back to
   bluetoothd's default. The one-shot queries and actions (bonded, connected, trust, disconnect, remove, device list)
