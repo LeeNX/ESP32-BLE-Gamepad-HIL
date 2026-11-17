@@ -27,6 +27,8 @@ REPLY_PREFIXES = (
     "OUTPUT",
     "TEMP",
     "SLOTS",
+    "STATS",
+    "TASKS",
 )
 
 

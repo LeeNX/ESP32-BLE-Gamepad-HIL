@@ -11,7 +11,7 @@
  *
  * Protocol: 115200 8N1, '\n'-terminated ASCII. Every command produces exactly
  * one reply line: OK, ERR <reason>, or a value line (PONG / CONN 0|1 / DIS ...
- * / PNP ... / RSIZE ... / PEER ... / BURST ... / T ...). See README.md
+ * / PNP ... / RSIZE ... / PEER ... / BURST ... / T ... / STATS ...). See README.md
  * "Serial protocol".
  *
  * Requires ESP32-BLE-Gamepad with getHidReportSize() /
@@ -24,6 +24,7 @@
 #include <soc/soc_caps.h>
 #include "hil_profile.h"
 #include "hil_slots.h"
+#include "hil_stats.h"
 
 // HIL_DEVICE_NAME (hil_profile.h): "HILpad <board>" for CI/release, "HILdev
 // <board>" for the `local` profile, or a -D override. Keep it <= 18 chars --
@@ -40,6 +41,53 @@ static const int HIL_BURST_MAX = 2000;
 static String line;
 
 static void reply(const char *s) { Serial.println(s); }
+
+// Input reports sent since boot -- STATS? reports it as a "how busy was BLE" counter. Every sendReport() goes
+// through here.
+static uint32_t reportsSent = 0;
+static void sendRpt()
+{
+    bleGamepad.sendReport();
+    reportsSent++;
+}
+
+// MCU health: STATS?, TASKS? and TEMP? (firmware/include/hil_stats.h, shared with the Bluepad32 observer).
+// The Bluetooth stack's tasks, summed into bt=: NimBLE's host and the controller.
+static const char *const HIL_BT_TASKS[] = {"nimble_host", "btController", nullptr};
+static hil_stats_state_t statsState;
+static hil_task_window_t tasksWindow;
+
+// STATS <shared fields> conn=<0|1> stack_loop=<b> stack_ble=<b|na> reports=<n> took_us=<us>
+// The loop task polls serial without sleeping, so its core reads ~100% busy whatever BLE is doing: bt= is the number
+// that tracks BLE load. Takes ~5 ms on the MCU (it walks the task list), so the host samples between tests.
+static void printStats()
+{
+    int64_t t0 = esp_timer_get_time();
+    char buf[320];
+    int n = snprintf(buf, sizeof buf, "STATS ");
+    n += hil_stats_body(&statsState, buf + n, sizeof buf - n, HIL_BT_TASKS);
+    TaskHandle_t ble = xTaskGetHandle("nimble_host");
+    char bleStack[16] = "na";
+    if (ble) snprintf(bleStack, sizeof bleStack, "%u", (unsigned)uxTaskGetStackHighWaterMark(ble));
+    n += snprintf(buf + n, sizeof buf - n, " conn=%d stack_loop=%u stack_ble=%s reports=%lu",
+                  bleGamepad.isConnected() ? 1 : 0, (unsigned)uxTaskGetStackHighWaterMark(nullptr), bleStack,
+                  (unsigned long)reportsSent);
+    if (n < (int)sizeof buf)
+        snprintf(buf + n, sizeof buf - n, " took_us=%lu", (unsigned long)(esp_timer_get_time() - t0));
+    Serial.println(buf);
+}
+
+// TASKS span_ms=<n> <task>:<cpu %>:<least free stack> ... -- a one-line "top" since the previous TASKS?.
+static void printTasks()
+{
+    static char buf[768];
+    if (hil_stats_tasks(&tasksWindow, buf, sizeof buf) < 0)
+    {
+        reply("ERR tasks");
+        return;
+    }
+    Serial.printf("TASKS %s\n", buf);
+}
 
 // Two opt-in status LEDs -- neither wired on any board by default, both
 // compile out to no-ops when their pin macro is undefined. Wiring guide:
@@ -344,18 +392,23 @@ static void handle(const String &cmd)
 
     if (c == "TEMP?")
     {
-        // On-die temp sensor, via the Arduino core's temperatureRead(): the
-        // new driver on S2/S3/C3/C6 (SOC_TEMP_SENSOR_SUPPORTED), *and* the
-        // classic ESP32 too, via an undocumented ROM function
-        // (temprature_sens_read() [sic], CONFIG_IDF_TARGET_ESP32 branch in
-        // esp32-hal-misc.c). The classic-ESP32 reading is uncalibrated and
-        // known to run well above ambient -- fine for trend-watching (did
-        // this board get hotter mid-run), not for an absolute reading.
-#if defined(CONFIG_IDF_TARGET_ESP32) || SOC_TEMP_SENSOR_SUPPORTED
-        Serial.printf("TEMP %.1f\n", temperatureRead());
-#else
-        reply("ERR unsupported");
-#endif
+        // On-die temp sensor, hil_stats_temp_c() (hil_stats.h: 20-100 C range on
+        // S3/C3, an uncalibrated ROM reading on the classic ESP32).
+        float t = hil_stats_temp_c();
+        if (!HIL_STATS_HAS_TEMP || isnan(t)) reply("ERR unsupported");
+        else Serial.printf("TEMP %.1f\n", t);
+        return;
+    }
+
+    if (c == "STATS?")
+    {
+        printStats();
+        return;
+    }
+
+    if (c == "TASKS?")
+    {
+        printTasks();
         return;
     }
 
@@ -431,7 +484,7 @@ static void handle(const String &cmd)
         bool timed = (c == "TPRESS" || c == "TRELEASE");
         if (down) bleGamepad.press(b); else bleGamepad.release(b);
         uint32_t ts = micros();
-        bleGamepad.sendReport();
+        sendRpt();
         if (timed) Serial.printf("T %lu\n", (unsigned long)ts);
         else reply("OK");
         return;
@@ -454,13 +507,13 @@ static void handle(const String &cmd)
         for (long i = 0; i < count; i++)
         {
             if (i & 1) bleGamepad.release(b); else bleGamepad.press(b);
-            bleGamepad.sendReport();
+            sendRpt();
             if (gap) delayMicroseconds(gap);
             if ((i & 0x3F) == 0) yield();
         }
         uint32_t elapsed = micros() - start;
         bleGamepad.release(b);
-        bleGamepad.sendReport();
+        sendRpt();
         Serial.printf("BURST OK %ld %lu\n", count, (unsigned long)elapsed);
         return;
     }
@@ -477,7 +530,7 @@ static void handle(const String &cmd)
         if (t[1] == "PRESS") bleGamepad.pressSpecialButton(b);
         else if (t[1] == "RELEASE") bleGamepad.releaseSpecialButton(b);
         else { reply("ERR subcmd"); return; }
-        bleGamepad.sendReport();
+        sendRpt();
         reply("OK");
         return;
     }
@@ -489,7 +542,7 @@ static void handle(const String &cmd)
         if (idx < 0) { reply("ERR axis"); return; }
         if (!hilAxisEnabled(idx)) { reply("ERR disabled"); return; }
         applyAxis(idx, (int16_t)t[2].toInt());
-        bleGamepad.sendReport();
+        sendRpt();
         reply("OK");
         return;
     }
@@ -503,7 +556,7 @@ static void handle(const String &cmd)
         if (idx < 1 || idx > HIL_HAT_COUNT) { reply("ERR range"); return; }
         if (dir < 0 || dir > 8) { reply("ERR dir"); return; }
         applyHat(idx, (signed char)dir);
-        bleGamepad.sendReport();
+        sendRpt();
         reply("OK");
         return;
     }
@@ -595,7 +648,7 @@ static void handle(const String &cmd)
                 if (v[i] < -32768 || v[i] > 32767) { reply("ERR range"); return; }
             }
             bleGamepad.setMotionControls(v[0], v[1], v[2], v[3], v[4], v[5]);
-            bleGamepad.sendReport();
+            sendRpt();
             reply("OK");
             return;
         }
@@ -609,7 +662,7 @@ static void handle(const String &cmd)
                 return;
             }
             bleGamepad.setTouchpad((uint8_t)f, (int16_t)x, (int16_t)y, (uint16_t)p);
-            bleGamepad.sendReport();
+            sendRpt();
             reply("OK");
             return;
         }
@@ -646,7 +699,7 @@ static void handle(const String &cmd)
         long v = t[2].toInt();
         if (v < -32768 || v > 32767) { reply("ERR range"); return; }
         applySim(idx, (int16_t)v);
-        bleGamepad.sendReport();
+        sendRpt();
         reply("OK");
         return;
     }
@@ -666,7 +719,7 @@ static void handle(const String &cmd)
         bleGamepad.setTouchpad(0, 0, 0, 0);
         bleGamepad.setTouchpad(1, 0, 0, 0);
 #endif
-        bleGamepad.sendReport();
+        sendRpt();
         reply("OK");
         return;
     }

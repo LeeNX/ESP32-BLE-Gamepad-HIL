@@ -22,6 +22,10 @@
 //   SLOTS?              OTA app slots: HIL slots running=<n> boot=<n> count=<n> <i>=<sha256>/<state>/<proj>/<ver>
 //   BOOT <n> [WIPE]     boot OTA slot n next (WIPE: erase NVS too), reply HIL ok boot <n>, restart
 //                       (multi-slot PoC, docs/multislot-ota.md; same commands as hil_runner)
+//   stats?              MCU health (firmware/include/hil_stats.h, same fields as hil_runner's STATS?):
+//                       HIL stats up=<ms> reset=<r> temp=<C> cpu0=<%> [cpu1=<%>] bt=<%> heap=<b> heap_min=<b>
+//                       heap_big=<b> conns=<n> stack_main=<b> states=<n> took_us=<us>
+//   tasks?              one-line "top": HIL tasks span_ms=<n> <task>:<cpu %>:<least free stack> ...
 //
 // Pairing filter: with an allowed address set, only that device is accepted. Otherwise devices whose name starts
 // with "HILpad" (the rig's gamepads), or that advertise no name at all (which a rig gamepad can do before its scan
@@ -50,6 +54,7 @@
 #include "parser/uni_hid_parser_sinput.h"
 
 #include "hil_slots.h"
+#include "hil_stats.h"
 
 #ifndef HIL_ALLOW_ADDR
 #define HIL_ALLOW_ADDR ""
@@ -66,6 +71,15 @@ static size_t g_line_len;
 // connect and disconnect: a reconnected device's first report always prints.
 static uni_controller_t g_prev[CONFIG_BLUEPAD32_MAX_DEVICES];
 static bool g_prev_valid[CONFIG_BLUEPAD32_MAX_DEVICES];
+
+// stats?: devices connected now, and "HIL state" lines printed since boot (how busy the input path was).
+static int g_conns;
+static uint32_t g_states;
+// The Bluetooth stack's tasks, summed into bt=: the controller, and app_main's task ("main"), which runs BTstack's
+// run loop and with it all of Bluepad32 -- including this console.
+static const char* const HIL_BT_TASKS[] = {"btController", "main", NULL};
+static hil_stats_state_t g_stats;
+static hil_task_window_t g_tasks;
 
 static void forget_state(uni_hid_device_t* d) {
     int idx = uni_hid_device_get_idx_for_instance(d);
@@ -113,6 +127,8 @@ static void print_help(void) {
         "HIL help   allow <addr>|any            only pair with this Bluetooth address",
         "HIL help   SLOTS?                      OTA app slots: running, next boot, each slot's image sha256",
         "HIL help   BOOT <n> [WIPE]             boot OTA slot n next (WIPE: erase NVS too), then restart",
+        "HIL help   stats?                      MCU health: temperature, CPU and Bluetooth load, heap",
+        "HIL help   tasks?                      per-task CPU share and least free stack",
     };
     for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); i++)
         printf("%s\n", lines[i]);
@@ -146,6 +162,21 @@ static void handle_command(char* line) {
         printf("HIL ok boot %u%s\n", a, n == 2 ? " wipe" : "");
         vTaskDelay(pdMS_TO_TICKS(20));
         hil_slots_restart();
+    } else if (strcmp(line, "stats?") == 0) {
+        static char buf[320];
+        int64_t t0 = esp_timer_get_time();
+        int n = hil_stats_body(&g_stats, buf, sizeof(buf), HIL_BT_TASKS);
+        if (n < (int)sizeof(buf))
+            snprintf(buf + n, sizeof(buf) - n, " conns=%d stack_main=%u states=%lu took_us=%lu", g_conns,
+                     (unsigned)uxTaskGetStackHighWaterMark(NULL), (unsigned long)g_states,
+                     (unsigned long)(esp_timer_get_time() - t0));
+        printf("HIL stats %s\n", buf);
+    } else if (strcmp(line, "tasks?") == 0) {
+        static char buf[768];
+        if (hil_stats_tasks(&g_tasks, buf, sizeof(buf)) < 0)
+            printf("HIL err tasks\n");
+        else
+            printf("HIL tasks %s\n", buf);
     } else if (strcmp(line, "version?") == 0) {
         printf("HIL version %s\n", esp_app_get_description()->version);
     } else if (strcmp(line, "features?") == 0) {
@@ -231,6 +262,7 @@ static uni_error_t hil_on_device_discovered(bd_addr_t addr, const char* name, ui
 
 static void hil_on_device_connected(uni_hid_device_t* d) {
     forget_state(d);
+    g_conns++;
     printf("HIL connected idx=%d\n", uni_hid_device_get_idx_for_instance(d));
 }
 
@@ -238,6 +270,8 @@ static void hil_on_device_disconnected(uni_hid_device_t* d) {
     if (d == g_dev)
         g_dev = NULL;
     forget_state(d);
+    if (g_conns > 0)
+        g_conns--;
     printf("HIL disconnected idx=%d\n", uni_hid_device_get_idx_for_instance(d));
 }
 
@@ -263,6 +297,7 @@ static void hil_on_controller_data(uni_hid_device_t* d, uni_controller_t* ctl) {
     if (ctl->klass != UNI_CONTROLLER_CLASS_GAMEPAD)
         return;
     const uni_gamepad_t* gp = &ctl->gamepad;
+    g_states++;
     printf("HIL state idx=%d btn=0x%04x misc=0x%02x dpad=0x%02x lx=%d ly=%d rx=%d ry=%d brake=%d thr=%d bat=%d "
            "ax=%d ay=%d az=%d gx=%d gy=%d gz=%d\n",
            uni_hid_device_get_idx_for_instance(d), gp->buttons, gp->misc_buttons, gp->dpad, (int)gp->axis_x,

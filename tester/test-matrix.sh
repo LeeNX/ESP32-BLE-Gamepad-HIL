@@ -219,6 +219,7 @@ for obs in "${ROTATIONS[@]}"; do
     if [[ $LANES == serial ]]; then wait $bz_pid; bz_rc=$?; fi
     PYTHONPATH=host timeout 900 "$PY" tester/bp32_hil.py --profile "$p" "$(port "$bp")" "$(port "$obs")" \
       ${obs_rst:+--bp32-reset-port "$obs_rst"} \
+      --mcu-csv "results/mcu-bp32-$obs-$p.csv" --observer-board "$obs" --gamepad-board "$bp" \
       > "$OUT/$tag-bp32-$bp.log" 2>&1 &
     bp_pid=$!
     if [[ $LANES != serial ]]; then wait $bz_pid; bz_rc=$?; fi

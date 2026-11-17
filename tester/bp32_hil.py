@@ -40,6 +40,14 @@ ap.add_argument(
     default="",
     help="the observer's native USB-Serial/JTAG port, to reset it through when bp32_port has no RTS -> EN wiring",
 )
+ap.add_argument(
+    "--mcu-csv",
+    default="",
+    help="append both boards' MCU health (observer stats?, gamepad STATS?) after pairing and at the end"
+    " to this CSV (host/hil/mcustats.py)",
+)
+ap.add_argument("--observer-board", default="observer", help="observer board name, for --mcu-csv")
+ap.add_argument("--gamepad-board", default="gamepad", help="gamepad board name, for --mcu-csv")
 args = ap.parse_args()
 
 results, gaps = [], []
@@ -672,12 +680,48 @@ def run_generic():
     cmd("RESET")
 
 
+def mcu_sample(phase):
+    """Both boards' MCU health into --mcu-csv: the observer under profile "bp32obs", the gamepad under its own.
+    Diagnostics only -- a missing reply just means no row."""
+    if not args.mcu_csv:
+        return
+    try:
+        from hil import mcustats
+    except ImportError:  # run without PYTHONPATH=host
+        return
+    log = mcustats.McuLog(args.mcu_csv, args.observer_board, "bp32obs")
+    m = bp.mark()
+    bp.send("stats?")
+    obs = mcustats.parse_stats(bp.wait_for("HIL stats", m, timeout=3.0) or "")
+    if obs:
+        log.write(mcustats.row_from_stats(obs, args.observer_board, "bp32obs", phase))
+    pad_stats = mcustats.parse_stats(cmd("STATS?") or "")
+    if pad_stats:
+        log.write(mcustats.row_from_stats(pad_stats, args.gamepad_board, args.profile, phase))
+    if phase == "bp32-end":
+        m = bp.mark()
+        bp.send("tasks?")
+        line = bp.wait_for("HIL tasks", m, timeout=3.0)
+        if line:
+            try:
+                with open(args.mcu_csv.rsplit(".", 1)[0] + ".tasks.txt", "a") as f:
+                    f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {args.observer_board} {line}\n")
+            except OSError:
+                pass
+    temp = obs.get("temp") if obs else None
+    print(
+        f"      MCU {phase}: observer temp={temp} bt={obs.get('bt') if obs else None}", flush=True
+    )
+
+
+mcu_sample("bp32-start")
 if args.profile == "sinput":
     run_sinput()
 else:
     run_generic()
 
 cmd("RESET")
+mcu_sample("bp32-end")
 print(f"\nGAPS ({len(gaps)}): " + "; ".join(gaps) if gaps else "\nGAPS: none")
 print(
     "PASSED" if all(results) else "FAILED", f"({results.count(False)} failures of {len(results)})"

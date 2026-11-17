@@ -21,6 +21,7 @@ sys.path.insert(0, str(REPO / "host"))
 from hil import bluetooth  # noqa: E402
 from hil.config import load as load_config  # noqa: E402
 from hil.evdev_utils import Capture, find_all_nodes, find_gamepad  # noqa: E402
+from hil.mcustats import McuLog  # noqa: E402
 from hil.serialdev import SerialDev  # noqa: E402
 
 STATE = pathlib.Path.home() / ".cache" / "esp32-hil" / "state.json"
@@ -268,7 +269,13 @@ def dut(rigcfg, firmware, manifest, pytestconfig):
             d.close()
             pytest.exit(f"[dut] MISMATCH: {msg}", returncode=HIL_MISMATCH_EXIT)
         print(f"[dut] WARNING: {msg}")
+    # MCU health log (hil/mcustats.py): a "boot" sample now, before BEGIN and pairing -- the board is only
+    # advertising -- then one before every test (_mcu_sample) and an "end" sample plus a TASKS? snapshot here.
+    d.mcu = McuLog(REPO / "results" / f"mcu-{rigcfg['name']}-{want}.csv", rigcfg["name"], want)
+    d.mcu.sample(d, "boot")
     yield d
+    d.mcu.sample(d, "end")
+    d.mcu.tasks(d)
     d.close()
 
 
@@ -544,4 +551,17 @@ def _reset(request):
             )
         dut.reset()
         cap.drain()
+    yield
+
+
+# --- MCU health sample per test ----------------------------------------------
+@pytest.fixture(autouse=True)
+def _mcu_sample(request):
+    """One STATS? before every test that talks to the board (hil/mcustats.py): temperature, CPU and BLE load,
+    heap. Taken before the test body, so its ~5 ms on the MCU never lands inside a timed measurement."""
+    if "dut" in request.fixturenames:
+        dut = request.getfixturevalue("dut")
+        mcu = getattr(dut, "mcu", None)
+        if mcu is not None:
+            mcu.sample(dut, "test", request.node.name)
     yield
