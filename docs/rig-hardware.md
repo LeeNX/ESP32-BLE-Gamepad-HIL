@@ -109,6 +109,40 @@ It only works for an LED on GPIO48, the one the core's variant file
 (`variants/esp32s3/pins_arduino.h`) names. A v1.1 board (GPIO38) needs
 `RGB38`.
 
+## Observer firmware (Bluepad32)
+
+When a board runs the Bluepad32 observer (the observer matrix,
+`firmware/observer`), the same settings drive its status LEDs. There's nothing
+extra to set: `builder/build-observers.sh` reads `led_pin` / `conn_led_pin`
+(or `$HIL_LED_PIN_<BOARD>` / `$HIL_CONN_LED_PIN_<BOARD>`) through the same
+`builder/led-pin.sh` as `builder/build.sh`. The idle colours differ from
+hil_runner's, so you can see a board's current role at a glance:
+
+| Colour | hil_runner (gamepad) | Observer |
+|---|---|---|
+| Dim blue | Advertising | — |
+| Dim purple | — | Scanning, no gamepad |
+| Cyan | — | Gamepad connected, not ready yet |
+| Green | BLE-connected | Gamepad ready |
+| White flash | Serial command handled | Reports arriving (at most one flash per ~100ms, so a steady stream flickers) |
+| Red flash | `ERR …` reply | `HIL err …` reply |
+| Amber | `BOOT <n>` slot switch | `BOOT <n>` slot switch |
+
+On a single-colour LED the observer pulses on reports and errors only, and
+`conn_led_pin` stays on while a gamepad is ready.
+
+The observer's own console commands for its LED are `statusled?` →
+`HIL statusled rgb <gpio>` / `mono <gpio>` / `none`, and
+`statusled on|off|<r> <g> <b>`. Don't confuse these with `led <n>` / `rgb <r> <g> <b>`,
+which drive the connected *gamepad's* LEDs over Bluetooth. A `97` setting
+works there too: the observer reads any pin past the chip's last GPIO as
+"RGB LED on pin − GPIO count", like Arduino's `RGB_BUILTIN`. So with `97`,
+an S3 gets full colours as an observer but white only as a gamepad.
+
+The observer drives the WS2812 with ESP-IDF's RMT TX driver directly, with no
+extra component to download. A low-priority task does every LED write, so the
+Bluetooth thread only sets flags.
+
 ## Parts (per LED)
 
 - One 5mm LED. Different colours for the two LEDs (e.g. yellow = activity,

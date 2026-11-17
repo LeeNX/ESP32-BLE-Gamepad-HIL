@@ -99,47 +99,20 @@ fi
 export SOURCE_DATE_EPOCH
 echo "== SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH ($(date -u -r "$SOURCE_DATE_EPOCH" +%FT%TZ 2>/dev/null || date -u -d "@$SOURCE_DATE_EPOCH" +%FT%TZ))"
 
-# Status LED GPIOs, per board (docs/rig-hardware.md, hil_config.toml
-# [board.*].led_pin/.conn_led_pin comments, README "Rig hardware TODO"):
-# $HIL_LED_PIN_<BOARD> / $HIL_CONN_LED_PIN_<BOARD> (uppercased, e.g.
-# HIL_LED_PIN_ESP32DEV) win over config -- lets a runner set them without
-# touching hil_config.local.toml. Unset -> no -D flag, firmware compiles that
-# LED's support out for that board.
-board_gpio() {  # <board> <config key> <env suffix>
-  local env_var v
-  env_var="HIL_${3}_$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')"
-  v="${!env_var:-}"
-  [[ -n "$v" ]] && { echo "$v"; return; }
-  cfg "board.$1.$2"
-}
+# Status LED GPIOs, per board: $HIL_LED_PIN_<BOARD> / $HIL_CONN_LED_PIN_<BOARD> or
+# [board.*].led_pin/.conn_led_pin -- builder/led-pin.sh, docs/rig-hardware.md.
+# Unset -> no -D flag, firmware compiles that LED's support out for that board.
+# shellcheck source=builder/led-pin.sh
+source "$REPO/builder/led-pin.sh"
 
 mkdir -p "$OUT_ROOT"
 for board in "${BOARDS[@]}"; do
   chip=$(board_chip "$board")
   board_flags="${PLATFORMIO_BUILD_FLAGS:-}"
-  led_pin=$(board_gpio "$board" led_pin LED_PIN)
-  # `RGB<gpio>` (any case, optional colon: RGB48 / rgb:48) = a WS2812-style RGB
-  # LED on that GPIO, e.g. the S3 DevKitC-1's onboard one (RGB48, or RGB38 on a
-  # v1.1 board). Same setting, no extra env var: build.sh just adds the
-  # internal -DHIL_LED_RGB so the firmware drives it with colours
-  # (docs/rig-hardware.md "RGB status LED"). A plain number stays a
-  # single-colour LED.
-  if [[ "$led_pin" =~ ^[Rr][Gg][Bb]:?([0-9]+)$ ]]; then
-    led_pin="${BASH_REMATCH[1]}"
-    board_flags="$board_flags -DHIL_LED_PIN=$led_pin -DHIL_LED_RGB"
-    echo "== $board activity LED: RGB on GPIO $led_pin"
-  elif [[ "$led_pin" =~ ^[0-9]+$ ]]; then
-    board_flags="$board_flags -DHIL_LED_PIN=$led_pin"
-    echo "== $board activity LED: GPIO $led_pin"
-  elif [[ -n "$led_pin" ]]; then
-    echo "!! $board: led_pin '$led_pin' is neither <gpio> nor RGB<gpio>" >&2
-    exit 2
-  fi
-  conn_led_pin=$(board_gpio "$board" conn_led_pin CONN_LED_PIN)
-  if [[ -n "$conn_led_pin" ]]; then
-    board_flags="$board_flags -DHIL_CONN_LED_PIN=$conn_led_pin"
-    echo "== $board connection LED: GPIO $conn_led_pin"
-  fi
+  board_leds "$board" || exit 2
+  [[ -n "$LED_GPIO" ]] && board_flags="$board_flags -DHIL_LED_PIN=$LED_GPIO"
+  [[ "$LED_RGB" == 1 ]] && board_flags="$board_flags -DHIL_LED_RGB"
+  [[ -n "$CONN_LED_GPIO" ]] && board_flags="$board_flags -DHIL_CONN_LED_PIN=$CONN_LED_GPIO"
   for profile in "${PROFILES[@]}"; do
     env="${board}$(profile_suffix "$profile")"
     echo "== build $env  (board=$board chip=$chip profile=$profile)"

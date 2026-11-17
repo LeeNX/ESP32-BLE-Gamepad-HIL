@@ -37,6 +37,12 @@ What a bump means:
   held until the next non-LED command), plus `test_led_kind` / `test_led_rgb_colours`. A plain number keeps the old
   single-colour behaviour; anything else fails the build. `docs/rig-hardware.md` also documents a white-only
   fallback that needs none of this: `97` (`RGB_BUILTIN`, GPIO48 + 49) lights the S3's RGB LED white through plain `digitalWrite()`.
+- **Status LEDs on the Bluepad32 observer too.** `builder/build-observers.sh` applies the same per-board `led_pin` /
+  `conn_led_pin` settings, through a shared `builder/led-pin.sh` that `builder/build.sh` now uses as well. Observer
+  colours: dim purple scanning, cyan connected, green ready, white flicker on reports (one flash per ~100 ms at
+  most), red flash on `HIL err`, amber on `BOOT <n>`. New observer console commands `statusled?` and
+  `statusled on|off|<r> <g> <b>`. The WS2812 is driven with ESP-IDF's RMT TX driver from a low-priority task, so the
+  Bluetooth thread never waits on it.
 - **`docs/rig-host-selection.md`: a buyer's guide for tester hardware.** Host options (Pi 3B+/4/5, used 1-litre PC,
   N100), powered and `uhubctl`-capable hubs, Bluetooth dongle choice (a known model from a reputable seller, not the cheapest) and placement, sourcing a reliable hub, idle/busy power and yearly kWh per
   host, a kernel-log table for tracking down USB resets, and a pre-purchase checklist. Linked from README and
