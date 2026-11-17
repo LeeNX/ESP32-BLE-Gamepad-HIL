@@ -62,6 +62,7 @@ ROUTINE_SKIP = (
     "no Feature Report",
     "no Output Report",
     "profile has no special buttons",
+    "RGB colours don't apply",  # test_led_rgb_colours on a single-colour or LED-less board
 )
 
 
@@ -83,6 +84,12 @@ def _bundle(path):
 def _first_line(text):
     lines = (text or "").strip().splitlines()
     return lines[0] if lines else ""
+
+
+def _md(text):
+    # Messages are shown as markdown text: escape what GitHub would take as HTML, so `RGB<gpio>` isn't
+    # rendered as "RGB" with the unknown <gpio> tag silently dropped.
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _dur(seconds):
@@ -298,13 +305,13 @@ def render(bundles, areas, failures, gap_skips, run_seconds=None, flash_line="")
         for board, profile, area, name, msg in failures:
             out.append(f"> - `{board}/{profile}` · `{area}::{name}`")
             if msg:
-                out.append(f">   {msg}")
+                out.append(f">   {_md(msg)}")
         out.append("")
 
     if gap_skips:
         out += ["> [!WARNING]", "> **Skipped — worth a look**", ">"]
         for board, profile, area, name, reason in gap_skips:
-            out.append(f"> - `{board}/{profile}` · `{area}::{name}` — {reason}")
+            out.append(f"> - `{board}/{profile}` · `{area}::{name}` — {_md(reason)}")
         out.append("")
 
     return "\n".join(out).rstrip() + "\n"

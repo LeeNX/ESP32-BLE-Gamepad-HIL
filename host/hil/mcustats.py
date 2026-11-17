@@ -305,21 +305,28 @@ def summarize_group(rows):
 def render(groups):
     if not groups:
         return ""
+    stats = {key: summarize_group(rows) for key, rows in sorted(groups.items())}
+    # Quiet/busy only exist when test_mcu_thermal ran (`--bench`). Without it the column would be all dashes, which
+    # reads like missing data, so it's left out and the note says how to get it.
+    thermal = any(s["quiet"] is not None or s["busy"] is not None for s in stats.values())
     out = [
         "### MCU health",
         "",
         "On-die temperature and load per board, sampled by `STATS?` through each pytest session"
         " (`results/mcu-*.csv`). Trends only: the classic esp32 sensor is uncalibrated, in 0.56 °C steps.",
-        "Quiet/busy are `test_mcu_thermal` phases (connected and idle vs. sending reports flat out; `--bench` only).",
+        "Quiet/busy are `test_mcu_thermal` phases (connected and idle vs. sending reports flat out; `--bench` only)."
+        if thermal
+        else "No quiet/busy thermal phases in this run: `test_mcu_thermal` runs with `--bench` only.",
         "`bt` = the Bluetooth tasks' peak share of one core (after boot). Per-core CPU is in the CSV, but the test"
         " firmware's loop polls serial without sleeping, so its core always reads ~100%.",
         "",
-        "| board | profile | °C first → max → last | quiet / busy °C | peak bt % | min free heap | min BLE stack | reset |",
-        "|---|---|---|---|---|---|---|---|",
+        "| board | profile | °C first → max → last |"
+        + (" quiet / busy °C |" if thermal else "")
+        + " peak bt % | min free heap | min BLE stack | reset |",
+        "|---|---|---|" + ("---|" if thermal else "") + "---|---|---|---|",
     ]
     warn = []
-    for (board, profile), rows in sorted(groups.items()):
-        s = summarize_group(rows)
+    for (board, profile), s in stats.items():
         reset = s["resets"]
         if s["restarts"]:
             reset += f" ⚠️ {s['restarts']} restart(s) mid-run"
@@ -330,7 +337,8 @@ def render(groups):
             warn.append(f"{board}/{profile} last reset reason: {s['resets']}")
         out.append(
             f"| {board} | {profile} | {_f(s['temp_first'])} → {_f(s['temp_max'])} → {_f(s['temp_last'])}"
-            f" | {_f(s['quiet'])} / {_f(s['busy'])} | {_f(s['bt_max'])}"
+            + (f" | {_f(s['quiet'])} / {_f(s['busy'])}" if thermal else "")
+            + f" | {_f(s['bt_max'])}"
             f" | {_f(s['heap_min'], '{:,}')} | {_f(s['stack_ble_min'], '{:,}')} | {reset} |"
         )
     if warn:

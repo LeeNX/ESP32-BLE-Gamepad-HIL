@@ -71,10 +71,14 @@ def test_led_kind(dut):
 
 
 def test_led_rgb_colours(dut):
-    if dut.led_kind()[0] != "rgb":
-        pytest.skip(
-            "no RGB status LED on this board (led_pin = RGB<gpio>, see docs/rig-hardware.md)"
-        )
+    # Only an RGB build has colours to test. A single-colour LED (esp32dev, esp32c3) is the expected case there, and
+    # test_led_kind already checks it rejects colours; a board with no LED configured is flagged by test_led_kind.
+    # So these skips are routine (hil.summarize counts them rather than listing them as gaps).
+    kind = dut.led_kind()[0]
+    if kind == "mono":
+        pytest.skip("single-colour status LED: RGB colours don't apply")
+    if kind != "rgb":
+        pytest.skip("no status LED configured: RGB colours don't apply (see test_led_kind)")
     for rgb in ((32, 0, 0), (0, 32, 0), (0, 0, 32), (0, 0, 0)):
         assert dut.led_rgb(*rgb), f"LED {rgb} rejected"
     assert dut.command("LED 256 0 0") == "ERR range"
