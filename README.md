@@ -157,7 +157,9 @@ Still manual:
 - **Host choice**: a Raspberry Pi 3B+ handles one ESP32, maybe two. Its USB,
   Ethernet and any USB storage share one controller, which wedged with three
   boards. The reference rig is now an up-cycled 1-litre PC with USB on its own
-  bus. See [`docs/rig-build.md`](docs/rig-build.md) "Choosing a tester host".
+  bus. See [`docs/rig-build.md`](docs/rig-build.md) "Choosing a tester host",
+  and [`docs/rig-host-selection.md`](docs/rig-host-selection.md) for a buyer's
+  guide (host, hubs, Bluetooth dongle, power use, tracking down USB resets).
 - **Power**: a Pi 3B+ can't reliably power an ESP32 doing BLE off its own USB —
   brownouts show up as a reset loop that never advertises. Use a **powered USB
   hub** for the ESP32s on any host.

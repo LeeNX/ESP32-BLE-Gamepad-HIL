@@ -20,6 +20,10 @@ What a bump means:
 
 ### Added
 
+- **`docs/rig-host-selection.md`: a buyer's guide for tester hardware.** Host options (Pi 3B+/4/5, used 1-litre PC,
+  N100), powered and `uhubctl`-capable hubs, Bluetooth dongle choice (a known model from a reputable seller, not the cheapest) and placement, sourcing a reliable hub, idle/busy power and yearly kWh per
+  host, a kernel-log table for tracking down USB resets, and a pre-purchase checklist. Linked from README and
+  `docs/rig-build.md`.
 - **`HIL_BT_ADAPTER` picks the Bluetooth controller.** Set it to a BD address (`18:69:45:F3:4C:D3`, recommended: it
   stays the same across re-plugging) or an hci name (`hci1`). Unset, the suite uses the only controller if there's
   just one, or `hci0` with a warning if there are several, so single-adapter rigs behave as before.
