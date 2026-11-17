@@ -81,6 +81,18 @@ What a bump means:
   ~6.7–7.4 ms), whose p99 falls ~13.7 → ~7.8 ms. p99 improves on every board. The README findings, `docs/rig-build.md`
   and the `test_conn_interval_recorded` comment follow; no gate changed.
 
+### Fixed
+
+- **Run summary: no more "worth a look" warnings for RGB colours on single-colour LED boards.** `test_led_rgb_colours`
+  skips on the esp32dev and esp32c3, which is expected: their LEDs are single-colour, and `test_led_kind` already checks
+  that they reject colours. Its skip reasons are now routine, so they're counted, not listed (8 lines per full run). A
+  board with no LED configured is still flagged, once, by `test_led_kind`.
+- **Run summary: messages keep their `<...>` text.** Failure and skip messages are escaped for markdown, so
+  `RGB<gpio>` no longer renders as "RGB".
+- **MCU health table: the quiet / busy °C column only appears on `--bench` runs.** It comes from
+  `test_mcu_thermal`, which only runs with `--bench`, so in other runs it was a column of dashes that looked like
+  missing data. Without bench data, the column is left out and the note says how to get it.
+
 ## [0.7.0] — 2026-11-13
 
 ### Fixed
