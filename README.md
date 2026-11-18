@@ -160,6 +160,8 @@ Still manual:
   bus. See [`docs/rig-build.md`](docs/rig-build.md) "Choosing a tester host",
   and [`docs/rig-host-selection.md`](docs/rig-host-selection.md) for a buyer's
   guide (host, hubs, Bluetooth dongle, power use, tracking down USB resets).
+  [`docs/hardware-tested.md`](docs/hardware-tested.md) lists every part tried
+  on the rig, what didn't work and why; reports from other rigs are welcome.
 - **Power**: a Pi 3B+ can't reliably power an ESP32 doing BLE off its own USB —
   brownouts show up as a reset loop that never advertises. Use a **powered USB
   hub** for the ESP32s on any host.
@@ -169,7 +171,9 @@ Still manual:
   UB500 (Realtek RTL8761BU) with the Intel disabled. See "Bluetooth adapter"
   below.
 - `hil_config.local.toml` sets the real `[board.<b>].port`
-  (`ls -l /dev/serial/by-id/`).
+  (`ls -l /dev/serial/by-id/`; for two bridges with no unique serial number,
+  such as two plain CH340s, use `/dev/serial/by-path/` instead, see
+  `docs/hardware-tested.md`).
 
 First run pairs the device automatically (`NoInputNoOutput` agent, Just Works).
 To pair by hand: `bluetoothctl` → `scan on`, wait for `HILpad <board>`, then

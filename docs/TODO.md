@@ -93,6 +93,20 @@ These ESP32-BLE-Gamepad features have **no firmware command and no test**:
   moving a desktop test into `host/tests/` behind a transport fixture over
   keeping a parallel copy, and fold the desktop-only `local` profile into a
   shared one if its only reason to exist is history.
+- [ ] **Hardware qualification runner (side project).** Telling the bad
+  CP2102 DevKit apart took ad-hoc scripts on 2026-11-18: a serial-only
+  flood, `BURST` with no BLE connection, `BURST` while connected (with the
+  other boards held in reset so only one advertises), and a raw read of
+  what arrives when a reply goes missing. Package that as one command
+  (`tester/qualify.sh <port>`): flash the test firmware, run the three
+  stages, and print one line per stage in the format of
+  [`docs/hardware-tested.md`](hardware-tested.md), so anyone can test a
+  board, bridge, cable or hub port and paste the result into a report.
+  Gotchas found the hard way: a background job in a non-interactive shell
+  ignores SIGINT; releasing DTR/RTS with DTR still asserted boots the ESP32
+  into download mode; boards sharing a name confuse the pairing cache in
+  `~/.cache/esp32-hil/state.json`. Could grow into a standing "plug it in
+  and get a verdict" service on the rig, but that's a bigger design.
 - [ ] **NuS / OTA testing from the old `bluepad32-observer` branch.** The
   branch (gitea only, 7 commits, kept on purpose) predates the
   `firmware/observer` rewrite and has hardware-verified work that never landed:
@@ -104,4 +118,12 @@ These ESP32-BLE-Gamepad features have **no firmware command and no test**:
   mining for the **Nordic UART Service** gap above and for an OTA-over-BLE
   test next to the multi-slot flashing. Port the ideas onto
   `firmware/observer` / `hil_runner`, don't merge the branch (its layout is
-  obsolete).
+  obsolete). A second reason since 2026-11-17: the esp32dev's CP2102 loses
+  the odd reply line (and adds a packet of `0xFF` junk) only while the radio
+  is busy, and a NuS copy of the command channel would tell "the serial path
+  lost the line" from "the board never replied" with one command. Keep it a
+  complement to serial, not a replacement, and opt-in (a build flag, off in
+  the CI profiles): it shares the radio and the connection with the HID
+  reports the bench measures, adds a GATT service the descriptor and
+  device-info tests would see, and can't help before pairing, for flashing,
+  or when BLE itself is the fault.

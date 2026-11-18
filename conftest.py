@@ -286,6 +286,11 @@ def dut(rigcfg, firmware, manifest, pytestconfig):
     yield d
     d.mcu.sample(d, "end")
     d.mcu.tasks(d)
+    if d.junk_bytes or d.failed_attempts:
+        # Recovered from, or the run would have failed -- but a serial path that needs it is worth knowing about.
+        print(
+            f"\n[dut] serial path: {d.failed_attempts} failed command attempts, {d.junk_bytes} junk bytes dropped"
+        )
     d.close()
 
 

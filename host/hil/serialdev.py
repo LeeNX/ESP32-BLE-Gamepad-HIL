@@ -48,6 +48,11 @@ class SerialDev:
     def __init__(self, port, baud=115200, boot_wait=2.0):
         self.port = port
         self.baud = baud
+        # Serial-path trouble this session, for the run log (conftest prints it at teardown): bytes outside
+        # printable ASCII that _readline() threw away, and command replies that never arrived.
+        self.junk_bytes = 0
+        # Command attempts that raised SerialError: a lost reply, a timeout, a port drop.
+        self.failed_attempts = 0
         self.ser = self._open()
         # Opening the port resets the ESP32; give it time to boot before we talk.
         time.sleep(boot_wait)
@@ -115,44 +120,56 @@ class SerialDev:
             if not b:
                 continue
             if b == b"\n":
-                return buf.decode("ascii", "replace").strip()
-            if b != b"\r":
+                return buf.decode("ascii").strip()
+            # The protocol is printable ASCII only. Anything else is line noise -- the esp32dev's CP2102 has been
+            # seen to deliver a 64-byte packet of 0xFF ahead of the next reply under BLE load -- and kept, it
+            # would hide that reply's prefix from reply(), turning one lost line into a run of timeouts.
+            if 0x20 <= b[0] < 0x7F or b == b"\t":
                 buf += b
+            elif b != b"\r":
+                self.junk_bytes += 1
         raise SerialError("timeout waiting for a reply line")
 
-    def command(self, cmd, timeout=6.0, prefixes=REPLY_PREFIXES, retries=1):
+    def command(self, cmd, timeout=6.0, prefixes=REPLY_PREFIXES, retries=1, replay=True):
         """Send one command line, return the first reply line matching a known
         prefix. Stray lines (boot banner, debug) are skipped.
 
         Retries once by default: the cheap USB-UART bridges on the C3/S3 (an
         external PL2303 / CH340) drop a byte here and there under the `--bench`
-        burst load, so a lone missed reply shouldn't fail the run."""
+        burst load, so a lone missed reply shouldn't fail the run. For a command
+        that must not run twice, pass retries=0 and replay=False (see send())."""
         last = None
         for attempt in range(retries + 1):
             try:
-                return self._command_once(cmd, timeout, prefixes)
+                return self._command_once(cmd, timeout, prefixes, replay)
             except SerialError as e:
                 last = e
+                self.failed_attempts += 1
                 if attempt < retries:
                     self.drain()
                     time.sleep(0.2)
         raise last
 
-    def _command_once(self, cmd, timeout, prefixes):
-        self.send(cmd)
+    def _command_once(self, cmd, timeout, prefixes, replay=True):
+        self.send(cmd, replay=replay)
         return self.reply(cmd, timeout, prefixes)
 
-    def send(self, cmd, flush=True):
+    def send(self, cmd, flush=True, replay=True):
         """Write one command line without waiting for its reply; read that with reply(). For timing an effect of the
         command: a serial bridge can hold the reply back -- an FTDI's latency timer, up to 16 ms -- well after the
         effect itself has happened. Time with flush=False too: flush() is tcdrain(), which blocks until the bridge
-        has taken the bytes (~8 ms on the esp32c3's FTDI) -- the bytes go out just the same without it."""
+        has taken the bytes (~8 ms on the esp32c3's FTDI) -- the bytes go out just the same without it.
+
+        A write that fails is re-sent once on a reopened port, unless replay=False: then the port is reopened and
+        SerialError raised, since the first write may already have reached the firmware."""
         try:
             self.ser.write((cmd + "\n").encode("ascii"))
             if flush:
                 self.ser.flush()
-        except (serial.SerialException, OSError):
+        except (serial.SerialException, OSError) as e:
             self._reopen()
+            if not replay:
+                raise SerialError(f"write of {cmd!r} failed, not re-sent: {e}") from e
             self.ser.write((cmd + "\n").encode("ascii"))
             if flush:
                 self.ser.flush()
@@ -364,8 +381,25 @@ class SerialDev:
 
     def burst(self, button, count, gap_us=0, timeout=30.0):
         """Fire <count> toggles of <button>, <gap_us> apart. Returns
-        (count, elapsed_us) from the firmware's own clock."""
-        r = self.command(f"BURST {button} {count} {gap_us}", timeout=timeout)
+        (count, elapsed_us) from the firmware's own clock -- elapsed_us is None
+        when the burst was sent but its reply line got lost on the way back.
+
+        Never re-sent, neither after a lost reply nor after a failed write: the
+        burst may well have run (on the CP2102 board its late `BURST OK` turned
+        up behind the junk), and running it twice would double what the host
+        counts. Resynchronise on a PING instead, whose PONG-only prefix also
+        skips a late `BURST OK`; only a board that doesn't answer that is an
+        error. elapsed_us=None means "not confirmed": a caller that needs the
+        load to have happened must check for its effect (the thermal test
+        counts evdev events)."""
+        cmd = f"BURST {button} {count} {gap_us}"
+        try:
+            r = self.command(cmd, timeout=timeout, retries=0, replay=False)
+        except SerialError:
+            self.drain()
+            if self.command("PING", prefixes=("PONG",)) != "PONG":
+                raise
+            return count, None
         parts = r.split()
         if len(parts) != 4 or parts[:2] != ["BURST", "OK"]:
             raise SerialError(f"BURST -> {r!r}")

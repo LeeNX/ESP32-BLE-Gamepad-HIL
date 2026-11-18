@@ -122,8 +122,9 @@ boards.
   - Treat the hub's power supply as part of the hub. Replace a weak
     bundled brick with a known-good one of the same voltage and polarity.
   - Once you have a hub that behaves, note the exact model and buy a
-    spare. Record what didn't behave too, in "Parts tried on this rig"
-    below, so the next purchase starts from evidence.
+    spare. Record what didn't behave too, in
+    [hardware-tested.md](hardware-tested.md), so the next purchase starts
+    from evidence.
 - **Single-TT vs multi-TT.** Every board's serial bridge is a 12 Mbit/s
   full-speed device. Behind a USB 2.0 hub, a single-TT hub runs all of them
   through one translator; a multi-TT hub gives each port its own. Serial
@@ -146,15 +147,23 @@ boards.
   one more chance for the bus to trip. Seen on this rig: the S3's native USB
   cable was removed and it's flashed through its CH340 (README "ESP32-S3
   dual-USB-C setup").
-- **Bridge chip brand doesn't matter much; the cable does.** All three bridge
-  chips work here. Seen on this rig: the only adapter that logged `-71`
-  (EPROTO) errors was a CP2102 on a spare USB-C cable, and the cable or hub
-  port was the suspect, not the chip. Short, decent cables, and swap the
-  cable first when one lane flakes.
+- **The bridge chip's brand matters less than the cable and the board around
+  it.** CP2102, CH340, CH343 and FT232R have all worked here. Seen on this
+  rig: the only adapter that logged `-71` (EPROTO) errors was a CP2102 on a
+  spare USB-C cable, and the cable or hub port was the suspect, not the
+  chip. Short, decent cables, and swap the cable first when one lane flakes.
+  But one CP2102 DevKit lost a serial reply in 3 of 40 BLE-connected bursts,
+  where two CH340 DevKits on the same firmware (one on the same hub, one on a
+  motherboard port) lost none, so a board can be the problem too (see [hardware-tested.md](hardware-tested.md)). Before
+  trusting a new board, run the bench's thermal and latency tests on it a
+  few times.
 - **Budget ports per board, not per rig**: a C3 with a separate UART bridge
   needs two (README "ESP32-C3 serial bridge").
-- Always address boards by `/dev/serial/by-id/`. `ttyUSBn` numbers move
-  between reboots (seen on this rig).
+- Address boards by `/dev/serial/by-id/`, never `ttyUSBn`: those numbers
+  move between reboots (seen on this rig). The exception is bridges without a
+  unique USB serial number, such as two plain CH340s, whose by-id names
+  collide: use `/dev/serial/by-path/`, which follows the hub port (see
+  [hardware-tested.md](hardware-tested.md#serial-bridges)).
 
 ## Bluetooth: one radio, many boards
 
@@ -353,29 +362,17 @@ Check three things:
 
 ## Parts tried on this rig
 
-Data sheets and listings for this class of gear are often vague, and
-sometimes simply wrong. What a part did on a real rig is the most reliable
-information there is. Add a row whenever a part is added, removed or misbehaves.
-Use the USB IDs from `lsusb`, because product names change between batches.
-
-| Part | USB ID | Verdict | Notes |
-|---|---|---|---|
-| TP-Link UB500 Bluetooth dongle (Realtek RTL8761BU) | `2357:0604` | Good | The reference rig's radio since 2026-11-16 (`HIL_BT_ADAPTER`). |
-| Intel onboard Bluetooth (mimir) | `8087:07da` | Avoid for the rig | Wedged under parallel pairing (`Controller not accepting commands anymore`). Disabled with a udev rule. |
-| 7-port USB 2.0 hub, self-powered, two Genesys GL850G chips | `05e3:0608` ×2 | Works, watch it | Single-TT and cascaded (see "Powered hubs"). Port `1-1.4.1` (second chip) gave `-121` errors and broken Bluetooth pairing on 2026-11-17; the other ports have been fine. |
-| CP2102 bridge on an ESP32 DevKit (esp32dev) | `10c4:ea60` | Good on a good port | Opening the port auto-resets the ESP32 (DTR/RTS to EN). Earlier, `-71` errors on a spare USB-C cable. |
-| CH340 bridge, external, previous esp32dev | `1a86:…` (`ch341` driver) | Good | Retired with its board 2026-11-17, not for a fault. |
-| CH343 bridge on the ESP32-S3 DevKitC-1 "UART" port | `1a86:55d3` | Good | Console and flashing. The S3's native USB cable is left out (see "Serial bridges and cables"). |
-| FT232R bridge (esp32c3 console) | `0403:6001` | Good | TX/RX/GND only, no reset line. The C3 is reset through its own USB. |
-| ESP32-C3 native USB-Serial/JTAG (flashing, reset) | `303a:1001` | Good | Re-enumerates on every reset, which is expected. |
-| Raspberry Pi 3B+ as host | — | Retired 2026-11-11 | One USB controller shared with Ethernet and the root disk wedged (`dwc_otg`). See "Host options". |
+Moved to its own page, [hardware-tested.md](hardware-tested.md): every hub,
+bridge, board and dongle tried on this rig, with its USB ID and verdict, the
+evidence behind each "avoid", and how to report a part of your own. Add a row
+there whenever a part is added, removed or misbehaves.
 
 ## Checklist before you buy
 
 - [ ] Host has wired Ethernet and SATA/NVMe storage that aren't on the boards' USB controller
 - [ ] At least 2 GB RAM (1 GB proved a hard floor on the Pi 3B+)
 - [ ] A powered USB hub with ~0.5 A per board, preferably `uhubctl`-capable, that doesn't back-power the host
-- [ ] On arrival: `lsusb -t` to see how many hub chips are inside, label the ports by tier, and add the hub to "Parts tried on this rig"
+- [ ] On arrival: `lsusb -t` to see how many hub chips are inside, label the ports by tier, and add the hub to [hardware-tested.md](hardware-tested.md)
 - [ ] A well-known USB Bluetooth dongle from a reputable seller (TP-Link UB500, RTL8761BU, worked here), with `linux-firmware` installed
 - [ ] One USB port per board, plus one per separate UART bridge
 - [ ] Short, decent USB cables, plus a spare to swap in

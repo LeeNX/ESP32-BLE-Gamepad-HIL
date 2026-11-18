@@ -19,8 +19,9 @@ GitHub Release, and two attached tarballs:
 2. Full validation on `main`. Everyday pushes run `minimal maxfeat` through
    the suite and a quick observer matrix (`sinput`), without `--bench`; a
    release covers every profile, bench and the full observer matrix. Trigger
-   [`hil.yml`](.github/workflows/hil.yml) — always pass `profiles` explicitly
-   (blank means the everyday set):
+   [`hil.yml`](.github/workflows/hil.yml). The Actions form pre-fills
+   `profiles` with all six; from the CLI pass it explicitly (blank means the
+   everyday set):
 
    ```bash
    gh workflow run hil.yml \
