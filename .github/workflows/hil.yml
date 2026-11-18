@@ -66,8 +66,10 @@ on:
         description: 'space-separated subset to build+test (blank = all: esp32dev esp32c3 esp32s3)'
         default: ""
       profiles:
-        description: 'space-separated subset (blank = minimal maxfeat sinput; the weekly schedule adds specials)'
-        default: ""
+        # Pre-filled with every profile, so an ad-hoc run tests them all unless trimmed. Pushes and the schedule
+        # don't read this input (see PROFILES below).
+        description: 'space-separated profiles; delete any to skip (blank = the push set: minimal maxfeat sinput)'
+        default: "default specials minimal maxbtn maxfeat sinput"
       test_filter:
         description: 'pytest -k expression for a focused run, e.g. "feature_report" or "battery or descriptor" (blank = whole suite)'
         default: ""

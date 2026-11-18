@@ -72,6 +72,9 @@ What a bump means:
 
 ### Changed
 
+- **A manual `hil.yml` run now lists every profile.** The workflow_dispatch `profiles` field is pre-filled with
+  `default specials minimal maxbtn maxfeat sinput`, so an ad-hoc run covers all six unless trimmed (it used to
+  default to blank, which ran only `minimal maxfeat sinput`). Push and scheduled runs are unchanged.
 - **`TEMP?` on the esp32c3/esp32s3 now reads 20–100 °C.** It used Arduino's `temperatureRead()`, which sets the sensor up
   for 10–50 °C; these chips idle at 50–53 °C, so readings sat pinned at the top of the range (a C3 read a flat
   52.9 °C). The classic esp32 is unchanged (an uncalibrated ROM reading in 0.56 °C steps).
