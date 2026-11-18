@@ -98,8 +98,8 @@ What a bump means:
   The junk hid that reply's prefix, so the retry timed out too and later tests errored one after another; the
   release-prep bench on 2026-11-17 only passed on six esp32dev retries. `SerialDev` now drops any byte outside
   printable ASCII, and `burst()` no longer re-sends a `BURST` whose reply went missing (the burst may have run, so the
-  host would count it twice; nor is a `BURST` whose write failed re-sent on the reopened port): it resyncs on `PING` and returns `elapsed_us=None`, which the thermal test backs up by
-  counting the evdev events the busy phase produced (none fails it). The thermal test's `BURST` waits
+  host would count it twice; nor is a `BURST` whose write failed re-sent on the reopened port): it resyncs on `PING` and returns `elapsed_us=None`, which the thermal test treats as
+  inconclusive: such a burst must show its own button key events on the host, or the test fails. The thermal test's `BURST` waits
   15 s, not 30 s, before calling a reply lost. conftest prints `[dut] serial path: N failed command attempts, M
   junk bytes dropped` at the end of a session that needed any of this.
 - **Run summary: no more "worth a look" warnings for RGB colours on single-colour LED boards.** `test_led_rgb_colours`

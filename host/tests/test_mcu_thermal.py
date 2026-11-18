@@ -16,6 +16,7 @@ import os
 import time
 
 import pytest
+from evdev import ecodes
 
 PHASE_SECS = float(os.environ.get("HIL_THERMAL_SECS", "60"))
 SAMPLE_SECS = float(os.environ.get("HIL_THERMAL_SAMPLE_SECS", "5"))
@@ -56,18 +57,23 @@ def test_mcu_thermal_ramp(bench_enabled, connected_dut, gamepad, pytestconfig):
     if getattr(dut, "mcu", None) is None or not dut.mcu.sample(dut, "thermal-start"):
         pytest.skip("firmware has no STATS? (built before it existed)")
 
-    load = {"bursts": 0, "unconfirmed": 0, "events": 0}
+    load = {"bursts": 0, "unconfirmed": 0, "keys": 0, "unproven": []}
 
     def burst():
+        cap.drain()  # whatever is queued from before this burst isn't evidence for it
         # ~5 s of reports; twice that plus slack before calling the reply lost (burst() then resyncs, no re-send)
         _, fw_us = dut.burst(
             1, BURST_COUNT, BURST_GAP_US, timeout=2 * BURST_COUNT * BURST_GAP_US / 1e6 + 5
         )
+        # Drain so the evdev queue can't overflow, counting button transitions (EV_KEY; only button 1 toggles).
+        keys = cap.drain(ecodes.EV_KEY)
         load["bursts"] += 1
-        load["unconfirmed"] += fw_us is None
-        # Drain so the evdev queue can't overflow, and count: a lost BURST reply leaves only the events as proof
-        # that the load ran at all.
-        load["events"] += cap.drain()
+        load["keys"] += keys
+        if fw_us is None:
+            # Reply lost: inconclusive on its own, and never re-sent -- this burst's key events are the proof it ran.
+            load["unconfirmed"] += 1
+            if not keys:
+                load["unproven"].append(load["bursts"])
 
     quiet, _ = _sample_for(dut, "thermal-quiet", secs)
     busy, _ = _sample_for(dut, "thermal-busy", secs, between=burst)
@@ -83,11 +89,14 @@ def test_mcu_thermal_ramp(bench_enabled, connected_dut, gamepad, pytestconfig):
         f"\n[thermal] quiet {mean(temps(quiet)):.1f} C  busy {mean(temps(busy)):.1f} C"
         f" (max {max(temps(busy), default=float('nan')):.1f})  cool {mean(temps(cool)):.1f} C"
         f"  bt% busy {max((r.get('bt') or 0) for r in busy):.1f}"
-        f"  bursts {load['bursts']} ({load['unconfirmed']} unconfirmed)  events {load['events']}"
+        f"  bursts {load['bursts']} ({load['unconfirmed']} unconfirmed)  key events {load['keys']}"
     )
     assert load["bursts"], "the busy phase ran no BURST"
-    assert load["events"], (
-        f"{load['bursts']} BURSTs but no input events reached the host: the busy phase had no load"
+    assert load["keys"], (
+        f"{load['bursts']} BURSTs but no key events reached the host: the busy phase had no load"
+    )
+    assert not load["unproven"], (
+        f"BURST #{load['unproven']} lost its reply and produced no key events: no evidence it ran"
     )
     # A board that went silent at the end would leave only its earlier uptimes, which still look monotonic.
     assert cool_ok, "board stopped answering STATS? by the end of the cool-down"

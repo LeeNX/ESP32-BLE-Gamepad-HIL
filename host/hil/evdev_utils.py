@@ -84,12 +84,12 @@ class Capture:
     def __init__(self, dev):
         self.dev = dev
 
-    def drain(self):
-        """Discard queued events; returns how many there were."""
+    def drain(self, ev_type=None):
+        """Discard queued events; returns how many there were (only those of `ev_type`, if given)."""
         n = 0
         try:
-            while self.dev.read_one() is not None:
-                n += 1
+            while (e := self.dev.read_one()) is not None:
+                n += ev_type is None or e.type == ev_type
         except BlockingIOError:
             pass
         return n
