@@ -47,6 +47,7 @@ the choice (README "ESP32-S3 dual-USB-C setup").
 
 Before buying hardware, read [rig-host-selection.md](rig-host-selection.md). It covers hubs,
 the Bluetooth dongle, power use per host, and how to track down a USB reset.
+[hardware-tested.md](hardware-tested.md) lists the parts tried here and which ones didn't work.
 
 ## Current reference rig: mimir-u26 (1-litre PC)
 

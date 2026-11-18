@@ -63,6 +63,13 @@ What a bump means:
   `python -m hil.bluetooth adapter` prints what it resolves to. The health report's `adapter` block now names the
   controller actually used (`hci`, `address`).
 
+- **`docs/hardware-tested.md`: what worked, what didn't, and how to report a part.** The rig's parts table moves
+  here from the buyer's guide (which now links to it), with a verdict per part and the evidence behind each
+  "avoid": the CP2102 DevKit that lost serial replies under BLE load (one sample, comparison table against two
+  CH340 DevKits), the hub port behind 2026-11-17's pairing failures, and the Intel onboard Bluetooth. A
+  "Reporting a part" section asks others to confirm or contradict rows. The buyer's guide's bridge advice is
+  qualified accordingly, and `docs/TODO.md` adds a hardware qualification runner as a side project.
+
 ### Changed
 
 - **`TEMP?` on the esp32c3/esp32s3 now reads 20–100 °C.** It used Arduino's `temperatureRead()`, which sets the sensor up

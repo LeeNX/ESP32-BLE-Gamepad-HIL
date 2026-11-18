@@ -93,6 +93,20 @@ These ESP32-BLE-Gamepad features have **no firmware command and no test**:
   moving a desktop test into `host/tests/` behind a transport fixture over
   keeping a parallel copy, and fold the desktop-only `local` profile into a
   shared one if its only reason to exist is history.
+- [ ] **Hardware qualification runner (side project).** Telling the bad
+  CP2102 DevKit apart took ad-hoc scripts on 2026-11-18: a serial-only
+  flood, `BURST` with no BLE connection, `BURST` while connected (with the
+  other boards held in reset so only one advertises), and a raw read of
+  what arrives when a reply goes missing. Package that as one command
+  (`tester/qualify.sh <port>`): flash the test firmware, run the three
+  stages, and print one line per stage in the format of
+  [`docs/hardware-tested.md`](hardware-tested.md), so anyone can test a
+  board, bridge, cable or hub port and paste the result into a report.
+  Gotchas found the hard way: a background job in a non-interactive shell
+  ignores SIGINT; releasing DTR/RTS with DTR still asserted boots the ESP32
+  into download mode; boards sharing a name confuse the pairing cache in
+  `~/.cache/esp32-hil/state.json`. Could grow into a standing "plug it in
+  and get a verdict" service on the rig, but that's a bigger design.
 - [ ] **NuS / OTA testing from the old `bluepad32-observer` branch.** The
   branch (gitea only, 7 commits, kept on purpose) predates the
   `firmware/observer` rewrite and has hardware-verified work that never landed:

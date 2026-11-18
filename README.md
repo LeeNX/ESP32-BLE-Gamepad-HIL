@@ -160,6 +160,8 @@ Still manual:
   bus. See [`docs/rig-build.md`](docs/rig-build.md) "Choosing a tester host",
   and [`docs/rig-host-selection.md`](docs/rig-host-selection.md) for a buyer's
   guide (host, hubs, Bluetooth dongle, power use, tracking down USB resets).
+  [`docs/hardware-tested.md`](docs/hardware-tested.md) lists every part tried
+  on the rig, what didn't work and why; reports from other rigs are welcome.
 - **Power**: a Pi 3B+ can't reliably power an ESP32 doing BLE off its own USB —
   brownouts show up as a reset loop that never advertises. Use a **powered USB
   hub** for the ESP32s on any host.
