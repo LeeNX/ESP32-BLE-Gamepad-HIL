@@ -18,6 +18,11 @@ What a bump means:
 
 ## [Unreleased]
 
+### Added
+
+- **`docs/hardware-tested.md`: a photo of the retired CP2102 DevKit** and how to recognise it (no maker's name on
+  the board, so `lsusb` matters more than the look). Metadata stripped.
+
 ## [0.8.0] — 2026-11-18
 
 ### Added
