@@ -47,11 +47,11 @@ What a bump means:
   N100), powered and `uhubctl`-capable hubs, Bluetooth dongle choice (a known model from a reputable seller, not the cheapest) and placement, sourcing a reliable hub, idle/busy power and yearly kWh per
   host, a kernel-log table for tracking down USB resets, and a pre-purchase checklist. Linked from README and
   `docs/rig-build.md`.
-- **Buyer's guide: a hub-port case study and a "Parts tried on this rig" table.** On 2026-11-17 one esp32dev on a
+- **Buyer's guide: a hub-port case study.** On 2026-11-17 one esp32dev on a
   second-tier port of mimir's 7-port hub (two cascaded GL850G chips) broke every C3-observer Bluepad32 pairing with it
   (`Reason=0x3e`) for most of a day, and showed up in the kernel log only as rare `cp210x … -121` lines. Moving the
   cable to another port fixed it. The guide now explains that 7-port hubs are often two chips, adds `-121` to the
-  kernel-log table, and has a table of every hub, bridge and dongle tried, with its USB ID and verdict. The checklist
+  kernel-log table, and points to `docs/hardware-tested.md` (below) for every hub, bridge and dongle tried. The checklist
   adds `lsusb -t` on arrival. `docs/rig-build.md` gets a photo of the current mimir rig (metadata stripped, the
   host's serial-number label masked) and an up-to-date mimir section: one 7-port hub, not two, and three boards
   since the CP2102 DevKit became `esp32dev`. `docs/TODO.md` gains two follow-ups: retry a Bluepad32 lane once with diagnostics, and
@@ -63,8 +63,8 @@ What a bump means:
   `python -m hil.bluetooth adapter` prints what it resolves to. The health report's `adapter` block now names the
   controller actually used (`hci`, `address`).
 
-- **`docs/hardware-tested.md`: what worked, what didn't, and how to report a part.** The rig's parts table moves
-  here from the buyer's guide (which now links to it), with a verdict per part and the evidence behind each
+- **`docs/hardware-tested.md`: what worked, what didn't, and how to report a part.** The one home of the rig's parts
+  table (the buyer's guide links to it), with a verdict per part and the evidence behind each
   "avoid": the CP2102 DevKit that lost serial replies under BLE load (one sample, comparison table against two
   CH340 DevKits), the hub port behind 2026-11-17's pairing failures, and the Intel onboard Bluetooth. A
   "Reporting a part" section asks others to confirm or contradict rows. The buyer's guide's bridge advice is
@@ -94,10 +94,11 @@ What a bump means:
   CP2102 bridge sometimes drops a reply line and then delivers a 64-byte packet of `0xFF` ahead of the next one.
   The junk hid that reply's prefix, so the retry timed out too and later tests errored one after another; the
   release-prep bench on 2026-11-17 only passed on six esp32dev retries. `SerialDev` now drops any byte outside
-  printable ASCII, and `burst()` no longer re-sends a `BURST` whose reply went missing (the burst had run, so the
-  host would count it twice): it resyncs on `PING` and returns `elapsed_us=None`. The thermal test's `BURST` waits
-  15 s, not 30 s, before calling a reply lost. conftest prints `[dut] serial path: N lost replies, M junk bytes
-  dropped` at the end of a session that needed any of this.
+  printable ASCII, and `burst()` no longer re-sends a `BURST` whose reply went missing (the burst may have run, so the
+  host would count it twice; nor is a `BURST` whose write failed re-sent on the reopened port): it resyncs on `PING` and returns `elapsed_us=None`, which the thermal test backs up by
+  counting the evdev events the busy phase produced (none fails it). The thermal test's `BURST` waits
+  15 s, not 30 s, before calling a reply lost. conftest prints `[dut] serial path: N failed command attempts, M
+  junk bytes dropped` at the end of a session that needed any of this.
 - **Run summary: no more "worth a look" warnings for RGB colours on single-colour LED boards.** `test_led_rgb_colours`
   skips on the esp32dev and esp32c3, which is expected: their LEDs are single-colour, and `test_led_kind` already checks
   that they reject colours. Its skip reasons are now routine, so they're counted, not listed (8 lines per full run). A

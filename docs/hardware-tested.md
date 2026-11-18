@@ -94,7 +94,8 @@ or the design. Confirmations either way are very welcome.**
   host side was also hardened (`hil/serialdev.py` drops non-ASCII bytes and
   doesn't re-send a `BURST` whose reply was lost), so one lost line costs a
   retry rather than a run of failures, and conftest prints
-  `[dut] serial path: N lost replies, M junk bytes dropped` when it happened.
+  `[dut] serial path: N failed command attempts, M junk bytes dropped` when it
+  happened.
 
 ### One port of the 7-port hub
 

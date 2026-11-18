@@ -152,15 +152,18 @@ boards.
   rig: the only adapter that logged `-71` (EPROTO) errors was a CP2102 on a
   spare USB-C cable, and the cable or hub port was the suspect, not the
   chip. Short, decent cables, and swap the cable first when one lane flakes.
-  But one CP2102 DevKit lost serial replies whenever its radio was busy,
-  where two CH340 DevKits on the same firmware and hub didn't, so a board can
-  be the problem too (see [hardware-tested.md](hardware-tested.md)). Before
+  But one CP2102 DevKit lost a serial reply in 3 of 40 BLE-connected bursts,
+  where two CH340 DevKits on the same firmware (one on the same hub, one on a
+  motherboard port) lost none, so a board can be the problem too (see [hardware-tested.md](hardware-tested.md)). Before
   trusting a new board, run the bench's thermal and latency tests on it a
   few times.
 - **Budget ports per board, not per rig**: a C3 with a separate UART bridge
   needs two (README "ESP32-C3 serial bridge").
-- Always address boards by `/dev/serial/by-id/`. `ttyUSBn` numbers move
-  between reboots (seen on this rig).
+- Address boards by `/dev/serial/by-id/`, never `ttyUSBn`: those numbers
+  move between reboots (seen on this rig). The exception is bridges without a
+  unique USB serial number, such as two plain CH340s, whose by-id names
+  collide: use `/dev/serial/by-path/`, which follows the hub port (see
+  [hardware-tested.md](hardware-tested.md#serial-bridges)).
 
 ## Bluetooth: one radio, many boards
 

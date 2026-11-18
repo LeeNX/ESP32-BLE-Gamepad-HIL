@@ -85,11 +85,14 @@ class Capture:
         self.dev = dev
 
     def drain(self):
+        """Discard queued events; returns how many there were."""
+        n = 0
         try:
             while self.dev.read_one() is not None:
-                pass
+                n += 1
         except BlockingIOError:
             pass
+        return n
 
     def collect(self, settle=0.35, hard_timeout=2.0):
         """Read events until the stream goes quiet for `settle` seconds."""

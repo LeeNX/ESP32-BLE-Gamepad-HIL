@@ -62,10 +62,13 @@ the Bluetooth dongle, power use per host, and how to track down a USB reset.
 
 It took over the Pi's boards with the same serial adapters. Their
 `/dev/serial/by-id/` names follow the adapters, so `hil_config.local.toml`
-moved across unchanged. Since 2026-11-17 it carries three boards. The
-original esp32dev (on an external CH340) was removed, and the DevKit with an
-onboard CP2102 that used to be the observer-matrix-only `esp32dev2` is now
-`esp32dev`. The S3 is still flashed through its CH343 "UART" bridge
+moved across unchanged. Since 2026-11-17 it carries three boards. That day
+the original esp32dev (on an external CH340) was removed, and the DevKit with
+an onboard CP2102 that used to be the observer-matrix-only `esp32dev2` became
+`esp32dev`. On 2026-11-18 that board was retired too (it lost serial replies
+under BLE load, see [hardware-tested.md](hardware-tested.md)), and a DevKit
+with an onboard CH340 (`1a86:7523`, hub port 1-1.3) is now `esp32dev`. There
+is no `esp32dev2`. The S3 is still flashed through its CH343 "UART" bridge
 (`1a86:55d3`), with its native USB unplugged. That's not strictly needed on
 this USB, but it keeps the board from re-enumerating on every flash.
 

@@ -56,10 +56,18 @@ def test_mcu_thermal_ramp(bench_enabled, connected_dut, gamepad, pytestconfig):
     if getattr(dut, "mcu", None) is None or not dut.mcu.sample(dut, "thermal-start"):
         pytest.skip("firmware has no STATS? (built before it existed)")
 
+    load = {"bursts": 0, "unconfirmed": 0, "events": 0}
+
     def burst():
         # ~5 s of reports; twice that plus slack before calling the reply lost (burst() then resyncs, no re-send)
-        dut.burst(1, BURST_COUNT, BURST_GAP_US, timeout=2 * BURST_COUNT * BURST_GAP_US / 1e6 + 5)
-        cap.drain()  # keep the evdev queue from overflowing; the events themselves aren't checked here
+        _, fw_us = dut.burst(
+            1, BURST_COUNT, BURST_GAP_US, timeout=2 * BURST_COUNT * BURST_GAP_US / 1e6 + 5
+        )
+        load["bursts"] += 1
+        load["unconfirmed"] += fw_us is None
+        # Drain so the evdev queue can't overflow, and count: a lost BURST reply leaves only the events as proof
+        # that the load ran at all.
+        load["events"] += cap.drain()
 
     quiet, _ = _sample_for(dut, "thermal-quiet", secs)
     busy, _ = _sample_for(dut, "thermal-busy", secs, between=burst)
@@ -75,6 +83,11 @@ def test_mcu_thermal_ramp(bench_enabled, connected_dut, gamepad, pytestconfig):
         f"\n[thermal] quiet {mean(temps(quiet)):.1f} C  busy {mean(temps(busy)):.1f} C"
         f" (max {max(temps(busy), default=float('nan')):.1f})  cool {mean(temps(cool)):.1f} C"
         f"  bt% busy {max((r.get('bt') or 0) for r in busy):.1f}"
+        f"  bursts {load['bursts']} ({load['unconfirmed']} unconfirmed)  events {load['events']}"
+    )
+    assert load["bursts"], "the busy phase ran no BURST"
+    assert load["events"], (
+        f"{load['bursts']} BURSTs but no input events reached the host: the busy phase had no load"
     )
     # A board that went silent at the end would leave only its earlier uptimes, which still look monotonic.
     assert cool_ok, "board stopped answering STATS? by the end of the cool-down"

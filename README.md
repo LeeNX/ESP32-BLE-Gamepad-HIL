@@ -171,7 +171,9 @@ Still manual:
   UB500 (Realtek RTL8761BU) with the Intel disabled. See "Bluetooth adapter"
   below.
 - `hil_config.local.toml` sets the real `[board.<b>].port`
-  (`ls -l /dev/serial/by-id/`).
+  (`ls -l /dev/serial/by-id/`; for two bridges with no unique serial number,
+  such as two plain CH340s, use `/dev/serial/by-path/` instead, see
+  `docs/hardware-tested.md`).
 
 First run pairs the device automatically (`NoInputNoOutput` agent, Just Works).
 To pair by hand: `bluetoothctl` → `scan on`, wait for `HILpad <board>`, then
