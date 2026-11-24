@@ -68,6 +68,16 @@ contradiction) is worth having.
 DevKit to compare, so we can't yet say whether this is the board, its batch,
 or the design. Confirmations either way are very welcome.**
 
+<img src="hardware-tested/esp32-devkit-cp2102.jpg" width="300" align="right"
+alt="The retired esp32dev: a black 38-pin ESP32 DevKit with a shielded ESP-32 module and PCB antenna at the top, a square QFN serial bridge chip in the middle, a USB-C socket at the bottom between the RST and BOOT buttons">
+
+**How to recognise it.** A black 38-pin DevKit with a USB-C socket between the
+`RST` and `BOOT` buttons, a shielded module marked `ESP-32` and CE (chip
+ESP32-D0WD-V3 rev 3.1), and the bridge as a small square QFN chip in the
+middle of the board (USB ID `10c4:ea60`). There's no maker's name or model on
+the board. Lookalikes are sold under many names, and the same layout can ship
+with a CH340 instead, so check `lsusb` rather than the photo.
+
 - **Symptom.** Under sustained BLE load (one input report every 5 ms) the
   board now and then never returned a serial reply line, and the next reply
   arrived after a 64-byte packet of `0xFF`. In CI it showed up as
