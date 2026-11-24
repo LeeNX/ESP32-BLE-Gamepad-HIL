@@ -79,6 +79,7 @@ push to the tester, run, pull results). One box can be both roles
 | `tester/test-all.sh` | loop `tester/test.sh` over every bundle in `~/hil-bundles`, retrying a failed bundle up to `$HIL_RETRY_COUNT` times (default 3, doubling `$HIL_RETRY_PAUSE`-second pause between each, default 15s — both overridable); a solo/sequential retry (including `--bench`) also restarts the BT adapter first (unsafe during `--by-board`'s parallel phase 2, so that path skips it — see `recover_adapter` in the script); `--by-board` runs the boards as parallel lanes (functional only, what CI runs by default); `--bench` is the sequential sweep (weekly + at release) |
 | `tester/test-matrix.sh` | the observer matrix: rotations of one observer + two gamepads, BlueZ and Bluepad32 lanes, USB health guards per step; writes `results/matrix-verdicts.md` |
 | `tester/sinput_hil.py` `tester/bp32_hil.py` | the `sinput` profile under hid-generic and under the `sinput` kernel driver (`--latency` times every input path); what a Bluepad32 observer parses from a gamepad |
+| `tester/sdl3_compare.py` `tester/bootstrap-sdl3.sh` | what an SDL3 app sees of the `sinput` profile: SDL's HIDAPI driver vs its evdev path, under both kernel drivers (report-only); installs the pinned `sdl3probe` |
 | `tester/rig-lock.sh` `tester/rig-status.sh` `tester/rig-kill.sh` `host/hil/riglock.py` | one-rig `flock` + run-status file — serialise CI and local runs; `rig-status.sh` shows who/what is running, `rig-kill.sh` aborts it (see [CI](#rig-lock--status)) |
 | `host/conftest.py` `host/hil/` `host/tests/` | the pytest suite. Helpers: `serialdev`, `evdev_utils`, `bluetooth`, `gatt` (DIS/PnP/battery over BlueZ D-Bus), `hidraw` (Feature/Output reports + descriptor), `latency`+`bench`, `pathlatency` (one report timed on several input paths), `sysinfo`, `detect` (present boards), `usbhealth` (USB bus guard), `names` (exact board-name matching), `charts`, `summarize`, `matrixsummary`, `healthsummary` (rig health for the job summary) |
 | `hil_config.toml` (+ gitignored `hil_config.local.toml`) | per-machine ports, ssh host, builder board/profile matrix, per-board `enabled` |
@@ -295,6 +296,49 @@ and evdev, under hid-generic and under the `sinput` driver — and writes
 `results/latency-<board>-sinput-*.json`. On the esp32c3 (2026-10-06) evdev adds
 0.003–0.1 ms over hidraw and the two drivers are within ~0.1 ms of each other
 (~4.7–4.9 ms p50): the driver choice doesn't change latency.
+
+### SDL3: HIDAPI vs evdev (`tester/sdl3_compare.py`)
+
+What an SDL 3.4 app sees of the `sinput` profile, by input path. SDL can read
+an SInput gamepad two ways on Linux: its own SInput driver on `/dev/hidraw*`
+(**hidapi**), or whatever input devices the kernel driver creates (**evdev**).
+The script runs two headless
+[`sdl3probe --json`](https://github.com/LeeNX/sdl3-sinput-probe) at once, one
+per path, under hid-generic and then under the `sinput` driver. That gives
+four columns: `hidapi@hid-generic`, `evdev@hid-generic`, `hidapi@sinput` and
+`evdev@sinput`. Every serial stimulus (buttons, special, hat, sticks, trigger,
+IMU, touchpad) is checked on each path, as are the facts SDL reports
+(driver, battery, sensors, touchpad, trigger rest) and SDL's outputs (rumble,
+RGB, player LED, read back from the board). `--latency N` (default 20) also
+times button presses on all four paths.
+
+It's **report-only**. A difference prints as `GAP <path> <check>` and is
+tagged `(known: …)` when `KNOWN` in `host/hil/sdl3probe.py` already explains
+that symptom. A known gap that stops appearing prints `FIXED?`, so it can be
+dropped from the list. The exit code is 0 whatever the gaps. The observer
+matrix runs it in the `sinput` BlueZ lane right after `sinput_hil.py` (own log
+`*-sdl3-*.log`, an `INFO … lane=sdl3` verdict line, and a path table in the
+job summary). `HIL_SDL3=0` skips it.
+
+Setup is per user, no sudo: `tester/bootstrap-sdl3.sh` downloads the pinned
+release (tag + sha256 in the script) to `~/sdl3/current`. The matrix runs it
+for you. HIDAPI also needs the hidraw udev rule from `bootstrap-sinput.sh`.
+
+```bash
+tester/rig-lock.sh -- env PYTHONPATH=host ~/.venvs/hil/bin/python tester/sdl3_compare.py \
+  "$(python3 host/hil/config.py board.esp32c3.port)" "HILpad esp32c3"
+```
+
+First run, 2026-11-24 (esp32c3, library `f97085e5`, SDL 3.4.18, driver 0.4.4,
+kernel 7.0): hidapi matches on both kernel drivers, and so does evdev under
+`sinput`, apart from its known gaps (no IMU, touchpad or LEDs through SDL's
+evdev backend). **evdev under hid-generic** is where SDL goes wrong. Its
+guessed mapping turns the hat into `y` and swaps the `z` axis (right stick X)
+with `rx` (left trigger). The special buttons never arrive, and there's no
+rumble. Known on every path: a released trigger reads 16383, and the battery
+level never reaches SDL. Button latency p50 is 8.4–10.6 ms on every path.
+evdev reads about 1 ms faster only because SDL stamps an evdev event with the
+kernel's time but a HIDAPI report with when it read it.
 
 ## Observer matrix (Bluepad32)
 

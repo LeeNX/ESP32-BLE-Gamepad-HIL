@@ -20,6 +20,16 @@ What a bump means:
 
 ### Added
 
+- **SDL3 HIDAPI vs evdev for the `sinput` profile** (`tester/sdl3_compare.py`, report-only). Two headless
+  `sdl3probe --json` (LeeNX/sdl3-sinput-probe v0.2.0) watch the same board at once, one through SDL's SInput HIDAPI
+  driver and one through evdev, under hid-generic and then under the `sinput` kernel driver. Every stimulus, device
+  fact and output (rumble / RGB / player LED, read back from the board) is checked on all four paths, with button
+  latency per path. Gaps already understood are tagged known (`KNOWN` in `host/hil/sdl3probe.py`); one that
+  disappears prints `FIXED?`. The observer matrix runs it in the `sinput` BlueZ lane after `sinput_hil.py`: own log,
+  an `INFO … lane=sdl3` verdict line and a path table in the job summary. It never fails the lane, and
+  `HIL_SDL3=0` skips it. `tester/bootstrap-sdl3.sh` installs the pinned probe release per user (no sudo); the matrix
+  calls it. First finding: under hid-generic, SDL's guessed evdev mapping turns the hat into `y`, swaps the right
+  stick X and the left trigger, and drops the special buttons.
 - **The observer prints the parser's `extra_info`, and the Bluepad32 lane
   checks it.** After every `HIL features` line comes
   `HIL extra_info <text>` (or `none`), from Bluepad32 5.0.0-beta1's
@@ -33,6 +43,8 @@ What a bump means:
 
 ### Changed
 
+- `tester/sinput_hil.py`'s driver helpers (`driver_ctl`, `bound_driver`, …) moved to `host/hil/sinput_driver.py`,
+  shared with `sdl3_compare.py`.
 - **The observer builds against upstream Bluepad32 5.0.0-beta1** (`1e81c8c8`),
   up from 5.0.0-beta0. The bump itself needed no observer changes: the SInput
   parser only gained `uni_hid_parser_sinput_device_extra_info`, and the new

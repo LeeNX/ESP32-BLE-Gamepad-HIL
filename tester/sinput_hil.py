@@ -28,6 +28,7 @@ from evdev import ecodes as e
 from hil import bluetooth as bt
 from hil import pathlatency as pl
 from hil.evdev_utils import find_gamepad
+from hil.sinput_driver import bound_driver, driver_ctl, hid_dev, wait_driver
 
 ap = argparse.ArgumentParser()
 ap.add_argument("port")
@@ -79,35 +80,6 @@ def cmd(c, timeout=2.0):
         if line and not line.startswith(("[", "HIL hil_runner ready")):
             return line
     return None
-
-
-def driver_ctl(action):
-    p = subprocess.run(
-        ["sudo", "-n", "hil-sinput-driver", action], capture_output=True, text=True, timeout=60
-    )
-    return p.returncode == 0, (p.stdout + p.stderr).strip()
-
-
-def hid_dev():
-    """sysfs HID device dir of the (single) BLE SInput device, or None."""
-    devs = sorted(glob.glob("/sys/bus/hid/devices/0005:2E8A:10C6.*"))
-    return devs[-1] if devs else None
-
-
-def bound_driver():
-    d = hid_dev()
-    if not d or not os.path.exists(f"{d}/driver"):
-        return None
-    return os.path.basename(os.path.realpath(f"{d}/driver"))
-
-
-def wait_driver(name, timeout=10):
-    end = time.monotonic() + timeout
-    while time.monotonic() < end:
-        if bound_driver() == name:
-            return True
-        time.sleep(0.2)
-    return False
 
 
 def dmesg_lines():
