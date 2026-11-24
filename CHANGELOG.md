@@ -30,6 +30,8 @@ What a bump means:
   `HIL_SDL3=0` skips it. `tester/bootstrap-sdl3.sh` installs the pinned probe release per user (no sudo); the matrix
   calls it. First finding: under hid-generic, SDL's guessed evdev mapping turns the hat into `y`, swaps the right
   stick X and the left trigger, and drops the special buttons.
+- **`docs/hardware-tested.md`: a photo of the retired CP2102 DevKit** and how to recognise it (no maker's name on
+  the board, so `lsusb` matters more than the look). Metadata stripped.
 
 ### Changed
 
