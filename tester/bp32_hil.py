@@ -53,6 +53,16 @@ args = ap.parse_args()
 results, gaps = [], []
 
 
+NO_EXTRA_INFO = "<no HIL extra_info line: observer built against Bluepad32 older than 5.0.0-beta1?>"
+
+# Bluepad32's SInput device_extra_info text (uni_hid_parser_sinput_device_extra_info), field for field the same
+# feature response as the observer's "HIL features" line.
+SINPUT_EXTRA_INFO = re.compile(
+    r"protocol=(?P<proto>\d+), caps0=(?P<caps0>0x[0-9a-f]+), caps1=(?P<caps1>0x[0-9a-f]+), "
+    r"poll=(?P<poll>\d+)us, accel=\+/-(?P<accel>\d+)g, gyro=\+/-(?P<gyro>\d+)dps"
+)
+
+
 def check(name, ok, detail=""):
     results.append(ok)
     print(
@@ -111,6 +121,9 @@ class Bluepad32:
             self.rst.open()
         self.lock = threading.Lock()
         self.state, self.ready, self.features, self.log = None, None, None, []
+        # "HIL extra_info": the parser's device_extra_info text, None for "none", NO_EXTRA_INFO until a line arrives
+        # (an observer built against Bluepad32 older than 5.0.0-beta1 never prints one).
+        self.extra_info = NO_EXTRA_INFO
         threading.Thread(target=self._run, daemon=True).start()
 
     def _run(self):
@@ -131,6 +144,9 @@ class Bluepad32:
                         self.state = {k: int(v, 0) for k, v in re.findall(r"(\w+)=(-?\w+)", line)}
                     elif line.startswith("HIL ready"):
                         self.ready = line
+                    elif line.startswith("HIL extra_info "):
+                        text = line[len("HIL extra_info ") :]
+                        self.extra_info = None if text == "none" else text
                     elif line.startswith("HIL features"):
                         self.features = (
                             {k: int(v, 0) for k, v in re.findall(r"(\w+)=(\w+)", line)}
@@ -327,6 +343,18 @@ def run_sinput():
             (f.get("poll"), f.get("accel"), f.get("gyro")) == (5000, 8, 2000),
             f"{f}",
         )
+        # The same response through Bluepad32's own formatter: a second reading of the parser's state, so a field
+        # the observer's getters and the parser disagree on shows up here.
+        x = bp.extra_info
+        m = SINPUT_EXTRA_INFO.fullmatch(x) if isinstance(x, str) and x != NO_EXTRA_INFO else None
+        if check("Bluepad32: extra_info is the SInput summary", bool(m), f"{x}"):
+            got = {k: int(v, 0) for k, v in m.groupdict().items()}
+            want = {k: f.get(k) for k in got}
+            check(
+                "extra_info: agrees with the feature response",
+                got == want,
+                f"extra_info {got} != features {want}",
+            )
 
     section("inputs")
     expect(
@@ -510,6 +538,11 @@ def run_generic():
         "Bluepad32: no SInput feature response (generic device)",
         bp.features is None,
         f"{bp.features}",
+    )
+    check(
+        "Bluepad32: no parser extra_info (generic HID parser)",
+        bp.extra_info is None,
+        f"{bp.extra_info}",
     )
 
     section("inputs")

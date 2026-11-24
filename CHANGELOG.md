@@ -18,11 +18,22 @@ What a bump means:
 
 ## [Unreleased]
 
+### Added
+
+- **The observer prints the parser's `extra_info`, and the Bluepad32 lane
+  checks it.** After every `HIL features` line comes
+  `HIL extra_info <text>` (or `none`), from Bluepad32 5.0.0-beta1's
+  `device_extra_info` parser hook. In the sinput lane, `bp32_hil.py` reads the
+  SInput summary back (protocol, caps, poll interval, IMU ranges) and checks
+  that it agrees field for field with `HIL features`. In the minimal/maxfeat
+  lanes, the generic HID parser must report `none`. An observer built against
+  an older Bluepad32 prints no such line and fails both checks.
+
 ### Changed
 
 - **The observer builds against upstream Bluepad32 5.0.0-beta1** (`1e81c8c8`),
-  up from 5.0.0-beta0. The observer needed no source changes: the SInput parser
-  only gained `uni_hid_parser_sinput_device_extra_info`, and the new
+  up from 5.0.0-beta0. The bump itself needed no observer changes: the SInput
+  parser only gained `uni_hid_parser_sinput_device_extra_info`, and the new
   `bp.bt.hid_allow` filter defaults to all device types (observer bundles
   flash a blank NVS anyway). The changes that matter to the rig are the BTstack
   update and the central-role fixes: the handler now ignores
