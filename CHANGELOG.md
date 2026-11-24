@@ -18,6 +18,16 @@ What a bump means:
 
 ## [Unreleased]
 
+### Changed
+
+- **The observer builds against upstream Bluepad32 5.0.0-beta1** (`1e81c8c8`),
+  up from 5.0.0-beta0. The observer needed no source changes: the SInput parser
+  only gained `uni_hid_parser_sinput_device_extra_info`, and the new
+  `bp.bt.hid_allow` filter defaults to all device types (observer bundles
+  flash a blank NVS anyway). The changes that matter to the rig are the BTstack
+  update and the central-role fixes: the handler now ignores
+  peripheral-role LE events and ATT transactions canceled on disconnect.
+
 ## [0.8.0] — 2026-11-18
 
 ### Added
