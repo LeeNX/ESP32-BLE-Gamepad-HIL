@@ -113,33 +113,11 @@ def versions(sdl="?"):
 
 
 # ---------------------------------------------------------------------------------------------------------------
-# Before connecting: a fresh pairing autoloads sinput (its modalias), which isn't the state to restore.
+# Before connecting: a fresh pairing autoloads sinput (its modalias), which isn't the state to restore. The pairing
+# below runs inside the try, so the cleanup puts the module back however the run ends.
 was_loaded = sd.module_loaded()
-section("connect")
-mac = None
-for m, n in bt.known_devices().items():
-    if bt.name_matches(n, args.name) and bt.is_connected(m):
-        mac = m
-        break
-if not mac:
-    with bt.BtCtl() as btctl:
-        mac = bt.ensure_paired(btctl, args.name, want_fresh=True)
-if not mac:
-    print(f"ERROR no BLE link to {args.name!r}", flush=True)
-    sys.exit(2)
-print(f"      {mac}", flush=True)
-end = time.monotonic() + 15
-while sd.bound_driver() is None and time.monotonic() < end:
-    time.sleep(0.2)
-
 can_switch = sd.driver_ctl("status")[0]
-drivers = args.drivers.split() if can_switch else [sd.bound_driver() or "none"]
-if not can_switch:
-    print(
-        f"      no hil-sinput-driver: running under the bound driver only ({drivers[0]})",
-        flush=True,
-    )
-
+restore_error = None
 report_paths = {}
 sdl_version = "?"
 
@@ -152,16 +130,37 @@ def skipped(drv, why):
         report_paths[label] = {"error": why}
 
 
-running = []  # every probe started, for the cleanup (stopping a finished one is a no-op)
 try:
+    section("connect")
+    mac = None
+    for m, n in bt.known_devices().items():
+        if bt.name_matches(n, args.name) and bt.is_connected(m):
+            mac = m
+            break
+    if not mac:
+        with bt.BtCtl() as btctl:
+            mac = bt.ensure_paired(btctl, args.name, want_fresh=True)
+    if not mac:
+        print(f"ERROR no BLE link to {args.name!r}", flush=True)
+        sys.exit(2)
+    print(f"      {mac}", flush=True)
+    end = time.monotonic() + 15
+    while sd.bound_driver() is None and time.monotonic() < end:
+        time.sleep(0.2)
+
+    drivers = args.drivers.split() if can_switch else [sd.bound_driver() or "none"]
+    if not can_switch:
+        print(
+            f"      no hil-sinput-driver: running under the bound driver only ({drivers[0]})",
+            flush=True,
+        )
+
     for drv in drivers:
         section(f"under {drv}")
         if can_switch:
             if drv == "hid-generic" and not sd.module_loaded():
-                ok, out = (
-                    True,
-                    "sinput module not loaded",
-                )  # the wrapper's unload fails on a module that isn't there
+                # The wrapper's unload fails on a module that isn't there.
+                ok, out = True, "sinput module not loaded"
             else:
                 ok, out = sd.driver_ctl("unload" if drv == "hid-generic" else "load")
             if not (ok and sd.wait_driver(drv)):
@@ -178,7 +177,6 @@ try:
             sp.Probe(exe, f"hidapi@{drv}", hidapi=True),
             sp.Probe(exe, f"evdev@{drv}", hidapi=False),
         ]
-        running.extend(probes)
         live = []
         for p in probes:
             ready = p.wait_ready()
@@ -314,7 +312,6 @@ try:
                     "2",
                 ],
             )
-            running.append(op)
             op.wait_ready()
             time.sleep(0.5)
             rumble, rgb, pled = cmd("RUMBLE?") or "", cmd("RGB?") or "", cmd("PLED?") or ""
@@ -349,18 +346,29 @@ try:
 finally:
     # Leave the rig as found even after an error or an interrupt (Ctrl-C, the matrix's timeout). Each step on its own:
     # one failing mustn't skip the others.
-    for p in running:
+    for p in sp.Probe.started:
         try:
             p.stop()
         except Exception as e:  # noqa: BLE001 -- cleanup: report and go on
             print(f"cleanup: stopping {p.label}: {e}", flush=True)
     try:
-        # The sinput module loaded or not, as it was at the start.
+        # The sinput module loaded or not, as it was at the start -- and the device (if connected) bound to its driver.
         if can_switch and sd.module_loaded() != was_loaded:
-            sd.driver_ctl("load" if was_loaded else "unload")
-            sd.wait_driver("sinput" if was_loaded else "hid-generic")
+            action = "load" if was_loaded else "unload"
+            ok, out = sd.driver_ctl(action)
+            want = "sinput" if was_loaded else "hid-generic"
+            bound = sd.hid_dev() is None or sd.wait_driver(want)
+            if not (ok and sd.module_loaded() == was_loaded and bound):
+                restore_error = (
+                    f"sinput {action} failed: {out or 'no output'}; bound: {sd.bound_driver()}"
+                )
     except Exception as e:  # noqa: BLE001
-        print(f"cleanup: restoring the sinput module: {e}", flush=True)
+        restore_error = f"restoring the sinput module: {e}"
+    if restore_error:
+        print(
+            f"ERROR cleanup: {restore_error} -- the rig's driver state differs from the start",
+            flush=True,
+        )
     try:
         cmd("RESET")
     except Exception as e:  # noqa: BLE001
@@ -394,6 +402,7 @@ fixed = [r for r in records if r["ok"] and r["known"]]
 line = (
     f"SDL3 COMPARE {board}: paths={len(paths)} checks={len(records)} gaps={len(gaps)} "
     f"(known {len(gaps) - len(new)}, new {len(new)}) fixed?={len(fixed)}"
+    + (" RIG-RESTORE-FAILED" if restore_error else "")
 )
 out = pathlib.Path(args.json or f"results/sdl3-compare-{board}.json")
 out.parent.mkdir(parents=True, exist_ok=True)
@@ -404,6 +413,7 @@ out.write_text(
             "profile": "sinput",
             "versions": vers,
             "summary": line,
+            "restore_error": restore_error,
             "paths": report_paths,
             "checks": records,
         },

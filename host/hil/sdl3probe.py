@@ -39,6 +39,8 @@ def find_probe(explicit=None):
 class Probe:
     """One `sdl3probe --json` process. `facts` fills in as lines arrive; `events` is every {"ev": ...} line."""
 
+    started = []  # every Probe ever created, for a cleanup that must stop them all (stop() on a finished one is a no-op)
+
     def __init__(self, exe, label, hidapi=True, wait=10, events=600, extra=()):
         self.label = label
         self.hidapi = hidapi
@@ -54,6 +56,9 @@ class Probe:
         self.proc = subprocess.Popen(
             argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
         )
+        Probe.started.append(
+            self
+        )  # straight after the process exists: a cleanup can always find it
         self._lock = threading.Lock()
         threading.Thread(target=self._pump, daemon=True).start()
 
@@ -142,29 +147,29 @@ KNOWN = [
     (
         "*",
         "fact:battery",
-        None,
+        "power=unknown battery=-1",
         "library reports plug status UNKNOWN unless charging state is set, and SDL then drops the level",
     ),
     (
         "evdev@*",
         "fact:sensors",
-        None,
+        "accel=0 gyro=0",
         "SDL's evdev backend doesn't use the separate IMU input device",
     ),
     (
         "evdev@*",
         "fact:touchpad",
-        None,
+        "touchpads=0",
         "SDL's evdev backend doesn't use the separate touchpad input device",
     ),
-    ("evdev@*", "step:MOTION*", None, "no sensors on the evdev path"),
-    ("evdev@*", "step:TOUCH*", None, "no touchpad on the evdev path"),
-    ("evdev@*", "out:led", None, "SDL's evdev backend has no LED path"),
-    ("evdev@*", "out:player", None, "SDL's evdev backend has no player-LED path"),
+    ("evdev@*", "step:MOTION*", "saw no events", "no sensors on the evdev path"),
+    ("evdev@*", "step:TOUCH*", "saw no events", "no touchpad on the evdev path"),
+    ("evdev@*", "out:led", "sdl=0 ", "SDL's evdev backend has no LED path"),
+    ("evdev@*", "out:player", "recv=0", "SDL's evdev backend has no player-LED path"),
     (
         "evdev@hid-generic",
         "out:rumble",
-        "sdl=0",
+        "sdl=0 ",
         "hid-generic: no force-feedback usage in the SInput descriptor",
     ),
 ]
