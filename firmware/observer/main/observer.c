@@ -7,6 +7,7 @@
 //   HIL state idx=<n> btn=<hex> misc=<hex> dpad=<hex> lx=<n> ly=<n> rx=<n> ry=<n> brake=<n> thr=<n> bat=<n>
 //             ax=<n> ay=<n> az=<n> gx=<n> gy=<n> gz=<n>    (accel in mm/s^2, gyro in mrad/s, Bluepad32's frame)
 //   HIL features proto=<n> caps0=<hex> caps1=<hex> poll=<us> accel=<g> gyro=<dps>   (or "HIL features none")
+//   HIL extra_info <Bluepad32 parser's device_extra_info text>   (or "HIL extra_info none"; follows every features line)
 //   HIL discovered addr=<addr> name="<name>" | HIL connected idx=<n> | HIL disconnected idx=<n>
 //   HIL init-complete | HIL version <version>
 //   HIL ok <command> | HIL err <reason>
@@ -23,7 +24,7 @@
 //   statusled?          HIL statusled rgb <gpio> | mono <gpio> | none
 //   statusled on|off|<r> <g> <b>   manual status-LED colour until the next other command (wiring check)
 //   rumble <weak> <strong> <ms>   dual rumble, magnitudes 0..255, for ms milliseconds (0 = stop)
-//   features?           print the device's feature response
+//   features?           print the device's feature response, then its extra_info line
 //   allow <addr>|any    only pair with this Bluetooth address (any = clear the filter)
 //   SLOTS?              OTA app slots: HIL slots running=<n> boot=<n> count=<n> <i>=<sha256>/<state>/<proj>/<ver>
 //   BOOT <n> [WIPE]     boot OTA slot n next (WIPE: erase NVS too), reply HIL ok boot <n>, restart
@@ -146,6 +147,15 @@ static void print_features(uni_hid_device_t* d) {
                poll_us, accel_g, gyro_dps);
     } else
         printf("HIL features none\n");
+
+    // The parser's own one-line summary (Bluepad32 >= 5.0.0-beta1's device_extra_info): for SInput, the same feature
+    // response as above, formatted by Bluepad32 rather than read field by field, so bp32_hil.py can cross-check them.
+    // A parser without one (the generic HID parser), or with nothing to say yet, prints "none".
+    char extra[128], safe[sizeof(extra)];
+    if (d && d->report_parser.device_extra_info && d->report_parser.device_extra_info(d, extra, sizeof(extra)) > 0)
+        printf("HIL extra_info %s\n", safe_name(extra, safe, sizeof(safe)));
+    else
+        printf("HIL extra_info none\n");
 }
 
 static void print_help(void) {

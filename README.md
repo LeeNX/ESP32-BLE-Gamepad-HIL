@@ -369,9 +369,10 @@ HIL rig's host firmware (leenx-foss/antBot-hil) minus its NuS and OTA. Bluepad32
 stays outside the repo, like the ESP32-BLE-Gamepad library:
 `builder/build-observers.sh` builds against `[observer].bluepad32_dir` when set,
 otherwise `builder/fetch-bluepad32.sh` checks out the pinned
-`[observer].bluepad32_repo` @ `bluepad32_ref` (upstream 5.0.0-beta0, the first
-release with the SInput parser) and applies Bluepad32's own BTstack patch. The
-bundles are `bundles/matrix/<board>-bp32obs-<bluepad32 sha8>-<rig sha8>/`; CI
+`[observer].bluepad32_repo` @ `bluepad32_ref` (upstream 5.0.0-beta1; 5.0.0-beta0
+was the first release with the SInput parser) and applies Bluepad32's own
+BTstack patch. The bundles are
+`bundles/matrix/<board>-bp32obs-<bluepad32 sha8>-<rig sha8>/`; CI
 and releases build them in parallel with the gamepad firmware, and releases ship
 them.
 
