@@ -20,6 +20,14 @@ What a bump means:
 
 ### Added
 
+- **The esp32s3 keeps eight apps in its slots, not four.** Every image a run uses (six runner profiles and the
+  observer) now stays on the S3, so a warm run switches between them without writing to it. `tester/flash.py` picks
+  the new `firmware/partitions/multislot-8mb.csv` when the runner bootloader it writes says 8 MB or more (the S3's
+  does). The 4 MB boards keep `multislot.csv`. The new table keeps every offset of the old one, so slots 0-3 survive
+  the one-time conversion. The `SLOTS?` line buffer in hil_runner and the observer grows from 512 bytes (about full
+  at four slots) to room for all 16. The host now joins a reply that arrives in more than one read, and drops a slot
+  whose digest was cut short. An image built before this change, written to `ota_4`..`ota_7`, leaves its own slot out
+  of `SLOTS?`; `flash.py` then checks that slot with esptool `verify_flash` instead of failing the write.
 - **SDL3 HIDAPI vs evdev for the `sinput` profile** (`tester/sdl3_compare.py`, report-only). Two headless
   `sdl3probe --json` (LeeNX/sdl3-sinput-probe v0.2.0) watch the same board at once, one through SDL's SInput HIDAPI
   driver and one through evdev, under hid-generic and then under the `sinput` kernel driver. Every stimulus, device

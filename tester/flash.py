@@ -5,7 +5,8 @@ nothing but esptool. No PlatformIO, no toolchain -- fine on a Raspberry Pi.
     tester/flash.py <bundle_dir> --port /dev/ttyUSB0 [--console-port /dev/ttyUSB1]
 
 Multi-slot (the default, docs/multislot-ota.md): the board's flash holds four apps in OTA slots behind a shared
-partition table (firmware/partitions/multislot.csv), and this treats them as a cache:
+partition table (firmware/partitions/multislot.csv; eight, multislot-8mb.csv, when the runner bootloader says 8 MB+ --
+the esp32s3), and this treats them as a cache:
 
   1. the bundle's app already in a slot -> boot it: over the console (`BOOT <n>`, no esptool, no USB bulk transfer,
      no native-USB re-enumeration) when --console-port answers, else an 8 KB otadata write with esptool;
@@ -239,7 +240,12 @@ def multislot_bootloader(bundle, manifest):
 
 def multislot(args, manifest, base, rec):
     """The slot cache -- see the module docstring."""
-    lay = ms.layout()
+    boot = multislot_bootloader(args.bundle, manifest)
+    if not boot:
+        raise SystemExit(f"{args.bundle}: no bootloader.bin")
+    # The table goes by the flash size in the bootloader this board gets (and keeps): what its apps can address.
+    flash_size = ms.bootloader_flash_size(boot[1].read_bytes()) or 4 << 20
+    lay = ms.layout(ms.table_for(flash_size), flash_size)
     slots, nslots = lay["slots"], len(lay["slots"])
     fw = args.bundle / "firmware.bin"
     try:
@@ -265,6 +271,25 @@ def multislot(args, manifest, base, rec):
     state = ms.load_state(args.port)
     label = f"{manifest['board']} {manifest['profile']} {manifest['lib_describe']}"
     rec.update(mode="multislot", image_sha256=want, slots=nslots)
+
+    def verify_slot(slot):
+        """Does the chip's slot hold this bundle's app? esptool verify_flash, a read only; retried when esptool gets no
+        answer at all, as step 2 below is."""
+        off = slots[slot]["offset"]
+        for attempt in range(1, args.retries + 1):
+            r = subprocess.run(
+                base + ["verify_flash", hex(off), str(fw)], capture_output=True, text=True
+            )
+            res = parse_verify(r.stdout + r.stderr)
+            if off in res:
+                return res[off]
+            print(
+                f"esptool verify_flash: no result (attempt {attempt}/{args.retries})",
+                file=sys.stderr,
+            )
+            time.sleep(3)
+        print((r.stdout + r.stderr).strip()[-800:], file=sys.stderr)
+        return False
 
     def done(slot, action, method, nbytes, wipe):
         now = time.time()
@@ -354,9 +379,6 @@ def multislot(args, manifest, base, rec):
 
         # 2. esptool verify, one session: is the table ours, the bootloader the runner's, and which slot (if any)
         # holds the app?
-        boot = multislot_bootloader(args.bundle, manifest)
-        if not boot:
-            raise SystemExit(f"{args.bundle}: no bootloader.bin")
         boot_off, boot_bin = int(boot[0], 16), boot[1]
         regions = [hex(ms.TABLE_OFFSET), str(tmp / "partitions.bin"), hex(boot_off), str(boot_bin)]
         for s in slots:
@@ -447,7 +469,15 @@ def multislot(args, manifest, base, rec):
             if con:
                 con.close()
         got = (after or {}).get("slots", {}).get(slot) or {}
-        if not after or after.get("running") != slot or got.get("sha256") != want:
+        ok = bool(after) and after.get("running") == slot and got.get("sha256") == want
+        if after and after.get("running") == slot and "sha256" not in got:
+            # Runs the slot, but its SLOTS? line left the slot out: an image built before the 8-slot table (512-byte
+            # buffer, about four slots) running from ota_4..7. Its digest is unknown, not wrong: ask the chip instead.
+            print(
+                f"flash: slot {slot} not in the image's SLOTS? reply -- verifying it with esptool"
+            )
+            ok = verify_slot(slot)
+        if not ok:
             print(
                 f"flash: after the write the board doesn't run slot {slot} with this image: {after}",
                 file=sys.stderr,
