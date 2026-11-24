@@ -197,12 +197,6 @@ try:
             )
             report(
                 p.label,
-                "fact:battery",
-                f.get("battery") == 77,
-                f"power={f.get('power')} battery={f.get('battery')}",
-            )
-            report(
-                p.label,
                 "fact:sensors",
                 f.get("sensor.accel") == 1 and f.get("sensor.gyro") == 1,
                 f"accel={f.get('sensor.accel')} gyro={f.get('sensor.gyro')}",
@@ -282,6 +276,16 @@ try:
 
         for p in probes:
             p.stop()
+            # Battery from the probe's final.* facts, read as it stops: SDL only learns it from an input report, and
+            # none may have arrived yet when the probe opened the device (BATTERY 77's report went out before that).
+            if p in live:
+                f = p.facts
+                report(
+                    p.label,
+                    "fact:battery",
+                    f.get("final.battery") == 77,
+                    f"power={f.get('final.power')} battery={f.get('final.battery')}",
+                )
             report_paths[p.label] = {
                 "facts": p.facts,
                 "events": len(p.events),

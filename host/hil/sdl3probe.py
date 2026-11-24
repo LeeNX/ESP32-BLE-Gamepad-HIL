@@ -10,6 +10,7 @@ event carries a CLOCK_MONOTONIC time (`mono_ns`), the clock `time.monotonic_ns()
 to the serial write that caused it. `observe()` / `evaluate()` turn one step's events into a verdict.
 """
 
+import contextlib
 import fnmatch
 import json
 import os
@@ -36,6 +37,27 @@ def find_probe(explicit=None):
     return None
 
 
+@contextlib.contextmanager
+def _signals_deferred(sigs=(signal.SIGINT, signal.SIGTERM)):
+    """Hold SIGINT/SIGTERM until the block ends, then deliver them to the handlers that were set. Python-level, not a
+    signal mask: a child started inside would inherit a mask, and then ignore the SIGTERM that Probe.stop() sends.
+    Only the main thread can set handlers; elsewhere the block just runs."""
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    pending = []
+    old = {}
+    try:
+        for s in sigs:
+            old[s] = signal.signal(s, lambda n, _frame: pending.append(n))
+        yield
+    finally:
+        for s, h in old.items():
+            signal.signal(s, h)
+        for n in pending:
+            signal.raise_signal(n)
+
+
 class Probe:
     """One `sdl3probe --json` process. `facts` fills in as lines arrive; `events` is every {"ev": ...} line."""
 
@@ -53,12 +75,12 @@ class Probe:
         if not hidapi:
             argv.append("--no-hidapi")
         self.argv = argv
-        self.proc = subprocess.Popen(
-            argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
-        )
-        Probe.started.append(
-            self
-        )  # straight after the process exists: a cleanup can always find it
+        # Start and register as one step: a Ctrl-C / SIGTERM in between would leave a process no cleanup knows of.
+        with _signals_deferred():
+            self.proc = subprocess.Popen(
+                argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
+            )
+            Probe.started.append(self)
         self._lock = threading.Lock()
         threading.Thread(target=self._pump, daemon=True).start()
 
