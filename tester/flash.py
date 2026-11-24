@@ -272,6 +272,25 @@ def multislot(args, manifest, base, rec):
     label = f"{manifest['board']} {manifest['profile']} {manifest['lib_describe']}"
     rec.update(mode="multislot", image_sha256=want, slots=nslots)
 
+    def verify_slot(slot):
+        """Does the chip's slot hold this bundle's app? esptool verify_flash, a read only; retried when esptool gets no
+        answer at all, as step 2 below is."""
+        off = slots[slot]["offset"]
+        for attempt in range(1, args.retries + 1):
+            r = subprocess.run(
+                base + ["verify_flash", hex(off), str(fw)], capture_output=True, text=True
+            )
+            res = parse_verify(r.stdout + r.stderr)
+            if off in res:
+                return res[off]
+            print(
+                f"esptool verify_flash: no result (attempt {attempt}/{args.retries})",
+                file=sys.stderr,
+            )
+            time.sleep(3)
+        print((r.stdout + r.stderr).strip()[-800:], file=sys.stderr)
+        return False
+
     def done(slot, action, method, nbytes, wipe):
         now = time.time()
         state[slot] = {
@@ -450,7 +469,15 @@ def multislot(args, manifest, base, rec):
             if con:
                 con.close()
         got = (after or {}).get("slots", {}).get(slot) or {}
-        if not after or after.get("running") != slot or got.get("sha256") != want:
+        ok = bool(after) and after.get("running") == slot and got.get("sha256") == want
+        if after and after.get("running") == slot and "sha256" not in got:
+            # Runs the slot, but its SLOTS? line left the slot out: an image built before the 8-slot table (512-byte
+            # buffer, about four slots) running from ota_4..7. Its digest is unknown, not wrong: ask the chip instead.
+            print(
+                f"flash: slot {slot} not in the image's SLOTS? reply -- verifying it with esptool"
+            )
+            ok = verify_slot(slot)
+        if not ok:
             print(
                 f"flash: after the write the board doesn't run slot {slot} with this image: {after}",
                 file=sys.stderr,

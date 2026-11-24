@@ -26,7 +26,8 @@ What a bump means:
   does). The 4 MB boards keep `multislot.csv`. The new table keeps every offset of the old one, so slots 0-3 survive
   the one-time conversion. The `SLOTS?` line buffer in hil_runner and the observer grows from 512 bytes (about full
   at four slots) to room for all 16. The host now joins a reply that arrives in more than one read, and drops a slot
-  whose digest was cut short.
+  whose digest was cut short. An image built before this change, written to `ota_4`..`ota_7`, leaves its own slot out
+  of `SLOTS?`; `flash.py` then checks that slot with esptool `verify_flash` instead of failing the write.
 - **SDL3 HIDAPI vs evdev for the `sinput` profile** (`tester/sdl3_compare.py`, report-only). Two headless
   `sdl3probe --json` (LeeNX/sdl3-sinput-probe v0.2.0) watch the same board at once, one through SDL's SInput HIDAPI
   driver and one through evdev, under hid-generic and then under the `sinput` kernel driver. Every stimulus, device
