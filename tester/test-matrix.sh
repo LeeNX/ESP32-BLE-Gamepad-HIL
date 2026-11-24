@@ -3,7 +3,8 @@
 # [matrix].boards order) gamepads; any further boards sit that rotation out. Each profile then runs two lanes:
 #
 #   BlueZ lane      gamepad A, observed by the Pi:   tester/test.sh (pytest suite) for minimal/maxbtn,
-#                                                    tester/sinput_hil.py (hid-generic + sinput driver) for sinput
+#                                                    tester/sinput_hil.py (hid-generic + sinput driver) for sinput,
+#                                                    then tester/sdl3_compare.py (SDL3 HIDAPI vs evdev, report-only)
 #   Bluepad32 lane  gamepad B, observed by the observer board: tester/bp32_hil.py --profile <p>
 #
 # Rotating the observer through every board means each board is observed by both BlueZ and Bluepad32, and each
@@ -15,6 +16,7 @@
 #   tester/test-matrix.sh --rotations esp32c3 --profiles sinput
 #   tester/test-matrix.sh --max-cells 1 --lanes serial      # ramp up: one cell, lanes one after the other
 #   tester/test-matrix.sh --restore                         # finish with every board on its default bundle
+#   HIL_SDL3=0 tester/test-matrix.sh ...                    # skip the sinput lane's SDL3 compare (below)
 #
 # Flash wear: a board is only written when it doesn't already hold the bundle (tester/flash.py verifies first),
 # and boards are left on whatever they ran last unless --restore -- the next run (or CI's suite) flashes only
@@ -56,7 +58,7 @@ while [[ $# -gt 0 ]]; do
     --lanes) LANES=$2; shift 2 ;;
     --max-cells) MAX_CELLS=$2; shift 2 ;;
     --restore) RESTORE=1; shift ;;
-    -h|--help) sed -n '2,34p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,36p' "$0"; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -163,6 +165,11 @@ summary=()
 # fresh baseline below makes the in-run guards count only this run's.)
 health check --ignore-dwc || { echo "USB unhealthy before the run: not starting" >&2; exit 3; }
 health baseline
+# The sinput BlueZ lane also runs tester/sdl3_compare.py (report-only): install or refresh the pinned sdl3probe first.
+SDL3=0
+if [[ " ${PROFILES[*]} " == *" sinput "* && ${HIL_SDL3:-1} != 0 ]]; then
+  if tester/bootstrap-sdl3.sh; then SDL3=1; else echo "sdl3: no sdl3probe, SDL3 compare skipped" | tee -a "$VERDICTS"; fi
+fi
 
 for obs in "${ROTATIONS[@]}"; do
   # The next two boards, in a fixed cyclic order: the first is observed by BlueZ, the second by Bluepad32.
@@ -211,6 +218,14 @@ for obs in "${ROTATIONS[@]}"; do
     (
       if [[ $p == sinput ]]; then
         PYTHONPATH=host "$PY" tester/sinput_hil.py "$(port "$bz")" "HILpad $bz" --cycles 3
+        rc=$?
+        # Report-only, after the lane's own checks (whose rc stays the lane's): SDL3 HIDAPI vs evdev on the same
+        # board and link, under hid-generic and the sinput driver. Own log, and an INFO line below.
+        if ((SDL3)); then
+          PYTHONPATH=host timeout 600 "$PY" tester/sdl3_compare.py "$(port "$bz")" "HILpad $bz" \
+            --json "$OUT/sdl3-compare-$obs-$bz.json" > "$OUT/$tag-sdl3-$bz.log" 2>&1
+        fi
+        exit $rc
       else
         HIL_JUNIT_TAG="matrix-$obs" tester/test.sh "$bz_bundle" --no-flash
       fi
@@ -248,6 +263,12 @@ for obs in "${ROTATIONS[@]}"; do
         done < <(grep -aE '^(FAIL |(FAILED|ERROR) [^ ]+( - |$)|[A-Za-z_.]*(Error|Exception): )' "$log" | cut -c1-300 | head -10)
       fi
     done
+    if [[ $p == sinput ]] && ((SDL3)); then
+      res=$(grep -aE '^(SDL3 COMPARE|SKIP|ERROR) ' "$OUT/$tag-sdl3-$bz.log" | tail -1)
+      line="INFO observer=$obs profile=$p lane=sdl3 gamepad=$bz  ${res:-no result: see $tag-sdl3-$bz.log}"
+      echo "$line" | tee -a "$VERDICTS"
+      summary+=("$line")
+    fi
     # The two gamepad boards may have bonded with BlueZ; drop that before the next profile's descriptor.
     unbond
     guard "after cell $tag"

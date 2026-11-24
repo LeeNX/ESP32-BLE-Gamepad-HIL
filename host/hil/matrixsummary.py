@@ -5,7 +5,8 @@
 Reads results/matrix-verdicts.md (the last `## matrix` section: one verdict line per lane, or an ABORT), the failed
 lanes' failure lines from their results/matrix/*.log (so the summary names what failed, not just a count), and the
 Bluepad32 lanes' GAP lines from results/matrix/*-bp32-*.log -- inputs Bluepad32 doesn't expose, which aren't failures
-but are the observer's findings. Exits 1 if any lane failed or the run aborted, 2 if there's no matrix result at all.
+but are the observer's findings -- and the sinput lane's report-only SDL3 compare (its INFO line and the path table
+from results/matrix/*-sdl3-*.log). Exits 1 if any lane failed or the run aborted, 2 if there's no matrix result at all.
 """
 
 import pathlib
@@ -17,6 +18,9 @@ try:
 except ImportError:  # run as a script (hil.yml: python3 host/hil/matrixsummary.py results/)
     from summarize import flash_totals
 
+_SDL3 = re.compile(
+    r"^INFO observer=(?P<obs>\S+) profile=(?P<profile>\S+) lane=sdl3 gamepad=(?P<pad>\S+)\s+(?P<rest>.*)$"
+)
 _VERDICT = re.compile(
     r"^(?P<verdict>PASS|FAIL) observer=(?P<obs>\S+) profile=(?P<profile>\S+) lane=(?P<lane>\S+) "
     r"gamepad=(?P<pad>\S+) rc=\S+ gaps=(?P<gaps>\d+)(?: slots=(?P<slots>\S+))?\s*(?P<rest>.*)$"
@@ -89,8 +93,12 @@ def render(results_dir):
         )
 
     out = ["## Observer matrix", "", f"`{run[0][3:].strip()}`", ""]
-    rows, aborts, failed, logs, why = [], [], False, set(), []
+    rows, aborts, failed, logs, why, sdl3 = [], [], False, set(), [], []
     for ln in run[1:]:
+        m = _SDL3.match(ln)
+        if m:
+            sdl3.append(m)
+            continue
         m = _VERDICT.match(ln)
         if m:
             failed |= m["verdict"] == "FAIL"
@@ -142,7 +150,30 @@ def render(results_dir):
         for profile in sorted(found):
             out += [f"- **{profile}**: " + "; ".join(found[profile])]
         out.append("")
+    out += sdl3_section(results / "matrix", sdl3)
     return "\n".join(out), 1 if failed else 0
+
+
+def sdl3_section(matrix_dir, infos):
+    """tester/sdl3_compare.py's results (report-only, never a failure): its summary line and path table per lane."""
+    if not infos:
+        return []
+    out = ["### SDL3: HIDAPI vs evdev (report-only)", ""]
+    for m in infos:
+        log = matrix_dir / f"obs-{m['obs']}-{m['profile']}-sdl3-{m['pad']}.log"
+        out += [f"**{m['pad']}** (observer {m['obs']}): {m['rest']}", ""]
+        table, legend = [], ""
+        if log.exists():
+            in_table = False
+            for ln in log.read_text(errors="replace").splitlines():
+                if ln.startswith("== matrix"):
+                    in_table, legend = True, ln[len("== matrix") :].strip(" ()")
+                elif in_table and ln.startswith("|"):
+                    table.append(ln)
+                elif in_table and table:
+                    break
+        out += ([f"Legend: {legend}", ""] if legend else []) + table + ([""] if table else [])
+    return out
 
 
 def main(argv):
