@@ -26,6 +26,7 @@ import json
 import os
 import pathlib
 import re
+import signal
 import sys
 import time
 
@@ -60,6 +61,9 @@ ap.add_argument(
 )
 args = ap.parse_args()
 board = args.name.split()[-1]
+
+# The matrix stops an overrunning lane with SIGTERM (timeout): exit through the cleanup below, like on Ctrl-C.
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 
 exe = sp.find_probe(args.probe)
 if not exe:
@@ -109,6 +113,8 @@ def versions(sdl="?"):
 
 
 # ---------------------------------------------------------------------------------------------------------------
+# Before connecting: a fresh pairing autoloads sinput (its modalias), which isn't the state to restore.
+was_loaded = sd.module_loaded()
 section("connect")
 mac = None
 for m, n in bt.known_devices().items():
@@ -127,7 +133,6 @@ while sd.bound_driver() is None and time.monotonic() < end:
     time.sleep(0.2)
 
 can_switch = sd.driver_ctl("status")[0]
-was_loaded = sd.module_loaded()
 drivers = args.drivers.split() if can_switch else [sd.bound_driver() or "none"]
 if not can_switch:
     print(
@@ -137,187 +142,229 @@ if not can_switch:
 
 report_paths = {}
 sdl_version = "?"
-for drv in drivers:
-    section(f"under {drv}")
-    if can_switch:
-        ok, out = sd.driver_ctl("unload" if drv == "hid-generic" else "load")
-        if not (ok and sd.wait_driver(drv)):
-            print(f"ERROR could not bind {drv}: {out} (bound: {sd.bound_driver()})", flush=True)
-            continue
-    if not bt.is_connected(mac):
-        print("ERROR BLE link dropped", flush=True)
-        break
-    cmd("RESET")
-    cmd("BATTERY 77")
-    time.sleep(0.3)
 
-    probes = [
-        sp.Probe(exe, f"hidapi@{drv}", hidapi=True),
-        sp.Probe(exe, f"evdev@{drv}", hidapi=False),
-    ]
-    live = []
-    for p in probes:
-        ready = p.wait_ready()
-        report(p.label, "probe:open", ready, p.error or "; ".join(p.other[-3:]) or "no gamepad")
-        if ready:
-            live.append(p)
-            sdl_version = p.facts.get("sdl_version", sdl_version)
 
-    # What SDL says about the device.
-    for p in live:
-        f = p.facts
-        want_drv = "hidapi" if p.hidapi else "evdev"
-        report(
-            p.label,
-            "fact:driver",
-            f.get("driver") == want_drv,
-            f"{f.get('driver')} via {f.get('path')}",
-        )
-        report(
-            p.label,
-            "fact:battery",
-            f.get("battery") == 77,
-            f"power={f.get('power')} battery={f.get('battery')}",
-        )
-        report(
-            p.label,
-            "fact:sensors",
-            f.get("sensor.accel") == 1 and f.get("sensor.gyro") == 1,
-            f"accel={f.get('sensor.accel')} gyro={f.get('sensor.gyro')}",
-        )
-        report(
-            p.label,
-            "fact:touchpad",
-            (f.get("touchpads") or 0) >= 1,
-            f"touchpads={f.get('touchpads')}",
-        )
-        rest = {k: f.get(f"state.{k}") for k in ("lefttrigger", "righttrigger")}
-        report(p.label, "fact:trigger_rest", all(v == 0 for v in rest.values()), f"{rest}")
+def skipped(drv, why):
+    """Both of drv's paths couldn't run: a gap each (so the table and the INFO line show it), not a silent hole."""
+    print(f"ERROR {why}", flush=True)
+    for label in (f"hidapi@{drv}", f"evdev@{drv}"):
+        report(label, "driver:bind", False, why)
+        report_paths[label] = {"error": why}
 
-    # Stimulus steps, every live path watching the same command.
-    for c, expect in sp.STEPS:
-        befores = {}
+
+running = []  # every probe started, for the cleanup (stopping a finished one is a no-op)
+try:
+    for drv in drivers:
+        section(f"under {drv}")
+        if can_switch:
+            if drv == "hid-generic" and not sd.module_loaded():
+                ok, out = (
+                    True,
+                    "sinput module not loaded",
+                )  # the wrapper's unload fails on a module that isn't there
+            else:
+                ok, out = sd.driver_ctl("unload" if drv == "hid-generic" else "load")
+            if not (ok and sd.wait_driver(drv)):
+                skipped(drv, f"could not bind {drv}: {out} (bound: {sd.bound_driver()})")
+                continue
+        if not bt.is_connected(mac):
+            skipped(drv, "BLE link dropped")
+            break
+        cmd("RESET")
+        cmd("BATTERY 77")
+        time.sleep(0.3)
+
+        probes = [
+            sp.Probe(exe, f"hidapi@{drv}", hidapi=True),
+            sp.Probe(exe, f"evdev@{drv}", hidapi=False),
+        ]
+        running.extend(probes)
+        live = []
+        for p in probes:
+            ready = p.wait_ready()
+            report(p.label, "probe:open", ready, p.error or "; ".join(p.other[-3:]) or "no gamepad")
+            if ready:
+                live.append(p)
+                sdl_version = p.facts.get("sdl_version", sdl_version)
+
+        # What SDL says about the device.
         for p in live:
-            if expect[0] == "axis":
-                hist = [
-                    e["value"]
-                    for e in p.events_between(0, 2**63)
-                    if e["ev"] == "axis" and e["name"] == expect[1]
-                ]
-                befores[p.label] = hist[-1] if hist else p.facts.get(f"state.{expect[1]}")
-        t0 = time.monotonic_ns()
-        cmd(c)
-        time.sleep(0.45)
-        t1 = time.monotonic_ns()
-        for p in live:
-            evs = p.events_between(t0, t1)
-            seen = sp.observe(evs, expect)
-            ok = sp.evaluate(expect, seen, befores.get(p.label))
+            f = p.facts
+            want_drv = "hidapi" if p.hidapi else "evdev"
             report(
                 p.label,
-                f"step:{c}",
-                ok,
-                f"want {expect[1] or expect[0]} {expect[2]}; saw {sp.summarize_events(evs)}",
+                "fact:driver",
+                f.get("driver") == want_drv,
+                f"{f.get('driver')} via {f.get('path')}",
             )
+            report(
+                p.label,
+                "fact:battery",
+                f.get("battery") == 77,
+                f"power={f.get('power')} battery={f.get('battery')}",
+            )
+            report(
+                p.label,
+                "fact:sensors",
+                f.get("sensor.accel") == 1 and f.get("sensor.gyro") == 1,
+                f"accel={f.get('sensor.accel')} gyro={f.get('sensor.gyro')}",
+            )
+            report(
+                p.label,
+                "fact:touchpad",
+                (f.get("touchpads") or 0) >= 1,
+                f"touchpads={f.get('touchpads')}",
+            )
+            rest = {k: f.get(f"state.{k}") for k in ("lefttrigger", "righttrigger")}
+            report(p.label, "fact:trigger_rest", all(v == 0 for v in rest.values()), f"{rest}")
 
-    # Latency: the same press/release on every live path at once. Not quite like for like: SDL stamps an evdev
-    # event with the kernel's time for it, a HIDAPI report with when SDL read it -- in its joystick update, which the
-    # probe runs every ~2 ms (as an app would once per frame).
-    lat = {}
-    if args.latency and live:
-        samples = {p.label: [] for p in live}
-        dropped = {p.label: 0 for p in live}
-        for i in range(args.latency * 2):
-            down = i % 2 == 0
+        # Stimulus steps, every live path watching the same command.
+        for c, expect in sp.STEPS:
+            befores = {}
+            for p in live:
+                if expect[0] == "axis":
+                    hist = [
+                        e["value"]
+                        for e in p.events_between(0, 2**63)
+                        if e["ev"] == "axis" and e["name"] == expect[1]
+                    ]
+                    befores[p.label] = hist[-1] if hist else p.facts.get(f"state.{expect[1]}")
             t0 = time.monotonic_ns()
-            cmd("PRESS 1" if down else "RELEASE 1")
-            hits = sp.wait_for(
-                live,
-                lambda e, d=down: e["ev"] == "button" and e["name"] == "a" and e["down"] is d,
-                t0,
-            )
-            for label, e in hits.items():
-                if e is None:
-                    dropped[label] += 1
-                else:
-                    samples[label].append((e["mono_ns"] - t0) / 1e6)
-            time.sleep(0.03)
-        for label in samples:
-            lat[label] = {
-                "latency": Stats.of(samples[label]),
-                "dropped": dropped[label],
-                "n": args.latency * 2,
-            }
-            st = lat[label]["latency"]
-            if st.get("n"):
-                print(
-                    f"LATENCY {label}: p50 {st['p50']:.3f}  p90 {st['p90']:.3f}  max {st['max']:.3f} ms  "
-                    f"n={st['n']} dropped={dropped[label]}",
-                    flush=True,
+            cmd(c)
+            time.sleep(0.45)
+            t1 = time.monotonic_ns()
+            for p in live:
+                evs = p.events_between(t0, t1)
+                seen = sp.observe(evs, expect)
+                ok = sp.evaluate(expect, seen, befores.get(p.label))
+                report(
+                    p.label,
+                    f"step:{c}",
+                    ok,
+                    f"want {expect[1] or expect[0]} {expect[2]}; saw {sp.summarize_events(evs)}",
                 )
-            else:
-                print(f"LATENCY {label}: no samples ({dropped[label]} dropped)", flush=True)
 
-    for p in probes:
-        p.stop()
-        report_paths[p.label] = {
-            "facts": p.facts,
-            "events": len(p.events),
-            "latency": lat.get(p.label),
-            "other_output": p.other[-10:],
-        }
+        # Latency: the same press/release on every live path at once. Not quite like for like: SDL stamps an evdev
+        # event with the kernel's time for it, a HIDAPI report with when SDL read it -- in its joystick update, which the
+        # probe runs every ~2 ms (as an app would once per frame).
+        lat = {}
+        if args.latency and live:
+            samples = {p.label: [] for p in live}
+            dropped = {p.label: 0 for p in live}
+            for i in range(args.latency * 2):
+                down = i % 2 == 0
+                t0 = time.monotonic_ns()
+                cmd("PRESS 1" if down else "RELEASE 1")
+                hits = sp.wait_for(
+                    live,
+                    lambda e, d=down: e["ev"] == "button" and e["name"] == "a" and e["down"] is d,
+                    t0,
+                )
+                for label, e in hits.items():
+                    if e is None:
+                        dropped[label] += 1
+                    else:
+                        samples[label].append((e["mono_ns"] - t0) / 1e6)
+                time.sleep(0.03)
+            for label in samples:
+                lat[label] = {
+                    "latency": Stats.of(samples[label]),
+                    "dropped": dropped[label],
+                    "n": args.latency * 2,
+                }
+                st = lat[label]["latency"]
+                if st.get("n"):
+                    print(
+                        f"LATENCY {label}: p50 {st['p50']:.3f}  p90 {st['p90']:.3f}  max {st['max']:.3f} ms  "
+                        f"n={st['n']} dropped={dropped[label]}",
+                        flush=True,
+                    )
+                else:
+                    print(f"LATENCY {label}: no samples ({dropped[label]} dropped)", flush=True)
 
-    # Outputs, one path at a time: the board says what arrived. Asked while the 2 s rumble still runs: when it ends
-    # (or the probe closes the gamepad) SDL sends a stop, and RUMBLE? would then read left=0 right=0.
-    for p in probes:
-        for q in ("RUMBLE?", "RGB?", "PLED?"):  # the ? queries clear the received flags
-            cmd(q)
-        op = sp.Probe(
-            exe,
-            p.label,
-            hidapi=p.hidapi,
-            events=2,
-            extra=[
-                "--rumble",
-                "51200",
-                "10240",
-                "2000",
-                "--led",
-                "10",
-                "20",
-                "30",
-                "--player",
-                "2",
-            ],
-        )
-        op.wait_ready()
-        time.sleep(0.5)
-        rumble, rgb, pled = cmd("RUMBLE?") or "", cmd("RGB?") or "", cmd("PLED?") or ""
-        op.stop()
-        f = op.facts
-        via = f"driver={f.get('driver')}"
-        report(
-            p.label,
-            "out:rumble",
-            "recv=1 left=200 right=40" in rumble,
-            f"sdl={f.get('rumble')} board={rumble!r} {via}",
-        )
-        report(
-            p.label,
-            "out:led",
-            "recv=1 r=10 g=20 b=30" in rgb,
-            f"sdl={f.get('led')} board={rgb!r} {via}",
-        )
-        report(
-            p.label, "out:player", "recv=1" in pled, f"sdl={f.get('player')} board={pled!r} {via}"
-        )
-        report_paths[p.label]["outputs"] = {"sdl": f, "rumble": rumble, "rgb": rgb, "pled": pled}
+        for p in probes:
+            p.stop()
+            report_paths[p.label] = {
+                "facts": p.facts,
+                "events": len(p.events),
+                "latency": lat.get(p.label),
+                "other_output": p.other[-10:],
+            }
 
-# Leave the module as it was found.
-if can_switch and was_loaded and not sd.module_loaded():
-    sd.driver_ctl("load")
-    sd.wait_driver("sinput")
-cmd("RESET")
+        # Outputs, one path at a time: the board says what arrived. Asked while the 2 s rumble still runs: when it ends
+        # (or the probe closes the gamepad) SDL sends a stop, and RUMBLE? would then read left=0 right=0.
+        for p in probes:
+            for q in ("RUMBLE?", "RGB?", "PLED?"):  # the ? queries clear the received flags
+                cmd(q)
+            op = sp.Probe(
+                exe,
+                p.label,
+                hidapi=p.hidapi,
+                events=2,
+                extra=[
+                    "--rumble",
+                    "51200",
+                    "10240",
+                    "2000",
+                    "--led",
+                    "10",
+                    "20",
+                    "30",
+                    "--player",
+                    "2",
+                ],
+            )
+            running.append(op)
+            op.wait_ready()
+            time.sleep(0.5)
+            rumble, rgb, pled = cmd("RUMBLE?") or "", cmd("RGB?") or "", cmd("PLED?") or ""
+            op.stop()
+            f = op.facts
+            via = f"driver={f.get('driver')}"
+            report(
+                p.label,
+                "out:rumble",
+                "recv=1 left=200 right=40" in rumble,
+                f"sdl={f.get('rumble')} board={rumble!r} {via}",
+            )
+            report(
+                p.label,
+                "out:led",
+                "recv=1 r=10 g=20 b=30" in rgb,
+                f"sdl={f.get('led')} board={rgb!r} {via}",
+            )
+            # SDL's player index is 0-based, SInput's player LED 1-based: --player 2 arrives as LED 3.
+            report(
+                p.label,
+                "out:player",
+                pled.strip() == "PLED recv=1 3",
+                f"sdl={f.get('player')} board={pled!r} {via}",
+            )
+            report_paths[p.label]["outputs"] = {
+                "sdl": f,
+                "rumble": rumble,
+                "rgb": rgb,
+                "pled": pled,
+            }
+finally:
+    # Leave the rig as found even after an error or an interrupt (Ctrl-C, the matrix's timeout). Each step on its own:
+    # one failing mustn't skip the others.
+    for p in running:
+        try:
+            p.stop()
+        except Exception as e:  # noqa: BLE001 -- cleanup: report and go on
+            print(f"cleanup: stopping {p.label}: {e}", flush=True)
+    try:
+        # The sinput module loaded or not, as it was at the start.
+        if can_switch and sd.module_loaded() != was_loaded:
+            sd.driver_ctl("load" if was_loaded else "unload")
+            sd.wait_driver("sinput" if was_loaded else "hid-generic")
+    except Exception as e:  # noqa: BLE001
+        print(f"cleanup: restoring the sinput module: {e}", flush=True)
+    try:
+        cmd("RESET")
+    except Exception as e:  # noqa: BLE001
+        print(f"cleanup: RESET: {e}", flush=True)
 
 # ---------------------------------------------------------------------------------------------------------------
 vers = versions(sdl_version)

@@ -19,7 +19,13 @@ import subprocess
 import threading
 import time
 
-DEFAULT_PROBE = pathlib.Path.home() / "sdl3" / "current" / "bin" / "sdl3probe"
+# Where tester/bootstrap-sdl3.sh installs it: $HIL_SDL3_ROOT (default ~/sdl3), then current/bin/sdl3probe.
+DEFAULT_PROBE = (
+    pathlib.Path(os.environ.get("HIL_SDL3_ROOT") or pathlib.Path.home() / "sdl3")
+    / "current"
+    / "bin"
+    / "sdl3probe"
+)
 
 
 def find_probe(explicit=None):
@@ -206,10 +212,11 @@ def evaluate(expect, seen, before=None):
         v = seen if seen is not None else before
         return v is not None and abs(v - want) <= AXIS_TOL
     if kind == "sensor":
-        if seen is None:
+        # Both sensors, either way: a reset seen on one of them doesn't show the other one went back to zero.
+        if seen is None or not {"accel", "gyro"} <= set(seen):
             return False
         moved = any(abs(x) > 1e-3 for data in seen.values() for x in data)
-        return moved == want and (not want or {"accel", "gyro"} <= set(seen))
+        return moved == want
     if kind == "touch":
         return bool(seen) and name in seen
     return False
