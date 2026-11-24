@@ -28,6 +28,8 @@ What a bump means:
   that it agrees field for field with `HIL features`. In the minimal/maxfeat
   lanes, the generic HID parser must report `none`. An observer built against
   an older Bluepad32 prints no such line and fails both checks.
+- **`docs/hardware-tested.md`: a photo of the retired CP2102 DevKit** and how to recognise it (no maker's name on
+  the board, so `lsusb` matters more than the look). Metadata stripped.
 
 ### Changed
 
