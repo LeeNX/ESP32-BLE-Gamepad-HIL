@@ -276,8 +276,10 @@ board stays connected, then repeats that for `--cycles` rounds and checks
 `dmesg`. Driver features it finds missing are printed as `GAP` lines, not
 failures.
 
-Setup is root-only and done once: `sudo tester/bootstrap-sinput.sh --user <test user> <driver .deb>`,
-then `sudo hil-sinput-driver install <version>` as the test user. A run, with
+Setup is root-only and done once: `sudo tester/bootstrap-sinput.sh --user <test user> sinput-common_<ver>_all.deb
+<module .deb>...`, with the module package for the tester's kernel and architecture (from a driver release, e.g.
+`sinput-modules-7.0.0-44-generic_0.4.5-ubuntu26.04_amd64.deb` on Ubuntu, `sinput-modules-6.18.60.rpt-rpi-v8_0.4.5_arm64.deb`
+on a Pi), then `sudo hil-sinput-driver install <version>` (e.g. `0.4.5`) as the test user. A run, with
 the board already flashed with an `sinput` bundle:
 
 ```bash

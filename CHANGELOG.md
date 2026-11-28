@@ -18,6 +18,18 @@ What a bump means:
 
 ## [Unreleased]
 
+### Fixed
+
+- **`tester/bootstrap-sinput.sh` works on x86 testers and with current driver releases.** It only took
+  `sinput-modules-*_<digits.dots>_arm64.deb`, from the Pi days, so it refused Ubuntu's
+  `…_0.4.5-ubuntu26.04_amd64.deb` (mimir's driver packages had to be installed with apt instead). It now stages any
+  architecture and Ubuntu-style versions, names each staged file from the package's own fields (a GitHub release
+  download has `.` where the package name has `+`, which the wrapper never found), and stages `sinput-common` too: the
+  module packages have depended on it since driver 0.4.1, so `hil-sinput-driver install` failed without it. The wrapper
+  installs the newest staged `sinput-common` that satisfies the module with it, unless one that does is installed
+  already (it never downgrades it), and `install 0.4.5` also finds `0.4.5-ubuntu26.04`. `-dbgsym` packages are refused (they're not
+  drivers).
+
 ## [0.9.0] — 2026-11-24
 
 ### Added
