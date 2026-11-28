@@ -26,8 +26,8 @@ What a bump means:
   architecture and Ubuntu-style versions, names each staged file from the package's own fields (a GitHub release
   download has `.` where the package name has `+`, which the wrapper never found), and stages `sinput-common` too: the
   module packages have depended on it since driver 0.4.1, so `hil-sinput-driver install` failed without it. The wrapper
-  installs the staged `sinput-common` with the module, unless that version or a newer one is installed already (it
-  never downgrades it), and `install 0.4.5` also finds `0.4.5-ubuntu26.04`. `-dbgsym` packages are refused (they're not
+  installs the newest staged `sinput-common` that satisfies the module with it, unless one that does is installed
+  already (it never downgrades it), and `install 0.4.5` also finds `0.4.5-ubuntu26.04`. `-dbgsym` packages are refused (they're not
   drivers).
 
 ## [0.9.0] — 2026-11-24

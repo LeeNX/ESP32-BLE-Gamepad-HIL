@@ -101,20 +101,27 @@ case "${1:-}" in
       deb=$1
     fi
     # The module package depends on sinput-common of its version (without any
-    # -ubuntu<version>) or later. Install the staged one along with it, unless
-    # that version or a newer one is installed already: a newer one may be what
-    # another kernel's module needs, so it's never downgraded.
+    # -ubuntu<version>) or later. Install the newest staged one that qualifies
+    # along with it, unless that version or a newer one is installed already: a
+    # newer one may be what another kernel's module needs, so it's never
+    # downgraded.
     cver=${ver%-ubuntu*}
-    common="$dir/sinput-common_${cver}_all.deb"
+    common='' cv=''
+    for f in "$dir"/sinput-common_*_all.deb; do
+      [ -f "$f" ] || continue
+      v=${f#"$dir"/sinput-common_}; v=${v%_all.deb}
+      dpkg --compare-versions "$v" ge "$cver" || continue
+      if [ -z "$cv" ] || dpkg --compare-versions "$v" gt "$cv"; then common=$f cv=$v; fi
+    done
     have=$(dpkg-query -W -f '${db:Status-Abbrev}${Version}' sinput-common 2>/dev/null || true)
     case "$have" in 'ii '*) have=${have#ii } ;; *) have= ;; esac
     if [ -n "$have" ] && dpkg --compare-versions "$have" ge "$cver"; then
       dpkg -i "$deb"
-    elif [ -f "$common" ]; then
+    elif [ -n "$common" ]; then
       dpkg -i "$common" "$deb"
     else
       # Modules before 0.4.1 don't depend on it; dpkg says if this one does.
-      echo "note: no sinput-common_${cver}_all.deb staged (installed: ${have:-none})" >&2
+      echo "note: no sinput-common $cver or later staged (installed: ${have:-none})" >&2
       dpkg -i "$deb"
     fi
     modprobe sinput ;;
