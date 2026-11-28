@@ -19,7 +19,8 @@
 #      test user run only that wrapper. The wrapper installs a .deb that is
 #      already staged in /opt/hil-sinput (by version, for the running kernel and
 #      architecture, with the staged sinput-common it needs), removes it,
-#      loads/unloads the module, or re-probes SInput devices -- nothing else. Loading takes over an already-connected SInput device from
+#      loads/unloads the module, or re-probes SInput devices -- nothing else.
+#      Loading takes over an already-connected SInput device from
 #      hid-generic (the HID core re-probes on driver registration); unloading
 #      hands it back by re-probing, so a test can switch drivers mid-connection.
 #
@@ -33,7 +34,7 @@ DEBS=()
 while [[ $# -gt 0 ]]; do
   case $1 in
     --user) TARGET_USER=$2; shift 2 ;;
-    -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,29p' "$0"; exit 0 ;;
     *) DEBS+=("$1"); shift ;;
   esac
 done
@@ -94,17 +95,28 @@ case "${1:-}" in
     case "$ver" in ''|[!0-9]*|*[!0-9A-Za-z.+~-]*) echo "version must look like 0.4.5 or 0.4.5-ubuntu26.04" >&2; exit 2 ;; esac
     deb="$dir/${pkg}_${ver}_${arch}.deb"
     if [ ! -f "$deb" ]; then
-      set -- "$dir/${pkg}_${ver}"-*"_${arch}.deb"
+      set -- "$dir/${pkg}_${ver}"-ubuntu*"_${arch}.deb"
       [ $# -le 1 ] || { echo "more than one staged package for $ver: $*" >&2; exit 2; }
       [ -f "$1" ] || { echo "not staged: $deb" >&2; exit 2; }
       deb=$1
     fi
     # The module package depends on sinput-common of its version (without any
-    # -ubuntu<version>) or later;
-    # install the staged one along with it if there is one (else it has to be
-    # installed already).
-    common="$dir/sinput-common_${ver%-ubuntu*}_all.deb"
-    if [ -f "$common" ]; then dpkg -i "$common" "$deb"; else dpkg -i "$deb"; fi
+    # -ubuntu<version>) or later. Install the staged one along with it, unless
+    # that version or a newer one is installed already: a newer one may be what
+    # another kernel's module needs, so it's never downgraded.
+    cver=${ver%-ubuntu*}
+    common="$dir/sinput-common_${cver}_all.deb"
+    have=$(dpkg-query -W -f '${db:Status-Abbrev}${Version}' sinput-common 2>/dev/null || true)
+    case "$have" in 'ii '*) have=${have#ii } ;; *) have= ;; esac
+    if [ -n "$have" ] && dpkg --compare-versions "$have" ge "$cver"; then
+      dpkg -i "$deb"
+    elif [ -f "$common" ]; then
+      dpkg -i "$common" "$deb"
+    else
+      # Modules before 0.4.1 don't depend on it; dpkg says if this one does.
+      echo "note: no sinput-common_${cver}_all.deb staged (installed: ${have:-none})" >&2
+      dpkg -i "$deb"
+    fi
     modprobe sinput ;;
   remove) modprobe -r sinput 2>/dev/null || true; dpkg -r "$pkg"; reprobe ;;
   load) modprobe sinput ;;
